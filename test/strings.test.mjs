@@ -3,9 +3,10 @@
 // source and checks the key exists in both locales.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { ROOT, loadStrings, loadPattern } from "../src/config.mjs";
+import { ROOT, loadStrings, loadPattern, makeT } from "../src/config.mjs";
 import { BOARD_EMPTY_REASONS, SLOT_EMPTY_REASONS } from "../src/queries.mjs";
 
 function sourceFiles() {
@@ -126,6 +127,34 @@ test("no translation is left unread by the source", () => {
   assert.ok(staticRefs.size > 100, `only ${staticRefs.size} t() calls found — this check is not looking properly`);
   assert.deepEqual(unread, [],
     `these translations exist in both locales and nothing reads them:\n  ${unread.join("\n  ")}`);
+});
+
+// The fallback path inside makeT, which a coverage run showed had never executed — every key exists in both
+// locales, which the two tests above guarantee, so the `else` branch was unreachable by construction.
+//
+// It is still load-bearing: it is what stops a missing key from throwing at a volunteer mid-form. The design is
+// deliberate and worth pinning — fall back to English, and if English lacks it too, render the KEY rather than
+// blank or `undefined`, because a visible "board.claimOk" is a bug report and an empty button is a mystery.
+test("a key missing from a locale falls back to English, and a key missing from both renders as itself", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "4water-t-"));
+  try {
+    // A tiny locale pair, so this exercises makeT's own logic rather than the shipped files.
+    writeFileSync(path.join(dir, "en.json"), JSON.stringify({ "a.only": "English only", "a.both": "English" }));
+    writeFileSync(path.join(dir, "da.json"), JSON.stringify({ "a.both": "Dansk" }));
+
+    const da = makeT("da", dir);
+    assert.equal(da("a.both"), "Dansk", "the locale wins when it has the key");
+    assert.equal(da("a.only"), "English only", "a gap falls back to English rather than breaking the page");
+    assert.equal(da("a.missing"), "a.missing",
+      "absent from both renders the key — visible enough to be reported, unlike an empty string");
+
+    // Placeholders still substitute on the fallback, or a fallen-back sentence would show raw {braces}.
+    writeFileSync(path.join(dir, "en.json"), JSON.stringify({ "a.count": "{n} of {of}" }));
+    writeFileSync(path.join(dir, "da.json"), JSON.stringify({}));
+    assert.equal(makeT("da", dir)("a.count", { n: 2, of: 3 }), "2 of 3");
+    // An unknown placeholder is left visible rather than blanked — same reasoning as rendering the key.
+    assert.equal(makeT("da", dir)("a.count", { n: 2 }), "2 of {of}");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("no translation is an empty string or still a placeholder", () => {

@@ -280,6 +280,66 @@ test("the timeout the RUNBOOK quotes is the timeout the code applies", () => {
     `RUNBOOK says ${quoted[1]}s, the code says ${OUTBOUND_TIMEOUT_MS / 1000}s`);
 });
 
+// The rollback in redeemInvite, which a coverage run showed had never executed anywhere.
+//
+// It fires when the invitation is consumed between this call's SELECT and its UPDATE — the guard is
+// `WHERE id = ? AND accepted_at IS NULL`, so the second redeemer's UPDATE changes 0 rows and the transaction is
+// thrown away. An invite is a one-shot credential, so the property that matters is not the returned reason: it is
+// that NO PERSON ROW SURVIVES. A missing or broken ROLLBACK would leave a volunteer who exists, is linked to no
+// invitation, and can sign in.
+//
+// Simulated with an AFTER INSERT trigger rather than real threads: node:sqlite is synchronous, so nothing can
+// interleave in-process, and the trigger reproduces the exact state a concurrent redeemer would have left — the
+// invitation already accepted by the time the UPDATE runs. It exercises the real branch rather than a stand-in.
+test("an invite consumed mid-redemption rolls back completely, leaving no half-created volunteer", () => {
+  const db = db0();
+  const { seasonId } = seedStructure(db, loadPattern());
+  const roleId = db.prepare("SELECT id FROM roles LIMIT 1").get().id;
+  const token = createInvite(db, { email: "two@4water.invalid", roleId });
+
+  const before = {
+    people: db.prepare("SELECT COUNT(*) n FROM people").get().n,
+    roles: db.prepare("SELECT COUNT(*) n FROM person_roles").get().n,
+  };
+
+  // Somebody else accepts it in the window between our SELECT and our UPDATE.
+  db.exec(`CREATE TRIGGER steal_invite AFTER INSERT ON people BEGIN
+             UPDATE invitations SET accepted_at = '2026-01-01T00:00:00.000Z' WHERE accepted_at IS NULL;
+           END`);
+  try {
+    const r = redeemInvite(db, token, { name: "Second Redeemer" });
+    assert.equal(r.ok, false, "the loser of the race must not get a session");
+    assert.equal(r.reason, "already_used", "and must be told why, not handed a 500");
+  } finally {
+    db.exec("DROP TRIGGER steal_invite");
+  }
+
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, before.people,
+    "the rolled-back INSERT must leave no person behind — an orphan volunteer could sign in");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM person_roles").get().n, before.roles,
+    "and no role grant either");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM people WHERE name='Second Redeemer'").get().n, 0);
+
+  // What this simulation CANNOT show, stated rather than asserted: whether the invitation stays spent afterwards.
+  // The trigger's UPDATE runs inside the same transaction as the INSERT, so ROLLBACK undoes it as well — the
+  // invitation ends up unaccepted again. A real winner would have COMMITTED in its own transaction, so the row
+  // would stay accepted and every later attempt would stop at the `row.accepted_at` check on the way in.
+  //
+  // I originally asserted "stays spent" here and it failed, which was the harness being unable to represent the
+  // property rather than the code being wrong. That check belongs to the already-accepted path, which is covered
+  // directly below and does not need a race to reach.
+  assert.equal(db.prepare("SELECT accepted_at FROM invitations").get().accepted_at, null,
+    "the rollback undid the trigger's write too — which is why the 'stays spent' property is checked separately");
+
+  // The already-accepted path, reached the ordinary way: mark it consumed as a committed winner would have, and
+  // every later redemption is refused before any transaction starts.
+  db.prepare("UPDATE invitations SET accepted_at = ?").run(new Date().toISOString());
+  assert.equal(redeemInvite(db, token, { name: "Third" }).reason, "already_used",
+    "a spent one-shot credential is refused, and refused before it touches the people table");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, before.people);
+  db.close();
+});
+
 test("state is compared safely and a mismatch fails", () => {
   assert.equal(checkState("abc", "abc"), true);
   assert.equal(checkState("abc", "abd"), false);

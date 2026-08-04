@@ -97,6 +97,25 @@ test("a season that has ENDED is reported as the reason the plan looks empty", w
   assert.equal(status.facts[0].key, "season", "it must be the FIRST fact — it explains all the others");
 }));
 
+// The fourth season state, which a coverage run showed had never executed: the config names a season that is not
+// in the database. It is a real operational moment — somebody edits the season key in config/pattern.json and
+// restarts before anything seeds it — and it is the one state where every screen is empty for a reason no other
+// fact explains. The other three (current, ended, future) are covered above and below.
+test("a season named in config but absent from the database is reported as missing", withWorld({}, async (w) => {
+  const pattern = { ...w.pattern, season: { ...w.pattern.season, key: "2027-Q3Q4-not-seeded-yet" } };
+  const status = collectStatus(w.db, { pattern, today: w.pattern.season.from, backupDir: null });
+  const season = factFor(status, "season");
+  assert.equal(season.note, "missing");
+  assert.equal(season.level, "bad", "an app serving a season that does not exist is broken, not merely idle");
+  assert.equal(season.value, "2027-Q3Q4-not-seeded-yet", "and it must name the key, or nobody knows what to fix");
+  assert.equal(status.facts[0].key, "season", "still first — it explains why every other fact looks empty");
+
+  // And it renders as a sentence naming the key, rather than as a bare status.* token.
+  const page = renderStatus({ t: makeT("en"), session: { csrf: "x" }, roles: ["planner"], who: "P", status }).__raw;
+  assert.match(page, /2027-Q3Q4-not-seeded-yet/);
+  assert.ok(!/status\.season/.test(page), "the seasonMissing string must exist and be used");
+}));
+
 test("a current and a future season are distinguished", withWorld({}, async (w) => {
   const during = collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null });
   assert.equal(factFor(during, "season").level, "ok");
