@@ -198,7 +198,13 @@ What that means in practice:
   not a thing that has happened, and the difference mattered: three tests read a file `.gitignore` excludes, so
   the first CI run would have been red for a reason having nothing to do with Node. That is fixed, and the suite
   is verified against an actual `git clone` rather than against this working copy. **Push the repo and confirm
-  the first run is green before relying on this line.**
+  the first run is green before relying on this line.** What is and is not already checked, so a red first build
+  is quick to triage: the first two steps (`node --version`, `node --test`) have been run against a real clone
+  and pass. The last two are Linux shell wrappers — `/tmp` paths and a backgrounded server — around properties
+  the cross-platform suite already asserts anyway (`test/image.test.mjs` boots the entry point and checks it
+  seeded slots; `test/backup.test.mjs` covers `verifyBackup`). Those wrappers could not be validated from the
+  Windows machine this was written on, because `/tmp/ci.db` resolves to `C:\tmp\ci.db` there. So if the first
+  build is red on one of those two steps, suspect the shell rather than the app.
 - **If it ever does break:** stay on the pinned Node version — nothing forces an upgrade — and raise it as an
   issue. The database file is ordinary SQLite, readable by any `sqlite3` binary, so the data is never trapped
   by this choice. That property is what makes the risk acceptable rather than reckless.
