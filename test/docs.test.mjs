@@ -81,6 +81,56 @@ test("only PLAN.md states a test count, so there is one number to keep true", ()
     `${offenders.join("\n  ")}\n  Say "the whole suite" instead, and leave the number to PLAN.md.`);
 });
 
+// The commands the RUNBOOK tells an operator to type, checked against what exists.
+//
+// This is the least-verified part of the whole project: the image has never been built, so nothing has ever run a
+// `docker compose` line from these documents. Everything referenced does currently exist — checked by hand — and
+// the point of pinning it is that renaming a compose service or a volume would leave the succession plan quietly
+// wrong, in the file somebody reads precisely when they are least able to debug it.
+test("every service, volume and port the documents tell an operator to use actually exists", () => {
+  const compose = read("compose.yml");
+  // Service keys are two-space indented under `services:`; volumes are declared in their own top-level block.
+  const services = new Set([...compose.matchAll(/^ {2}([a-z][\w-]*):/gm)].map((m) => m[1]));
+  const volumes = new Set([...compose.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1]));
+  assert.ok(services.has("app"), "compose.yml must define the app service this test reasons about");
+
+  const problems = [];
+  let checked = 0;
+  for (const doc of DOCS) {
+    const text = read(doc);
+
+    // `docker compose <verb> [flags] <service>`. Stops at a BACKTICK as well as a newline: these appear both in
+    // fenced blocks and as inline spans mid-sentence, and matching to end-of-line swallowed the closing backtick
+    // plus the prose after it — so `docker compose logs app` looked like it named no service, because `app` was
+    // followed by a backtick rather than whitespace. Three false positives before this was corrected.
+    for (const m of text.matchAll(/docker compose (?:run|exec|stop|start|restart|logs)[^\n`]*/g)) {
+      const line = m[0];
+      const named = [...services].filter((s) => new RegExp(`(?:^|\\s)${s}(?:\\s|$)`).test(line));
+      checked++;
+      if (!named.length) problems.push(`${doc}: names no known compose service:\n    ${line.trim()}`);
+    }
+
+    // Named volumes, which is how the restore procedure reaches /data.
+    for (const m of text.matchAll(/-v ([\w-]+):\//g)) {
+      checked++;
+      if (!volumes.has(m[1])) problems.push(`${doc}: uses volume "${m[1]}", which compose.yml does not declare`);
+    }
+
+    // The port an operator curls has to be the one the image publishes, or the health check they are told to run
+    // reports a failure that is entirely their tooling.
+    for (const m of text.matchAll(/http:\/\/127\.0\.0\.1:(\d+)\/healthz/g)) {
+      checked++;
+      const published = compose.match(/127\.0\.0\.1:(\d+):\d+/)?.[1];
+      if (m[1] !== published) {
+        problems.push(`${doc}: says to curl port ${m[1]}, but compose publishes ${published}`);
+      }
+    }
+  }
+  assert.ok(checked >= 5, `only ${checked} operator commands were checked — this is not looking properly`);
+  assert.deepEqual(problems, [], `the succession plan tells an operator to use things that do not exist:\n  ` +
+    `${problems.join("\n  ")}`);
+});
+
 test("every claim the documents make about the code is true", () => {
   const facts = sourceFacts();
   const problems = [];
