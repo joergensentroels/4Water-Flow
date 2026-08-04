@@ -2,7 +2,8 @@
 // server on an ephemeral port rather than a mock — the bugs worth catching are in the plumbing.
 import { pathToFileURL } from "node:url";
 import { createApp, send, redirect, readForm, html } from "./http.mjs";
-import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, exportConfig } from "./config.mjs";
+import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, exportConfig,
+         notifyTimingConfig } from "./config.mjs";
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
@@ -771,7 +772,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const notifier = makeNotifier({ db, config: notifyCfg });
   const bootT = makeT(boot.locale ?? "en");
   const currentSeasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(boot.season.key)?.id ?? null;
-  const jobs = startJobs({ db, notifier, t: bootT, seasonId: currentSeasonId, today: () => new Date().toISOString().slice(0, 10) });
+  // The formatters go in from here, where the view layer is already imported. jobs.mjs contains no date wording
+  // and no role vocabulary on purpose, and a shift reminder that read "2026-03-15 19:00 Salsa l" would be worse
+  // than none — it is read in a chat channel with none of the app's context around it.
+  const jobs = startJobs({
+    db, notifier, t: bootT, seasonId: currentSeasonId,
+    today: () => new Date().toISOString().slice(0, 10),
+    remindDaysBefore: notifyTimingConfig(boot).remindDaysBefore,
+    formatDate, formatTime, formatRole,
+  });
   console.log(`notifications: ${notifyCfg.describe()}`);   // describe() never reveals the URL — its path is the secret
 
   const port = Number(process.env.PORT) || 8080;

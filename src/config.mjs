@@ -69,6 +69,19 @@ export function validatePattern(p) {
     }
   }
 
+  // How far ahead a volunteer is reminded of a shift. Zero is meaningful and allowed — it means same-day only —
+  // but a long window is not: reminding somebody three weeks out is noise they will have forgotten by the time
+  // it matters, and the point of the message is to catch the shift they had lost track of.
+  if (p.notify !== undefined) {
+    const n = p.notify;
+    if (!n || typeof n !== "object" || Array.isArray(n)) err("notify must be an object");
+    if (n.remindDaysBefore !== undefined) {
+      if (!Number.isInteger(n.remindDaysBefore) || n.remindDaysBefore < 0 || n.remindDaysBefore > 14) {
+        err("notify.remindDaysBefore must be a whole number of days, 0..14");
+      }
+    }
+  }
+
   // The season export. A delimiter is not a detail here: a spreadsheet splits a double-clicked .csv on the
   // LOCALE's list separator, so on a Danish Windows a comma-separated file arrives with every row in one cell.
   // Which separator is right is a property of who opens the file, which makes it configuration rather than a
@@ -102,6 +115,13 @@ export const calendarConfig = (pattern) => ({
 // written beside it.
 export const exportConfig = (pattern) => ({
   csvDelimiter: pattern?.export?.csvDelimiter || ",",
+});
+
+// Two days: far enough ahead to arrange cover through the shift exchange, close enough that the shift is still
+// the thing on the volunteer's mind. `?? 2` rather than `|| 2`, because 0 is a legitimate setting meaning
+// same-day only, and `||` would silently turn it into two days.
+export const notifyTimingConfig = (pattern) => ({
+  remindDaysBefore: pattern?.notify?.remindDaysBefore ?? 2,
 });
 
 // Absent needs means one person, role irrelevant. Returned as a flat list of role slots, because that is what

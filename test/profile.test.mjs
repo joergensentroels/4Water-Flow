@@ -199,7 +199,7 @@ test("the nudge job's own account of itself is reported, and doing nothing is no
   // Each reading must render as its own sentence — a fact that collects but never renders is not reported.
   const t = makeT("en");
   for (const [state, expect] of [
-    [{ startedAt: at - 3600_000, lastRun: null }, /has not run once/],
+    [{ startedAt: at - 3600_000, lastRun: null }, /have not run once/],
     [{ startedAt: at - 3600_000, lastRun: at - 600_000, lastSent: 0 }, /last ran 10 minutes ago and sent 0/],
     [{ startedAt: at - 3600_000, lastRun: at - 60_000, lastError: "boom" }, /ran 1 minutes ago and failed/],
   ]) {

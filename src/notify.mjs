@@ -84,6 +84,12 @@ export const slotOpenMessage = (t, { when, activity, eligible }) =>
 export const nudgeMessage = (t, { name, from, to }) =>
   t("notify.nudge", { name, from, to });
 
+// WITH the role, and with the date already formatted by the caller. This message is read in a chat channel away
+// from the app, so it is the one place that has to stand entirely alone — the same reason the slot-open
+// announcement carries the role. An ISO date and a bare 'l' would technically be information.
+export const shiftReminderMessage = (t, { name, when, activity }) =>
+  t("notify.shiftReminder", { name, when, activity });
+
 // A stub transport for tests: records what would have been sent, and can be told to fail.
 export function stubTransport({ fail = false } = {}) {
   const calls = [];

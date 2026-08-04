@@ -245,8 +245,8 @@ test("a real deployment can be set up and used end to end", async () => {
     // from production for most of this project — so a status page that silently omits the line would be a
     // monitor carrying the identical defect to the one it monitors. Only a real boot can catch that, and this
     // is the only file that boots for real.
-    assert.match(status, /availability reminder|Påmindelsen om tilgængelighed/i,
-      "a real boot must wire the nudge job into /status, or the page cannot report a dead timer");
+    assert.match(status, /Scheduled reminders|Planlagte påmindelser/i,
+      "a real boot must wire the scheduled jobs into /status, or the page cannot report a dead timer");
 
     const csv = await admin.get("/planner/season.csv");
     assert.equal(csv.status, 200);

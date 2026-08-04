@@ -4,10 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "../src/db.mjs";
-import { loadPattern, makeT } from "../src/config.mjs";
-import { seedStructure, seedPeople } from "../src/seed.mjs";
+import { loadPattern, makeT, validatePattern, notifyTimingConfig } from "../src/config.mjs";
+import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { makeNotifier, notifyConfig, stubTransport, slotOpenMessage, nudgeMessage } from "../src/notify.mjs";
-import { isoWeek, runNudge, volunteersNeedingNudge, startJobs } from "../src/jobs.mjs";
+import { isoWeek, runNudge, volunteersNeedingNudge, startJobs, runShiftReminders } from "../src/jobs.mjs";
 import { setAvailabilityDay } from "../src/queries.mjs";
 import { listOutbox, renderOutbox } from "../src/pages/outbox.mjs";
 
@@ -220,6 +220,137 @@ test("the job timer swallows its own errors and does not hold the process open",
   assert.equal(warned.length, 1);
   assert.match(warned[0], /nudge failed/);
   jobs.stop();
+});
+
+// ---- the shift reminder --------------------------------------------------------------------------------
+//
+// src/calendar.mjs says missed shifts are the failure this app exists to prevent, and the answer until now was a
+// calendar feed — which reaches exactly the volunteers who went and subscribed. These pin the two properties
+// that make a reminder safe to run every few hours, plus the one that makes it worth sending at all.
+const fmt = { formatDate: (t, d) => `on ${d}`, formatTime: (h, m) => `${h}:${String(m).padStart(2, "0")}`,
+              formatRole: (t, r) => (r ? ` (${r})` : "") };
+
+// This file's `world()` builds STRUCTURE only — seedStructure creates sessions, not the open assignment rows a
+// volunteer occupies. That is fine for the nudge, which is about availability and needs no slots, and it is the
+// exact shape of the defect that shipped once: sessions with no slots look like a populated plan and are
+// unusable. So open them here, through the real function, rather than hand-inserting rows that might not match
+// what production creates.
+function withSlots(w) {
+  if (!w._slots) { openEverySession(w.db, w.seasonId, w.pattern); w._slots = true; }
+  return w;
+}
+
+function shift(w, { state = "confirmed", person = null, date = null } = {}) {
+  withSlots(w);
+  const row = w.db.prepare(`SELECT a.id, s.date FROM assignments a JOIN sessions s ON s.id = a.session_id
+                             WHERE a.person_id IS NULL AND s.season_id = :sid ${date ? "AND s.date = :d" : ""}
+                             ORDER BY s.date LIMIT 1`).get(date ? { sid: w.seasonId, d: date } : { sid: w.seasonId });
+  assert.ok(row, "the fixture needs an open slot to assign");
+  w.db.prepare("UPDATE assignments SET person_id = ?, state = ? WHERE id = ?").run(person, state, row.id);
+  return row;
+}
+
+test("a volunteer is reminded of a confirmed shift, once, with a message that stands alone", async () => {
+  const w = world();
+  const me = w.people[0];
+  const s = shift(w, { person: me });
+  const notifier = makeNotifier({ db: w.db, config: notifyConfig({}), log: {} });   // outbox
+
+  const first = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: s.date, daysBefore: 2, ...fmt });
+  assert.deepEqual(first.sent, [s.id], "the shift starting today is within the window");
+
+  const row = w.db.prepare("SELECT kind, person_id, period, body FROM notifications WHERE kind='shift_reminder'").get();
+  assert.equal(row.person_id, me);
+  assert.equal(row.period, `a${s.id}`, "keyed on the assignment, so two shifts on one evening both get a message");
+  // It has to make sense with none of the app around it: a real date, the activity, and what to do instead.
+  assert.match(row.body, new RegExp(s.date), "the date must be in the message");
+  assert.ok(!/\bl\b|\bf\b/.test(row.body.replace(/[^\w\s]/g, " ").replace(/\bshift\b/g, "")) || /\(/.test(row.body),
+    "a bare role code is not information");
+  assert.match(row.body, /hand it back|læg den tilbage/i, "and it must say what to do if they cannot make it");
+
+  // Run again — the job runs several times a day, and nobody wants four reminders for one shift.
+  const second = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: s.date, daysBefore: 2, ...fmt });
+  assert.deepEqual(second.sent, [], "a second run must send nothing");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications WHERE kind='shift_reminder'").get().n, 1);
+});
+
+test("a PROPOSED shift is never reminded about — that would be telling someone to show up for a guess",
+  async () => {
+  const w = world();
+    const s = shift(w, { person: w.people[0], state: "proposed" });
+    const notifier = makeNotifier({ db: w.db, config: notifyConfig({}), log: {} });
+    const r = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: s.date, daysBefore: 2, ...fmt });
+    assert.deepEqual(r.sent, [], "an auto-roster proposal is the planner thinking out loud");
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n, 0);
+  });
+
+test("the window is respected, and an inactive volunteer is left alone", async () => {
+  const w = world();
+  const dates = w.db.prepare(`SELECT DISTINCT date FROM sessions WHERE season_id=? ORDER BY date`)
+    .all(w.seasonId).map((r) => r.date);
+  const far = dates.at(-1);
+  const s = shift(w, { person: w.people[0], date: far });
+  const notifier = makeNotifier({ db: w.db, config: notifyConfig({}), log: {} });
+
+  const early = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: dates[0], daysBefore: 2, ...fmt });
+  assert.deepEqual(early.sent, [], "a shift months out is not due a reminder yet");
+
+  // Deactivated between assignment and shift: no message.
+  w.db.prepare("UPDATE people SET status='inactive' WHERE id=?").run(w.people[0]);
+  const gone = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: far, daysBefore: 2, ...fmt });
+  assert.deepEqual(gone.sent, [], "somebody who has left the roster must not be chased");
+
+  w.db.prepare("UPDATE people SET status='active' WHERE id=?").run(w.people[0]);
+  const due = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: far, daysBefore: 2, ...fmt });
+  assert.deepEqual(due.sent, [s.id], "and once they are back and the date is close, it goes");
+});
+
+test("the tick runs both jobs, and says so without the formatters rather than skipping silently",
+  async () => {
+  const w = world();
+    const s = shift(w, { person: w.people[0] });
+    const notifier = makeNotifier({ db: w.db, config: notifyConfig({}), log: {} });
+    const warned = [];
+
+    // Without the formatters: reminders must NOT go out, and it must be loud. A reminder built from an ISO date
+    // and a raw role code would be worse than none, and a silent skip is how the notifier stayed dead once.
+    const bare = startJobs({ db: w.db, notifier, t, seasonId: w.seasonId, today: () => s.date,
+                             everyMs: 60_000, log: { warn: (m) => warned.push(m), log: () => {} } });
+    await bare.tick();
+    bare.stop();
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications WHERE kind='shift_reminder'").get().n, 0);
+    assert.ok(warned.some((m) => /formatters/.test(m)), `expected a warning, got ${JSON.stringify(warned)}`);
+
+    // With them: one tick covers both jobs, and the reported count includes both.
+    //
+    // Counted as a DELTA across this tick, not as a total. `lastSent` is what the last run sent, and the first
+    // tick above already delivered the week's nudges — so a cumulative count would be 4 against a lastSent of 1
+    // and the test would be measuring the wrong thing while looking rigorous.
+    const total = () => w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n;
+    const before = total();
+    const jobs = startJobs({ db: w.db, notifier, t, seasonId: w.seasonId, today: () => s.date,
+                             everyMs: 60_000, log: {}, ...fmt });
+    await jobs.tick();
+    jobs.stop();
+
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications WHERE kind='shift_reminder'").get().n, 1,
+      "the reminder went out through the timer, not only through a direct call");
+    assert.equal(jobs.state().lastSent, total() - before,
+      "/status reports one number per tick, so it must count every kind that tick sent");
+    assert.ok(jobs.state().lastSent >= 1, "and this tick did send something");
+  });
+
+test("remindDaysBefore comes from config, and zero means same-day rather than the default", () => {
+  const base = loadPattern();
+  assert.equal(notifyTimingConfig({}).remindDaysBefore, 2, "absent means the default");
+  assert.equal(notifyTimingConfig({ notify: { remindDaysBefore: 0 } }).remindDaysBefore, 0,
+    "zero is a real setting — `|| 2` would silently turn it into two days");
+  assert.equal(notifyTimingConfig({ notify: { remindDaysBefore: 5 } }).remindDaysBefore, 5);
+  for (const bad of [-1, 15, 1.5, "2", null]) {
+    assert.throws(() => validatePattern({ ...base, notify: { remindDaysBefore: bad } }), /remindDaysBefore/,
+      `${JSON.stringify(bad)} must be refused`);
+  }
+  assert.throws(() => validatePattern({ ...base, notify: 2 }), /notify must be an object/);
 });
 
 // ---- message bodies ----------------------------------------------------------------------------------

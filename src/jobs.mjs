@@ -1,6 +1,6 @@
 // Scheduled work. A timer inside the process rather than a cron entry, so deploying the app deploys the
 // nudge — one fewer thing for whoever inherits this to know about, and one fewer thing to forget.
-import { nudgeMessage } from "./notify.mjs";
+import { nudgeMessage, shiftReminderMessage } from "./notify.mjs";
 
 // ISO week, used as the nudge's idempotency period: at most one reminder per volunteer per week, however
 // often the job runs. Computed in UTC to match how dates are stored.
@@ -54,9 +54,65 @@ export async function runNudge(db, { notifier, t, seasonId, today, windowDays = 
   return { considered: true, from, to, period: p, sent };
 }
 
-// The timer. Deliberately dumb: check on an interval and let runNudge's idempotency decide whether anything
+// ---- the shift reminder ---------------------------------------------------------------------------------
+//
+// src/calendar.mjs opens with "missed shifts are the failure this scheduling exists to prevent", and the answer
+// to it so far was a subscribable calendar feed — which helps exactly the volunteers who went and subscribed.
+// This reaches everybody, through the channel the chasing already happens in.
+//
+// CONFIRMED only. A proposal is the planner thinking out loud; telling somebody to show up for work that has not
+// been locked in is worse than saying nothing, because they might.
+export function shiftsNeedingReminder(db, seasonId, from, to) {
+  return db.prepare(`
+    SELECT a.id AS assignmentId, p.id AS personId, p.name, s.date, t.hour, t.minute,
+           act.label, COALESCE(a.role, '') AS role
+      FROM assignments a
+      JOIN sessions   s   ON s.id = a.session_id
+      JOIN timeslots  t   ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+      JOIN people     p   ON p.id = a.person_id
+     WHERE s.season_id = :sid
+       AND a.state = 'confirmed'
+       AND p.status = 'active'
+       AND s.date BETWEEN :from AND :to
+     ORDER BY s.date, t.hour, t.minute, a.id`).all({ sid: seasonId, from, to });
+}
+
+export async function runShiftReminders(db, { notifier, t, seasonId, today, daysBefore = 2, formatDate, formatTime, formatRole }) {
+  // A window, not an exact date: the job runs a few times a day and a restart must not skip a day's reminders.
+  // Idempotency is what makes the width safe rather than noisy — see the period below.
+  const from = today;
+  const to = addDays(today, daysBefore);
+  const sent = [];
+  for (const s of shiftsNeedingReminder(db, seasonId, from, to)) {
+    // The ASSIGNMENT id as the period, so the UNIQUE (kind, person, period) constraint means one reminder per
+    // person per shift, ever. Not the date: a volunteer with two shifts on one evening should hear about both.
+    //
+    // One known and accepted consequence: if they hand a shift back and later reclaim the same row, no second
+    // reminder goes out, because that tuple has already been used. Being told once about a shift you do have
+    // beats being told twice, and the alternative is a period key that lets a hand-back/reclaim cycle spam.
+    const r = await notifier.send({
+      kind: "shift_reminder",
+      personId: s.personId,
+      period: `a${s.assignmentId}`,
+      body: shiftReminderMessage(t, {
+        name: s.name,
+        when: `${formatDate(t, s.date)} ${formatTime(s.hour, s.minute)}`,
+        activity: `${s.label}${formatRole(t, s.role)}`,
+      }),
+    });
+    if (r.ok) sent.push(s.assignmentId);
+  }
+  return { from, to, sent };
+}
+
+// The timer. Deliberately dumb: check on an interval and let each job's idempotency decide whether anything
 // actually goes out. A missed tick therefore costs nothing, which is what makes restarts safe.
-export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 * 60 * 1000, log = console }) {
+export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 * 60 * 1000, log = console,
+                            // The formatters, injected, because a message that goes to a chat channel has to
+                            // stand alone: "Salsa · leader" with a real date, not an ISO string and a role code.
+                            // src/views.mjs owns that wording and this module owns no vocabulary.
+                            remindDaysBefore = 2, formatDate = null, formatTime = null, formatRole = null }) {
   // One run at a time. runNudge awaits one delivery per volunteer, so a slow channel makes a tick take
   // arbitrarily long — and setInterval does not wait. Overlapping runs cannot double-notify anyone (the UNIQUE
   // constraint on (kind, person, period) settles that), but they would stack up loops all grinding through the
@@ -93,11 +149,27 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
         state.lastSent = 0;
         return;
       }
-      const r = await runNudge(db, { notifier, t, seasonId: sid, today: today() });
+      const now = today();
+      const r = await runNudge(db, { notifier, t, seasonId: sid, today: now });
+
+      // Shift reminders only if the caller supplied the formatters. Not a silent skip: a reminder built from an
+      // ISO date and a raw role code would be worse than none, and defaulting them here would put date wording
+      // in the one module that is supposed to contain no vocabulary at all.
+      let reminded = { sent: [] };
+      if (formatDate && formatTime && formatRole) {
+        reminded = await runShiftReminders(db, {
+          notifier, t, seasonId: sid, today: now, daysBefore: remindDaysBefore,
+          formatDate, formatTime, formatRole,
+        });
+      } else {
+        log.warn?.(`[jobs] shift reminders are not running — startJobs was called without the date formatters`);
+      }
+
       state.lastRun = Date.now();
-      state.lastSent = r.sent.length;
+      state.lastSent = r.sent.length + reminded.sent.length;
       state.lastError = null;
       if (r.sent.length) log.log?.(`[jobs] availability nudge sent to ${r.sent.length} volunteer(s) for ${r.period}`);
+      if (reminded.sent.length) log.log?.(`[jobs] reminded ${reminded.sent.length} volunteer(s) of a shift within ${remindDaysBefore} day(s)`);
     } catch (e) {
       state.lastRun = Date.now();     // it ran; it failed. Both are facts an operator needs.
       state.lastError = e.message;
