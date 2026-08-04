@@ -1,0 +1,58 @@
+# The whole suite needs no network, no database, no services and no npm install — so CI is genuinely this
+# short. If this file ever grows a service container or an install step, something has gone wrong with the
+# zero-dependency rule rather than with the workflow.
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.14 is what the Dockerfile pins, so a green build there is the one that matters. 24 is included to
+        # notice a breaking change in node:sqlite BEFORE the LTS line moves under us — the module is young.
+        node: ["22.14", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Show what we are running on
+        run: node --version
+      - name: Run the suite
+        run: node --test
+      - name: Prove a fresh deployment comes up and seeds itself
+        # The bug this catches is the one that shipped: migrate ran, seeding did not, and the app served a
+        # working-looking empty shell. Every test builds its world through the harness, so only the real entry
+        # point can prove this.
+        run: |
+          FOURWATER_SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') \
+          FOURWATER_DB=/tmp/ci.db PORT=8099 node src/server.mjs &
+          for i in $(seq 1 40); do
+            sleep 0.25
+            if curl -fsS http://127.0.0.1:8099/healthz > /dev/null; then break; fi
+          done
+          curl -fsS http://127.0.0.1:8099/healthz
+          node -e "
+            const { DatabaseSync } = require('node:sqlite');
+            const db = new DatabaseSync('/tmp/ci.db', { readOnly: true });
+            const n = db.prepare('SELECT COUNT(*) n FROM sessions').get().n;
+            if (n === 0) { console.error('a fresh deployment seeded no sessions'); process.exit(1); }
+            console.log('fresh deployment has', n, 'sessions');
+          "
+      - name: Prove a backup restores into a working database
+        run: |
+          FOURWATER_DB=/tmp/ci.db FOURWATER_BACKUP_DIR=/tmp/ci-backups node tools/backup.mjs --no-upload
+          node -e "
+            const { readdirSync } = require('node:fs');
+            const f = readdirSync('/tmp/ci-backups').filter(x => x.endsWith('.sqlite')).sort().pop();
+            import('./tools/backup.mjs').then(m => {
+              const v = m.verifyBackup('/tmp/ci-backups/' + f);
+              if (!v.ok) { console.error('backup failed integrity_check', v); process.exit(1); }
+              console.log('restored backup is sound:', JSON.stringify(v.counts));
+            });
+          "

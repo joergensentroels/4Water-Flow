@@ -1,0 +1,74 @@
+# Deployment shape B1 from the spec: Docker Compose on the host 4water's Lyon department already runs.
+# Hosting follows the operators — they run the box, so they own the deployment, which is what stops this
+# depending on one person in Copenhagen.
+
+services:
+  app:
+    build: .
+    image: 4water-scheduling:local
+    container_name: 4water-cph
+    restart: unless-stopped
+
+    # ⚠ A NAMED VOLUME, deliberately — NOT a bind mount to a network share.
+    # SQLite on NFS/CIFS can corrupt: its locking assumes a local filesystem. This is the one line in the
+    # whole deployment that can lose data, so if the host's Docker root lives on network storage, move it or
+    # mount a local path here instead.
+    volumes:
+      - 4water-data:/data
+
+    # Resource limits because this shares a host with the department's identity provider. Co-tenanting is an
+    # accepted trade; letting a runaway query in a scheduling app degrade the thing two departments log in
+    # with is not.
+    mem_limit: 256m
+    cpus: "0.50"
+
+    # Bound to loopback: TLS and the public hostname are the reverse proxy's job, the same proxy that already
+    # fronts NextCloud on this host.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    environment:
+      # REQUIRED. Generate once with:  openssl rand -hex 32
+      # There is no default — a shared default secret would make every deployment's session cookie forgeable,
+      # and the app refuses to start rather than pretend.
+      FOURWATER_SECRET: ${FOURWATER_SECRET:?set FOURWATER_SECRET in .env — openssl rand -hex 32}
+
+      # NextCloud OIDC. Leave unset and the sign-in page simply does not offer it; invite links still work.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+
+      # Where notifications go. Unset means messages queue in the outbox table instead of being lost.
+      MATTERMOST_WEBHOOK: ${MATTERMOST_WEBHOOK:-}
+
+      # Backups upload here. An APP PASSWORD, never the account password.
+      NEXTCLOUD_WEBDAV_URL: ${NEXTCLOUD_WEBDAV_URL:-}
+      NEXTCLOUD_USER: ${NEXTCLOUD_USER:-}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD:-}
+
+    # Logs go to the host's journal rather than growing without bound inside the container.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Nightly backup. A separate one-shot service sharing the same volume, so the backup runs with the same
+  # image and env and cannot drift from the app. Trigger it from the host's cron or a systemd timer:
+  #   docker compose run --rm backup
+  backup:
+    build: .
+    image: 4water-scheduling:local
+    profiles: ["tools"]          # never started by `compose up`
+    volumes:
+      - 4water-data:/data
+    environment:
+      FOURWATER_SECRET: ${FOURWATER_SECRET:?}
+      NEXTCLOUD_WEBDAV_URL: ${NEXTCLOUD_WEBDAV_URL:-}
+      NEXTCLOUD_USER: ${NEXTCLOUD_USER:-}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD:-}
+    command: ["node", "tools/backup.mjs"]
+
+volumes:
+  4water-data:

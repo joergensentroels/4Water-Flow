@@ -1,0 +1,18 @@
+{
+  "name": "4water-scheduling",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Volunteer scheduling for 4water: availability, a shift exchange, planning and auto-rostering. Zero dependencies.",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/server.mjs",
+    "demo": "node tools/demo.mjs",
+    "backup": "node tools/backup.mjs",
+    "bootstrap": "node tools/bootstrap.mjs"
+  },
+  "license": "AGPL-3.0-or-later"
+}

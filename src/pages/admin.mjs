@@ -1,0 +1,169 @@
+// The admin screen. One page, four sections — a nonprofit's admin is a volunteer doing this twice a season,
+// so discoverability beats density.
+import { html } from "../http.mjs";
+import { layout, csrfField, navFor } from "../views.mjs";
+
+const OUTCOME = {
+  invited: { key: "admin.invited" },
+  revoked: { key: "admin.revoked" },
+  saved: { key: "admin.saved" },
+  last_admin: { key: "admin.lastAdmin", bad: true },
+  bad_status: { key: "admin.badStatus", bad: true },
+  no_such_role: { key: "admin.noSuchRole", bad: true },
+  no_such_activity: { key: "admin.noSuchActivity", bad: true },
+  no_such_person: { key: "admin.noSuchPerson", bad: true },
+  invalid: { key: "admin.invalidConfig", bad: true },
+  erased: { key: "admin.erased" },
+  erase_bad_mode: { key: "admin.eraseBadMode", bad: true },
+  retention_done: { key: "admin.retentionDone" },
+  weekly_added: { key: "admin.weeklyAdded" },
+  weekly_removed: { key: "admin.weeklyRemoved" },
+  weekly_not_found: { key: "admin.weeklyNotFound", bad: true },
+};
+
+export function adminFlash(t, code, vars) {
+  const o = OUTCOME[code];
+  return o ? { text: t(o.key, vars), bad: !!o.bad } : null;
+}
+
+export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash }) {
+  const toggle = (action, fields, label, cls = "secondary") => html`
+    <form method="post" action="${action}">
+      ${csrfField(session)}
+      ${Object.entries(fields).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
+      <button type="submit" class="${cls}">${label}</button>
+    </form>`;
+
+  const body = html`
+    <h2>${t("admin.title")}</h2>
+
+    ${inviteLink ? html`
+      <div class="card">
+        <b>${t("admin.inviteLink")}</b>
+        <p><code>${inviteLink}</code></p>
+      </div>` : ""}
+
+    <h2>${t("admin.people")}</h2>
+    ${people.map((p) => html`
+      <div class="card">
+        <b>${p.name}</b>
+        <small> · ${p.status === "active" ? t("admin.active") : t("admin.inactive")}
+          · ${p.linked ? t("admin.linked") : t("admin.notLinked")}</small>
+        <p class="hint">
+          ${t("admin.capabilities")}: ${p.can.length ? p.can.join(", ") : "—"}
+        </p>
+        <p class="hint">
+          ${pattern.roles.map((role) => html`
+            ${toggle("/admin/role", { personId: p.id, role, on: p.roles.includes(role) ? "0" : "1" },
+                     `${p.roles.includes(role) ? "− " : "+ "}${t(`role.${role}`)}`)}`)}
+        </p>
+        <p class="hint">
+          ${pattern.activities.map((a) => html`
+            ${toggle("/admin/capability", { personId: p.id, key: a.key, on: p.can.includes(a.key) ? "0" : "1" },
+                     `${p.can.includes(a.key) ? "− " : "+ "}${a.label}`)}`)}
+        </p>
+        ${toggle("/admin/status", { personId: p.id, status: p.status === "active" ? "inactive" : "active" },
+                 p.status === "active" ? t("admin.inactive") : t("admin.active"))}
+        <p class="hint"><a href="/admin/person/${p.id}/export.json">${t("admin.export")}</a></p>
+        <details>
+          <summary>${t("admin.erase")}</summary>
+          <p class="hint">${t("admin.eraseHint")}</p>
+          ${toggle("/admin/erase", { personId: p.id, mode: "anonymise" }, t("admin.eraseAnonymise"))}
+          ${toggle("/admin/erase", { personId: p.id, mode: "remove" }, t("admin.eraseRemove"))}
+        </details>
+      </div>`)}
+
+    <h2>${t("admin.invites")}</h2>
+    <div class="card">
+      <form method="post" action="/admin/invite">
+        ${csrfField(session)}
+        <label>${t("admin.inviteEmail")}
+          <input type="email" name="email" required>
+        </label>
+        <button type="submit">${t("admin.invite")}</button>
+      </form>
+    </div>
+    ${invites.map((i) => html`
+      <div class="card">
+        <b>${i.email}</b>
+        <small> · ${i.acceptedAt ? `${t("admin.accepted")}${i.personName ? ` (${i.personName})` : ""}` : t("admin.pending")}</small>
+        ${i.acceptedAt ? "" : toggle("/admin/invite/revoke", { id: i.id }, t("admin.revoke"))}
+      </div>`)}
+
+    <h2>${t("admin.retention")}</h2>
+    <div class="card">
+      <p class="hint">${t("admin.retentionHint", { seasons: pattern.retention?.seasons ?? 2, days: pattern.retention?.notificationDays ?? 90 })}</p>
+      <form method="post" action="/admin/retention">${csrfField(session)}<button type="submit" class="secondary">${t("admin.retentionRun")}</button></form>
+      <p class="hint"><a href="/planner/season.csv">${t("admin.exportSeason")}</a></p>
+    </div>
+
+    <h2>${t("admin.season")}</h2>
+    <div class="card">
+      <form method="post" action="/admin/season">
+        ${csrfField(session)}
+        <label>${t("admin.season")} <input name="seasonKey" value="${pattern.season.key}" required></label>
+        <label><input type="date" name="seasonFrom" value="${pattern.season.from}" required></label>
+        <label><input type="date" name="seasonTo" value="${pattern.season.to}" required></label>
+        <label>${t("admin.cutoffDays")}
+          <input type="number" name="cutoffDays" min="0" max="30" value="${pattern.board?.cutoffDays ?? 0}">
+        </label>
+        <button type="submit">${t("admin.save")}</button>
+      </form>
+    </div>
+
+    <h2>${t("admin.weekly")}</h2>
+    <p class="hint">${t("admin.weeklyHint")}</p>
+    ${pattern.weekly.map((w) => {
+      const used = weeklyUse[`${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`] ?? 0;
+      return html`<div class="card">
+        <b>${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}</b>
+        <p class="hint">${w.activities.map((k) => pattern.activities.find((a) => a.key === k)?.label ?? k).join(", ")}</p>
+        <p class="hint">${t("admin.weeklyUsed", { n: used })}</p>
+        ${toggle("/admin/weekly/remove", { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0 }, t("admin.weeklyRemove"))}
+      </div>`;
+    })}
+    <div class="card">
+      <form method="post" action="/admin/weekly/add">
+        ${csrfField(session)}
+        <label>${t("admin.weeklyDay")}
+          <select name="dayOfWeek">
+            ${[1, 2, 3, 4, 5, 6, 0].map((d) => html`<option value="${d}">${t.weekday(d)}</option>`)}
+          </select>
+        </label>
+        <label>${t("admin.weeklyTime")}
+          <input type="time" name="time" value="19:00" required>
+        </label>
+        <p class="hint">${t("admin.weeklyActivities")}</p>
+        ${pattern.activities.map((a) => html`
+          <label class="inline"><input type="checkbox" name="activities" value="${a.key}"> ${a.label}</label>`)}
+        <button type="submit">${t("admin.weeklyAdd")}</button>
+      </form>
+    </div>
+
+    ${nextSeason ? html`
+      <div class="card">
+        <b>${t("admin.rollover")}</b>
+        <p class="hint">${t("admin.rolloverHint")}</p>
+        <form method="post" action="/admin/season">
+          ${csrfField(session)}
+          <label>${t("admin.season")} <input name="seasonKey" value="${nextSeason.key}" required></label>
+          <label><input type="date" name="seasonFrom" value="${nextSeason.from}" required></label>
+          <label><input type="date" name="seasonTo" value="${nextSeason.to}" required></label>
+          <input type="hidden" name="cutoffDays" value="${pattern.board?.cutoffDays ?? 0}">
+          <button type="submit">${t("admin.rolloverDo", { key: nextSeason.key })}</button>
+        </form>
+      </div>` : ""}
+
+    <h2>${t("admin.activities")}</h2>
+    ${pattern.activities.map((a) => html`<div class="card"><b>${a.label}</b> <small><code>${a.key}</code></small></div>`)}
+    <div class="card">
+      <form method="post" action="/admin/activity">
+        ${csrfField(session)}
+        <label>${t("admin.activityKey")} <input name="key" pattern="[a-z0-9_]+" required></label>
+        <label>${t("admin.activityLabel")} <input name="label" required></label>
+        <button type="submit">${t("admin.addActivity")}</button>
+      </form>
+    </div>`;
+
+  return layout({ t, title: t("admin.title"), who, nav: navFor(t, roles, "admin"), flash, body });
+}

@@ -1,0 +1,108 @@
+{
+  "_comment": [
+    "Everything specific to ONE department lives here. Nothing in src/ or test/ may name an activity or a",
+    "weekday - a test enforces that (test/seams.test.mjs), because another department will run its own copy",
+    "of this app with its own file and a hardcoded name would be a defect, not a preference.",
+    "Weekdays are INTEGERS on purpose: 0=Sunday .. 6=Saturday, matching JS getUTCDay(). The human-readable",
+    "name is a translation, so it belongs in strings/, not here.",
+    "",
+    "*** TWO THINGS BELOW ARE PLACEHOLDERS, NOT DESCRIPTIONS OF 4WATER. ***",
+    "1. The clock times (19:00 and 15:00) were never stated anywhere. The Wed/Sun rhythm IS from the real",
+    "   export; the times are invented.",
+    "2. ONE timeslot per day is also invented. The real export has four parallel schedules and a Master",
+    "   Schedule, which implies a richer grid - several times on a day is normal and fully supported.",
+    "Both are editable from the Administration screen; nothing needs hand-editing here."
+  ],
+  "department": "cph",
+  "locale": "da",
+  "season": {
+    "key": "2026-Q1Q2",
+    "from": "2026-01-01",
+    "to": "2026-06-30"
+  },
+  "activities": [
+    {
+      "key": "salsa",
+      "parent": "dance",
+      "subtype": "salsa",
+      "label": "Salsa",
+      "boothLabel": "SA",
+      "consolidation": "S"
+    },
+    {
+      "key": "bachata",
+      "parent": "dance",
+      "subtype": "bachata",
+      "label": "Bachata",
+      "boothLabel": "BA",
+      "consolidation": "B"
+    },
+    {
+      "key": "dj",
+      "parent": "music",
+      "subtype": "dj",
+      "label": "DJ",
+      "boothLabel": "DJ",
+      "consolidation": "D"
+    },
+    {
+      "key": "workshop_yoga",
+      "parent": "workshop",
+      "subtype": "yoga",
+      "label": "Workshop: Yoga",
+      "boothLabel": "WY",
+      "consolidation": "W"
+    },
+    {
+      "key": "workshop_other",
+      "parent": "workshop",
+      "subtype": "other",
+      "label": "Workshop: Other",
+      "boothLabel": "WO",
+      "consolidation": "W"
+    },
+    {
+      "key": "sh",
+      "parent": "social",
+      "subtype": "sh",
+      "label": "SH (Steel House)",
+      "boothLabel": "SH",
+      "consolidation": "H"
+    }
+  ],
+  "weekly": [
+    {
+      "dayOfWeek": 3,
+      "hour": 19,
+      "minute": 0,
+      "activities": [
+        "salsa",
+        "bachata"
+      ]
+    },
+    {
+      "dayOfWeek": 0,
+      "hour": 15,
+      "minute": 0,
+      "activities": [
+        "salsa",
+        "workshop_yoga"
+      ]
+    }
+  ],
+  "roles": [
+    "admin",
+    "planner",
+    "volunteer"
+  ],
+  "board": {
+    "_comment": "Vagtbørs rules. cutoffDays is Q18 in the spec and still unanswered — 2 is a placeholder.",
+    "requiresApproval": false,
+    "cutoffDays": 2
+  },
+  "retention": {
+    "_comment": "Set by the board — see docs/PRIVACY.md. seasons: how many seasons of history to keep (the current one is never removed). notificationDays: how long to keep sent messages, which contain names.",
+    "seasons": 2,
+    "notificationDays": 90
+  }
+}

@@ -1,0 +1,22 @@
+# Line endings are pinned to LF for everything textual.
+#
+# This is written from Windows, and git's default would convert LF to CRLF on checkout. That is harmless for
+# the .mjs files but not for the rest: a CRLF `run: |` block in a GitHub Actions workflow breaks under bash
+# (the trailing \r becomes part of the command), and a CRLF Dockerfile RUN line can do the same inside the
+# image. The container and CI are Linux; the repository should look like it.
+* text=auto eol=lf
+
+# Belt and braces for the files where a stray \r actually breaks something.
+*.mjs      text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.css      text eol=lf
+*.yml      text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf
+
+# Never touched by end-of-line conversion.
+*.db       binary
+*.sqlite   binary
+*.png      binary
+*.ico      binary

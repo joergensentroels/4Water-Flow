@@ -1,0 +1,235 @@
+// The behaviour that makes this a scheduling system rather than a set of tables.
+
+// ---- Eligibility, defined exactly ONCE ----------------------------------------------------------------
+// Both the vagtbørs listing and the claim guard use this same fragment. Two copies would drift, and the
+// drift is not cosmetic: a volunteer could claim a slot the board never showed them, or vice versa.
+//
+// Availability resolution: an hour-level row wins over the day-level row for that hour; if neither exists
+// the person counts as NOT available. That default is deliberate — silence is not consent. Assigning a
+// volunteer who never answered is the exact failure the availability nudge exists to prevent.
+// The predicate itself, parameterised by how the PERSON is named. The board asks "which slots suit this
+// person" (:pid) and the planner asks "which people suit this slot" (p.id) — opposite directions, one rule.
+// Writing it twice is how a volunteer ends up able to claim something the board never offered, or a planner
+// sees a suggestion the system would then refuse.
+//
+// `person` is always a fragment this module controls (":pid" or "p.id"), never anything user-supplied.
+const eligiblePredicate = (person) => `
+  a.person_id IS NULL
+  AND EXISTS (SELECT 1 FROM capabilities c
+               WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)
+  AND COALESCE(
+        (SELECT ah.available FROM availability_hour ah
+          WHERE ah.person_id = ${person} AND ah.date = s.date AND ah.hour = t.hour),
+        (SELECT ad.available FROM availability_day ad
+          WHERE ad.person_id = ${person} AND ad.date = s.date),
+        0) = 1
+  -- Nobody can be in two places at once. Found while writing auto-roster, but the gap was real in the
+  -- vagtbørs too: config puts more than one activity in the same timeslot, so without this a volunteer could
+  -- claim both and nothing would notice until the evening itself.
+  AND NOT EXISTS (
+        SELECT 1 FROM assignments a2
+          JOIN sessions  s2 ON s2.id = a2.session_id
+          JOIN timeslots t2 ON t2.id = s2.timeslot_id
+         WHERE a2.person_id = ${person}
+           AND a2.id <> a.id
+           AND s2.date = s.date AND t2.hour = t.hour AND t2.minute = t.minute)
+`;
+
+const ELIGIBLE_OPEN_IDS = `
+  SELECT a.id
+    FROM assignments a
+    JOIN sessions  s ON s.id = a.session_id
+    JOIN timeslots t ON t.id = s.timeslot_id
+   WHERE ${eligiblePredicate(":pid")}
+`;
+
+// The same rule, read the other way: who could take this particular open slot.
+//
+// Ordered by FAIRNESS — fewest confirmed activities this season first, then name. It used to be alphabetical,
+// which meant the planner's dropdown and auto-roster disagreed about who should take a slot: the machine
+// balanced while a planner filling gaps by hand kept picking whoever came first in the alphabet. Same
+// eligibility rule, two different answers, and the practical effect was one volunteer quietly overloaded.
+// Score exists to prevent exactly that, so the suggestion order has to honour it.
+export function eligiblePeopleFor(db, assignmentId) {
+  return db.prepare(`
+    SELECT p.id, p.name,
+           (SELECT COUNT(*) FROM assignments a2
+              JOIN sessions s2 ON s2.id = a2.session_id
+             WHERE a2.person_id = p.id AND a2.state = 'confirmed' AND s2.season_id = s.season_id) AS score
+      FROM people p
+      JOIN assignments a ON a.id = :aid
+      JOIN sessions  s ON s.id = a.session_id
+      JOIN timeslots t ON t.id = s.timeslot_id
+     WHERE p.status = 'active'
+       AND ${eligiblePredicate("p.id")}
+     ORDER BY score ASC, p.name
+  `).all({ aid: assignmentId });
+}
+
+// ---- Score --------------------------------------------------------------------------------------------
+// Always computed, never stored. Only CONFIRMED assignments count: an auto-roster proposal the planner has
+// not locked in yet is not something the volunteer has done.
+export function score(db, personId, seasonId) {
+  return db.prepare(`
+    SELECT COUNT(*) AS n
+      FROM assignments a JOIN sessions s ON s.id = a.session_id
+     WHERE a.person_id = :pid AND s.season_id = :sid AND a.state = 'confirmed'
+  `).get({ pid: personId, sid: seasonId }).n;
+}
+
+// "Active volunteter" in the spreadsheet's sense: has done at least `threshold` activities this season.
+export const isActive = (db, personId, seasonId, threshold = 1) => score(db, personId, seasonId) >= threshold;
+
+// ---- The vagtbørs -------------------------------------------------------------------------------------
+// `fromDate` defaults to the beginning of time so callers that do not care get everything; the board passes
+// today, because offering a volunteer a slot that already happened is noise they have to read past.
+export function openSlotsFor(db, personId, seasonId, fromDate = "0000-00-00") {
+  return db.prepare(`
+    SELECT a.id AS assignmentId, s.id AS sessionId, s.date,
+           t.day_of_week AS dayOfWeek, t.hour, t.minute,
+           act.key AS activityKey, act.label AS activityLabel
+      FROM assignments a
+      JOIN sessions   s ON s.id = a.session_id
+      JOIN timeslots  t ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+     WHERE a.id IN (${ELIGIBLE_OPEN_IDS})
+       AND s.season_id = :sid
+       AND s.date >= :from
+     ORDER BY s.date, t.hour, t.minute
+  `).all({ pid: personId, sid: seasonId, from: fromDate });
+}
+
+// Claiming. The guard IS the race protection: `person_id IS NULL` inside the UPDATE means two volunteers
+// hitting this at the same moment cannot both win — the second sees changes === 0. Eligibility is checked
+// in the same statement so it cannot be bypassed by calling this directly.
+export function claimSlot(db, assignmentId, personId) {
+  const info = db.prepare(`
+    UPDATE assignments
+       SET person_id = :pid, state = 'confirmed'
+     WHERE id = :aid
+       AND id IN (${ELIGIBLE_OPEN_IDS})
+  `).run({ aid: assignmentId, pid: personId });
+  if (info.changes === 1) return { ok: true };
+  // Distinguish "someone beat you to it" from "you were never allowed to take it" — the volunteer needs
+  // different words for each, and lumping them together is how a UI ends up lying.
+  const row = db.prepare("SELECT person_id FROM assignments WHERE id = :aid").get({ aid: assignmentId });
+  if (!row) return { ok: false, reason: "no_such_slot" };
+  if (row.person_id !== null) return { ok: false, reason: "already_taken" };
+  return { ok: false, reason: "not_eligible" };
+}
+
+// Handing a slot back. Guarded on person_id = you, so one volunteer cannot release another's slot.
+// `today` is injected rather than read from the clock so the cutoff is testable without freezing time.
+export function handBackSlot(db, assignmentId, personId, { today, cutoffDays = 0 } = {}) {
+  const row = db.prepare(`
+    SELECT a.person_id, s.date
+      FROM assignments a JOIN sessions s ON s.id = a.session_id
+     WHERE a.id = :aid
+  `).get({ aid: assignmentId });
+  if (!row) return { ok: false, reason: "no_such_slot" };
+  if (row.person_id !== personId) return { ok: false, reason: "not_yours" };
+
+  if (today && cutoffDays > 0) {
+    const days = Math.round((Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+    // Past the cutoff it still releases, but the caller is told to notify a planner: at that point a human
+    // needs to know, otherwise the board quietly becomes the no-show channel.
+    if (days < cutoffDays) {
+      db.prepare("UPDATE assignments SET person_id = NULL WHERE id = :aid AND person_id = :pid")
+        .run({ aid: assignmentId, pid: personId });
+      return { ok: true, pastCutoff: true, daysUntil: days };
+    }
+  }
+  const info = db.prepare("UPDATE assignments SET person_id = NULL WHERE id = :aid AND person_id = :pid")
+    .run({ aid: assignmentId, pid: personId });
+  return info.changes === 1 ? { ok: true, pastCutoff: false } : { ok: false, reason: "not_yours" };
+}
+
+// ---- Reading the plan ---------------------------------------------------------------------------------
+export function planForSeason(db, seasonId) {
+  return db.prepare(`
+    SELECT s.id AS sessionId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,
+           act.key AS activityKey, act.label AS activityLabel,
+           a.id AS assignmentId, a.state, a.person_id AS personId, p.name AS personName
+      FROM sessions s
+      JOIN timeslots  t ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+      LEFT JOIN assignments a ON a.session_id = s.id
+      LEFT JOIN people p ON p.id = a.person_id
+     WHERE s.season_id = :sid
+     ORDER BY s.date, t.hour, t.minute, act.key
+  `).all({ sid: seasonId });
+}
+
+// ---- planner assignment -------------------------------------------------------------------------------
+// A planner may assign someone who has NOT answered — they have presumably just asked them in person, and
+// refusing would push the work back into the group chat this app exists to replace. A planner may NOT assign
+// someone who explicitly answered "cannot": silence is not consent, but an actual "no" is an actual no, and
+// overriding it is the one thing that would make volunteers stop trusting the tool.
+//
+// `expectPersonId` is optimistic concurrency: the form carries whoever occupied the slot when it was
+// rendered, so overwriting a person is only possible if the planner was looking at that person. If somebody
+// else changed it meanwhile, this refuses instead of silently discarding their work.
+export function assignSlot(db, assignmentId, personId, { expectPersonId = null } = {}) {
+  const row = db.prepare(`
+    SELECT a.person_id, s.date, s.activity_id, t.hour
+      FROM assignments a JOIN sessions s ON s.id = a.session_id JOIN timeslots t ON t.id = s.timeslot_id
+     WHERE a.id = :aid
+  `).get({ aid: assignmentId });
+  if (!row) return { ok: false, reason: "no_such_slot" };
+
+  const current = row.person_id ?? null;
+  if (current !== (expectPersonId ?? null)) return { ok: false, reason: "changed", current };
+
+  const person = db.prepare("SELECT id, status FROM people WHERE id = ?").get(personId);
+  if (!person || person.status !== "active") return { ok: false, reason: "no_such_person" };
+
+  const capable = db.prepare("SELECT 1 FROM capabilities WHERE person_id=? AND activity_id=?").get(personId, row.activity_id);
+  if (!capable) return { ok: false, reason: "not_capable" };
+
+  const answer = db.prepare(`
+    SELECT COALESCE(
+      (SELECT available FROM availability_hour WHERE person_id=:pid AND date=:d AND hour=:h),
+      (SELECT available FROM availability_day  WHERE person_id=:pid AND date=:d)) AS a
+  `).get({ pid: personId, d: row.date, h: row.hour }).a;
+  if (answer === 0) return { ok: false, reason: "said_no" };
+
+  const info = db.prepare(`UPDATE assignments SET person_id = :pid, state = 'confirmed'
+                            WHERE id = :aid AND COALESCE(person_id, -1) = COALESCE(:expect, -1)`)
+    .run({ aid: assignmentId, pid: personId, expect: expectPersonId ?? null });
+  return info.changes === 1 ? { ok: true, unanswered: answer == null } : { ok: false, reason: "changed" };
+}
+
+export function unassignSlot(db, assignmentId, { expectPersonId = null } = {}) {
+  const info = db.prepare(`UPDATE assignments SET person_id = NULL
+                            WHERE id = :aid AND COALESCE(person_id, -1) = COALESCE(:expect, -1)`)
+    .run({ aid: assignmentId, expect: expectPersonId ?? null });
+  return info.changes === 1 ? { ok: true } : { ok: false, reason: "changed" };
+}
+
+// One person's own slots from `fromDate` onward. Separate from planForSeason because this is the first thing
+// a volunteer wants to see and it must not require reading the whole season to find it.
+export function myUpcoming(db, personId, seasonId, fromDate, limit = 20) {
+  return db.prepare(`
+    SELECT a.id AS assignmentId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,
+           act.key AS activityKey, act.label AS activityLabel, a.state
+      FROM assignments a
+      JOIN sessions   s ON s.id = a.session_id
+      JOIN timeslots  t ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+     WHERE a.person_id = :pid AND s.season_id = :sid AND s.date >= :from
+     ORDER BY s.date, t.hour, t.minute
+     LIMIT :lim
+  `).all({ pid: personId, sid: seasonId, from: fromDate, lim: limit });
+}
+
+export function setAvailabilityDay(db, personId, date, available) {
+  db.prepare(`INSERT INTO availability_day (person_id, date, available) VALUES (:pid, :d, :a)
+              ON CONFLICT (person_id, date) DO UPDATE SET available = :a`)
+    .run({ pid: personId, d: date, a: available ? 1 : 0 });
+}
+
+export function setAvailabilityHour(db, personId, date, hour, available) {
+  db.prepare(`INSERT INTO availability_hour (person_id, date, hour, available) VALUES (:pid, :d, :h, :a)
+              ON CONFLICT (person_id, date, hour) DO UPDATE SET available = :a`)
+    .run({ pid: personId, d: date, h: hour, a: available ? 1 : 0 });
+}

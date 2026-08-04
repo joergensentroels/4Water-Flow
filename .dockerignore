@@ -1,0 +1,32 @@
+# Everything the image must NOT contain.
+#
+# The patterns are deliberately BROAD. Matching only the default filename left demo.db bakeable into the
+# image, and FOURWATER_DB can name the database anything — so a build run in a directory with a live roster
+# in it would ship every volunteer's contact details inside the container.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+backups/
+
+# Secrets: session key, OIDC client secret, NextCloud app password, Mattermost webhook.
+.env
+.env.*
+!.env.example
+
+# Generated locally, never part of a deployment.
+demo-pattern.json
+config/*.tmp
+
+# Not needed at runtime. The suite is deliberately absent: tests are not a deployment artefact.
+test/
+tools/testkit.mjs
+node_modules/
+.git/
+.gitignore
+.gitattributes
+.github/
+*.md
+!README.md
