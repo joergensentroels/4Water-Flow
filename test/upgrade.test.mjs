@@ -15,12 +15,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { migrate } from "../src/db.mjs";
 import { ROOT, loadPattern } from "../src/config.mjs";
 import { seedSeason, seedPeople } from "../src/seed.mjs";
+import { makeBackup, verifyBackup } from "../tools/backup.mjs";
+import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
 import { calendarTokenFor, personByCalendarToken } from "../src/calendar.mjs";
 
@@ -148,6 +151,102 @@ test("upgrading twice is a no-op the second time, so a restart cannot corrupt an
       "re-running migrate must not add a column twice — the ALTER would throw and take the boot down");
     assert.equal(db.prepare("SELECT COUNT(*) n FROM assignments").get().n, rows);
     db.close();
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+// The RUNBOOK's own recovery procedure, executed. It says: stop the app, copy a backup over the live database,
+// start it again. test/backup.test.mjs already proves the restored FILE is a working database — it opens it, runs
+// a real query, writes to it, and re-migrates. What nothing did was point the real entry point at one and see the
+// app come up, which is the actual procedure and the one that matters at 23:00 on a Saturday.
+//
+// The specific thing worth checking: `VACUUM INTO` produces a fresh database, and journal_mode is a persistent
+// per-database setting that a fresh file does NOT inherit — so a restored backup arrives in rollback mode, not
+// WAL. The app sets WAL at boot, which is easy to believe and worth confirming rather than believing.
+test("the app boots against a restored backup and serves the data that was in it", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "4water-restore-"));
+  const live = path.join(dir, "live.db");
+  const patternFile = path.join(dir, "pattern.json");
+  writeSeasonSpanningToday(patternFile, { key: "restore" });
+  const pattern = loadPattern(patternFile);
+
+  try {
+    // A deployment with real work in it.
+    let expected;
+    {
+      const db = new DatabaseSync(live);
+      migrate(db);
+      const { seasonId } = seedSeason(db, pattern);
+      const people = seedPeople(db, seasonId, [
+        { name: "Søren Nørgård", contact: "soren@4water.invalid", can: [pattern.activities[0].key] },
+      ]);
+      const dates = db.prepare("SELECT DISTINCT date FROM sessions WHERE season_id=? ORDER BY date LIMIT 2")
+        .all(seasonId).map((r) => r.date);
+      for (const d of dates) setAvailabilityDay(db, people[0], d, true);
+      const slot = db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                                WHERE a.person_id IS NULL AND s.season_id=? ORDER BY s.date LIMIT 1`).get(seasonId).id;
+      assert.equal(assignSlot(db, slot, people[0], { expectPersonId: null }).ok, true);
+      expected = {
+        people: db.prepare("SELECT COUNT(*) n FROM people").get().n,
+        filled: db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id IS NOT NULL").get().n,
+      };
+      db.close();
+    }
+
+    // Back it up the way the nightly job does, then restore it the way the RUNBOOK says.
+    const made = makeBackup({ db: live, dir: path.join(dir, "backups") });
+    assert.equal(verifyBackup(made.file).ok, true, "the backup must be sound before restoring it");
+    const restored = path.join(dir, "restored.db");
+    writeFileSync(restored, readFileSync(made.file));
+
+    // A restored file is NOT in WAL mode, because VACUUM INTO writes a fresh database.
+    {
+      const db = new DatabaseSync(restored, { readOnly: true });
+      const mode = db.prepare("PRAGMA journal_mode").get().journal_mode;
+      db.close();
+      assert.notEqual(mode, "wal", "if this is already wal, the premise below is wrong and worth re-reading");
+    }
+
+    // Now boot the real entry point against it.
+    const PORT = 8361;
+    const child = spawn(process.execPath, [path.join(ROOT, "src", "server.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, FOURWATER_DB: restored, FOURWATER_PATTERN: patternFile,
+             FOURWATER_SECRET: "r".repeat(48), PORT: String(PORT), HOST: "127.0.0.1", NODE_ENV: "production" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { out += d; });
+    try {
+      let healthy = false;
+      for (let i = 0; i < 80 && !healthy; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (child.exitCode !== null) break;
+        try { healthy = (await fetch(`http://127.0.0.1:${PORT}/healthz`)).ok; } catch {}
+      }
+      assert.ok(healthy, `the app must come up on a restored backup.\nexit=${child.exitCode}\n${out}`);
+      assert.equal((await fetch(`http://127.0.0.1:${PORT}/signin`)).status, 200, "and serve pages");
+
+      const db = new DatabaseSync(restored, { readOnly: true });
+      const after = {
+        people: db.prepare("SELECT COUNT(*) n FROM people").get().n,
+        filled: db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id IS NOT NULL").get().n,
+      };
+      const mode = db.prepare("PRAGMA journal_mode").get().journal_mode;
+      const name = db.prepare("SELECT name FROM people LIMIT 1").get().name;
+      db.close();
+
+      assert.deepEqual(after, expected, "booting must not lose the restored season's work");
+      assert.equal(name, "Søren Nørgård", "including the letters in it");
+      assert.equal(mode, "wal", "and boot must put the restored database back into WAL mode");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+        await new Promise((r) => child.once("exit", r));
+      }
+    }
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch {}
   }

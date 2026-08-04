@@ -8,9 +8,14 @@ They agreed to host it. Hosting follows the operators — they run the machine, 
 
 **⚠ Not yet verified:** the image has never been built. Docker was not installed on the machine this was
 written on, so `docker compose build` is untested. Everything else below has been exercised: the app boots
-under the image's exact environment, the healthcheck command exits 0, backups restore into a working
-database, and 129+ automated checks pass. Expect the first build to need small fixes; nothing else here
+under the image's exact environment, the healthcheck command exits 0, a restored backup boots and serves, and
+the whole suite passes on a clean `git clone`. Expect the first build to need small fixes; nothing else here
 depends on it.
+
+**No test count appears in this file on purpose.** `PLAN.md` holds the number, in one place, and a test asserts
+that no other document states one — three documents used to and all three were wrong at once (129, 330, 330,
+against an actual 338). A count that must be updated in several files is a count that will be stale in most of
+them.
 
 ---
 
@@ -162,8 +167,8 @@ deleting sessions would destroy assignments volunteers have already agreed to.
 **`1.0.0-rc.1`.** `/status` shows it as its last line, which is the answer to the first question any support
 conversation asks. It is also the only thing that reads `package.json` at runtime.
 
-The suffix is deliberate and is the honest part. The app is feature-complete, covered by 330 tests that pass on a
-clean `git clone`, and every mechanically checkable claim in these documents is verified by a test. None of that
+The suffix is deliberate and is the honest part. The app is feature-complete, its whole suite passes on a clean
+`git clone`, and every mechanically checkable claim in these documents is verified by a test. None of that
 is the same as having worked. **Four things have never happened**, and each is a release-blocker rather than a
 nice-to-have:
 

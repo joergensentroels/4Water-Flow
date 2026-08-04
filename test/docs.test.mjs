@@ -53,6 +53,34 @@ function sourceFacts() {
   };
 }
 
+// One place may state the test count, and it is PLAN.md.
+//
+// Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK said
+// "129+ automated checks", RUNBOOK said "330 tests" further down, PLAN said "330", and the suite had 338. My own
+// doc-claims sweep missed two of them because it only matched PLAN's exact phrasing — a checker with a blind spot
+// shaped like the thing it was checking.
+//
+// The count cannot be verified from inside the suite (running it from within itself does not terminate — see the
+// note at the top of this file), so this asserts the STRUCTURE instead: exactly one document may carry a number,
+// which makes the external check a single-place check rather than a hunt. Same fix as the Node floor and the
+// webhook timeout — one fact, one home.
+test("only PLAN.md states a test count, so there is one number to keep true", () => {
+  const COUNTISH = /\b\d{2,4}\+?\s+(?:automated\s+)?(?:tests?|checks?)\b/gi;
+  const offenders = [];
+  for (const doc of DOCS) {
+    const hits = [...read(doc).matchAll(COUNTISH)].map((m) => m[0].trim());
+    if (!hits.length) continue;
+    if (doc === "PLAN.md") {
+      assert.equal(hits.length, 1, `PLAN.md must state the count exactly once, found: ${hits.join(", ")}`);
+      continue;
+    }
+    offenders.push(`${doc}: ${hits.join(", ")}`);
+  }
+  assert.deepEqual(offenders, [],
+    `these documents state a test count as well as PLAN.md, so at least one of them will be stale:\n  ` +
+    `${offenders.join("\n  ")}\n  Say "the whole suite" instead, and leave the number to PLAN.md.`);
+});
+
 test("every claim the documents make about the code is true", () => {
   const facts = sourceFacts();
   const problems = [];
