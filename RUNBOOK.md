@@ -145,7 +145,7 @@ deleting sessions would destroy assignments volunteers have already agreed to.
 |---|---|
 | Nobody can sign in | Is NextCloud up? OIDC depends on it. Invite links do not — issue one to get back in. |
 | Volunteers see an empty board | They have not entered availability. Silence is treated as unavailable, on purpose. |
-| Nobody is being notified | `MATTERMOST_WEBHOOK` set? If not, messages queue in the `notifications` table rather than being lost. Check for rows with `status='failed'`. |
+| Nobody is being notified | `MATTERMOST_WEBHOOK` set? If not, messages queue in the `notifications` table rather than being lost. Check for rows with `status='failed'` — the `error` column says why. `the webhook did not answer within 10s` means Mattermost accepted the connection and went quiet; the message is kept as failed and the next nudge retries it, rather than the run stalling on it. |
 | The app is up but the plan looks empty | Check the season in **Administration** — a season entirely in the past has no upcoming sessions. |
 | Container keeps restarting | `docker compose logs --tail=100 app`. A missing `FOURWATER_SECRET` is the usual cause and says so. |
 | `4water Flow needs Node 22.13.0 or newer` | Exactly what it says. See **The one dependency risk** below. |

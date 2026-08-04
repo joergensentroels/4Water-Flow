@@ -23,7 +23,41 @@ function safeHost(url) {
   try { return new URL(url).host; } catch { return "invalid-url"; }
 }
 
-export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, log = console, now = () => new Date() }) {
+// A webhook that never answers is worse than one that refuses, and it was the only outcome this file could not
+// see. Node's fetch has no request timeout — undici's headers timeout is 300s — so one unresponsive Mattermost
+// stalled each send for five minutes, and runNudge awaits send once per volunteer in a loop. Thirty volunteers
+// is two and a half hours in which nobody after the first gets nudged, nothing is logged, and no row says
+// anything is wrong. This file's whole argument is that a broken webhook should be visible in the data; a hang
+// was invisible in the data AND the log.
+//
+// Ten seconds, because the thing being sent is a chat message: one that takes longer has failed in every sense
+// a volunteer cares about, and failing it turns the stall into a 'failed' row with a reason.
+const WEBHOOK_TIMEOUT_MS = 10_000;
+
+// Raced rather than relying on the signal alone. Real fetch honours AbortSignal, but the transport here is
+// injectable, and a transport that ignores the signal would leave send() permanently unsettled — the exact
+// failure this exists to remove. The signal is still passed so the socket is actually released.
+async function withTimeout(start, ms, label) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      start(controller.signal),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`${label} did not answer within ${ms / 1000}s`));
+        }, ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, log = console, now = () => new Date(),
+                               timeoutMs = WEBHOOK_TIMEOUT_MS }) {
   const record = db.prepare(`INSERT INTO notifications (kind, person_id, period, channel, body, status, error, created_at)
                              VALUES (:kind, :pid, :period, :channel, :body, :status, :error, :at)`);
 
@@ -48,11 +82,12 @@ export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, l
     }
 
     try {
-      const res = await fetchImpl(config.webhook, {
+      const res = await withTimeout((signal) => fetchImpl(config.webhook, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: base.body }),
-      });
+        signal,
+      }), timeoutMs, "the webhook");
       if (!res.ok) throw new Error(`webhook returned ${res.status}`);
       db.prepare("UPDATE notifications SET status='sent' WHERE id=?").run(rowId);
       return { ok: true, channel: "mattermost", id: rowId };

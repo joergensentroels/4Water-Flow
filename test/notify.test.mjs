@@ -158,6 +158,58 @@ test("a nudge that fails to deliver is not marked as sent, so the next run retri
   assert.equal(db.prepare("SELECT status FROM notifications").get().status, "failed");
 });
 
+// A channel that never answers was the only outcome this file could not see: `fail: true` rejects, and a
+// rejection was already handled. Node's fetch has no request timeout, so a hung Mattermost stalled send() for
+// five minutes — and runNudge awaits one per volunteer, so nobody after the first got nudged, with nothing in
+// the log and no row saying anything was wrong.
+//
+// The stub deliberately IGNORES the abort signal. Real fetch honours it, but the transport is injectable, so a
+// timeout that depends on the transport cooperating is a timeout that can be bypassed by the next adapter.
+test("a webhook that never answers is failed, not waited on forever", async () => {
+  const { db, seasonId, pattern } = world({ volunteers: 2 });
+  let aborts = 0;
+  const fetchImpl = (url, opts) => {
+    opts?.signal?.addEventListener?.("abort", () => { aborts++; });
+    return new Promise(() => {});               // never settles, and never looks at the signal
+  };
+  const notifier = makeNotifier({ db, config: notifyConfig({ MATTERMOST_WEBHOOK: SECRET_URL }),
+                                  fetchImpl, log: {}, timeoutMs: 50 });
+
+  const started = process.hrtime.bigint();
+  const r = await runNudge(db, { notifier, t, seasonId, today: pattern.season.from });
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+
+  assert.deepEqual(r.sent, [], "nothing was delivered");
+  assert.ok(ms < 2000, `runNudge must not hang: took ${ms.toFixed(0)}ms`);
+  const rows = db.prepare("SELECT status, error FROM notifications ORDER BY id").all();
+  assert.equal(rows.length, 2, "every volunteer was still attempted — the first hang must not end the loop");
+  for (const row of rows) {
+    assert.equal(row.status, "failed");
+    assert.match(row.error, /did not answer within/, "the row must say WHY, since that is where an operator looks");
+  }
+  assert.equal(aborts, 2, "and the socket is released rather than left open");
+});
+
+test("a slow tick is skipped rather than run twice over the same broken channel", async () => {
+  const { db, seasonId, pattern } = world({ volunteers: 1 });
+  let inFlight = 0, maxInFlight = 0;
+  const slow = { send: async () => {
+    maxInFlight = Math.max(maxInFlight, ++inFlight);
+    await new Promise((r) => setTimeout(r, 120));
+    inFlight--;
+    return { ok: true };
+  } };
+  const warned = [];
+  const jobs = startJobs({ db, notifier: slow, t, seasonId, today: () => pattern.season.from,
+                           everyMs: 60_000, log: { warn: (m) => warned.push(m), log: () => {} } });
+  const [, second] = await Promise.all([jobs.tick(), jobs.tick()]);
+  jobs.stop();
+
+  assert.equal(maxInFlight, 1, "two runs must not overlap");
+  assert.equal(second?.skipped, true, "the second tick reports that it stood down");
+  assert.match(warned[0] ?? "", /has not finished/, "and says so, because a skipped nudge is worth knowing about");
+});
+
 test("the job timer swallows its own errors and does not hold the process open", async () => {
   const { db, seasonId, pattern } = world({ volunteers: 1 });
   const broken = { send: async () => { throw new Error("boom"); } };

@@ -57,7 +57,20 @@ export async function runNudge(db, { notifier, t, seasonId, today, windowDays = 
 // The timer. Deliberately dumb: check on an interval and let runNudge's idempotency decide whether anything
 // actually goes out. A missed tick therefore costs nothing, which is what makes restarts safe.
 export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 * 60 * 1000, log = console }) {
+  // One run at a time. runNudge awaits one delivery per volunteer, so a slow channel makes a tick take
+  // arbitrarily long — and setInterval does not wait. Overlapping runs cannot double-notify anyone (the UNIQUE
+  // constraint on (kind, person, period) settles that), but they would stack up loops all grinding through the
+  // same unresponsive channel, which is how one broken webhook becomes a growing pile of work.
+  //
+  // Skipping is the right response rather than queueing: the tick is a periodic check whose whole design is
+  // that a missed one costs nothing.
+  let running = false;
   const tick = async () => {
+    if (running) {
+      log.warn?.(`[jobs] previous nudge run has not finished — skipping this tick`);
+      return { skipped: true };
+    }
+    running = true;
     try {
       const sid = typeof seasonId === "function" ? seasonId() : seasonId;
       if (!sid) return;
@@ -65,6 +78,8 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
       if (r.sent.length) log.log?.(`[jobs] availability nudge sent to ${r.sent.length} volunteer(s) for ${r.period}`);
     } catch (e) {
       log.warn?.(`[jobs] nudge failed: ${e.message}`);   // a broken job must not take the server down
+    } finally {
+      running = false;
     }
   };
   const timer = setInterval(tick, everyMs);
