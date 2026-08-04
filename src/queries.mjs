@@ -189,6 +189,46 @@ export function boardEmptyReason(db, personId, seasonId, fromDate = "0000-00-00"
   return { reason: "none_open" };
 }
 
+// WHY nobody can take this slot — the same question as boardEmptyReason, asked from the other end.
+//
+// The planner used to be told "Nobody has said they are free yet" for every empty candidate list, and unlike
+// the board's old message that is not merely vague, it is usually FALSE. If nobody is recorded as able to run
+// the activity, plenty of people have said they are free. If it is a leader slot and only followers answered,
+// they said they are free. If everyone who could is already on something else at that hour, they certainly said
+// they were free. In each case a planner reads "nobody is free", goes and chases people for availability, and
+// the actual remedy was to grant a capability, find a leader, or move the session.
+//
+// So this reports which gate empties the list, and each answer maps to a different action.
+export function slotEmptyReason(db, assignmentId) {
+  const countWith = (gates) => db.prepare(`
+    SELECT COUNT(*) n
+      FROM people p
+      JOIN assignments a ON a.id = :aid
+      JOIN sessions  s ON s.id = a.session_id
+      JOIN timeslots t ON t.id = s.timeslot_id
+     WHERE p.status = 'active'
+       ${gates.map((g) => `AND ${GATE[g]("p.id")}`).join("\n       ")}
+  `).get({ aid: assignmentId }).n;
+
+  // No active volunteers at all: nothing about this slot, and nothing a planner can do on this screen.
+  if (countWith([]) === 0) return { reason: "no_volunteers" };
+
+  let passed = [];
+  for (const gate of GATE_ORDER) {
+    const next = [...passed, gate];
+    if (countWith(next) > 0) { passed = next; continue; }
+    return {
+      reason: {
+        capable: "nobody_capable",        // grant somebody the capability
+        role: "nobody_in_that_role",      // recruit or ask a both-role teacher — availability is not the problem
+        available: "nobody_free",         // the only case where the old message was true
+        free: "all_already_busy",         // they are free and already on something at that hour; move the session
+      }[gate],
+    };
+  }
+  return { reason: "nobody_free" };       // unreachable while the list is empty, but never guess silently
+}
+
 // Claiming. The guard IS the race protection: `person_id IS NULL` inside the UPDATE means two volunteers
 // hitting this at the same moment cannot both win — the second sees changes === 0. Eligibility is checked
 // in the same statement so it cannot be bypassed by calling this directly.

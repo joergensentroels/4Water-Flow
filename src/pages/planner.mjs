@@ -40,7 +40,10 @@ function byDate(rows) {
   return out;
 }
 
-export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignment, flash, gapsOnly, weeks = 4, pendingProposals = 0 }) {
+// `emptyReasons` maps assignmentId -> reason code, only for slots with no candidates. Defaults to an empty Map
+// so a caller that does not compute it still renders — falling back to the one honest generic reason.
+export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignment, flash, gapsOnly, weeks = 4,
+                                pendingProposals = 0, emptyReasons = new Map() }) {
   const days = byDate(rows);
 
   // Auto-roster controls. Lock-in and discard only appear when there is something to decide about, because a
@@ -80,7 +83,14 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
     return html`
       <span class="when">
         ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}
-        <small>${people.length === 0 ? t("planner.noneEligible") : t("planner.eligibleFairest", { n: people.length })}</small>
+        <!-- When nobody can take it, say WHICH of the four rules is the binding one. The old text asserted
+             "nobody has said they are free yet" in every case, which is usually false: if nobody is recorded as
+             able to run the activity, or the slot needs the other role, or everyone who could is already on
+             something at that hour, then they have all said they are free. A planner acting on that wrong
+             diagnosis chases availability instead of granting a capability or moving the session. -->
+        <small>${people.length === 0
+          ? html`${t("planner.noneEligible")} — ${t(`planner.why.${emptyReasons.get(r.assignmentId) ?? "nobody_free"}`)}`
+          : t("planner.eligibleFairest", { n: people.length })}</small>
       </span>
       ${people.length === 0 ? "" : html`
         <form method="post" action="/planner/assign">

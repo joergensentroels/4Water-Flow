@@ -66,6 +66,9 @@ test("every dynamically-built key family is complete in both locales", () => {
     // against the same codes boardEmptyReason can return.
     "board.why": ["none_open", "no_capabilities", "nothing_in_your_activities", "no_role_stated",
                   "only_the_other_role", "no_availability", "not_free_then", "already_busy_then"],
+    // The same question from the planner's side: why can nobody take THIS slot. Pinned for the same reason —
+    // a missing key renders "planner.why.nobody_capable" at somebody trying to fix a gap under time pressure.
+    "planner.why": ["no_volunteers", "nobody_capable", "nobody_in_that_role", "nobody_free", "all_already_busy"],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 

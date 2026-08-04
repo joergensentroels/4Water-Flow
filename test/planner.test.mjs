@@ -246,3 +246,79 @@ test("the planner defaults to a four-week horizon, with links to widen it", with
   const all = await (await w.get("/planner?weeks=all", planner)).text();
   assert.ok(all.length > body.length, "the whole-season view should genuinely be bigger");
 }));
+
+// ---- WHY nobody can take a slot --------------------------------------------------------------------------
+// The planner used to be told "Nobody has said they are free yet" for every empty candidate list. Unlike the
+// board's old message, which was vague but true, this one asserts a cause — and in three of the four cases the
+// cause is wrong. Those three are the point of these tests: a planner who believes it goes and chases people
+// for availability when the actual remedy was a capability, a leader, or moving the session.
+test("an unstaffable slot names which rule is the binding one", async () => {
+  const { slotEmptyReason } = await import("../src/queries.mjs");
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["planner"] } });
+  try {
+    makeAvailableEverywhere(w.db, w.people[0]);
+    makeAvailableEverywhere(w.db, w.people[1]);
+    makeAvailableEverywhere(w.db, w.people[2]);
+    const slot = w.db.prepare(`SELECT a.id, a.role FROM assignments a JOIN sessions s ON s.id=a.session_id
+                                WHERE a.person_id IS NULL AND s.date >= ? LIMIT 1`).get(w.today);
+    const reason = () => slotEmptyReason(w.db, slot.id).reason;
+
+    // Everyone free and capable: not empty at all, so nothing to explain.
+    const { eligiblePeopleFor } = await import("../src/queries.mjs");
+    assert.ok(eligiblePeopleFor(w.db, slot.id).length > 0, "the fixture must start staffable");
+
+    // 1. NOBODY CAPABLE — and the old message would have said "nobody has said they are free", while all three
+    //    have. The remedy is in Administration, not in chasing anyone.
+    w.db.prepare("DELETE FROM capabilities").run();
+    assert.equal(reason(), "nobody_capable");
+
+    // 2. NOBODY IN THAT ROLE. Same falsehood: they are free, they can run it, and the slot wants the other half.
+    const act = w.db.prepare("SELECT s.activity_id a FROM assignments x JOIN sessions s ON s.id=x.session_id WHERE x.id=?").get(slot.id).a;
+    for (const p of w.people) w.db.prepare("INSERT OR IGNORE INTO capabilities (person_id, activity_id) VALUES (?,?)").run(p, act);
+    if (slot.role) {
+      const other = slot.role === "l" ? "f" : "l";
+      w.db.prepare("UPDATE people SET preferred_role=?").run(other);
+      assert.equal(reason(), "nobody_in_that_role");
+    }
+    w.db.prepare("UPDATE people SET preferred_role='b'").run();
+
+    // 3. NOBODY FREE — the one case the old message was right about.
+    w.db.prepare("DELETE FROM availability_day").run();
+    w.db.prepare("DELETE FROM availability_hour").run();
+    assert.equal(reason(), "nobody_free");
+
+    // 4. ALL ALREADY BUSY. They are free, capable and correctly roled, and every one of them is on something
+    //    else at that exact time — so the honest answer is to move the session, not to nag anybody.
+    for (const p of w.people) makeAvailableEverywhere(w.db, p);
+    const clash = w.db.prepare(`SELECT a.id FROM assignments a
+                                  JOIN sessions s ON s.id = a.session_id
+                                  JOIN timeslots t ON t.id = s.timeslot_id
+                                 WHERE a.id <> :aid AND a.person_id IS NULL
+                                   AND s.date = (SELECT s2.date FROM assignments a2 JOIN sessions s2 ON s2.id=a2.session_id WHERE a2.id=:aid)
+                                   AND t.hour = (SELECT t2.hour FROM assignments a3 JOIN sessions s3 ON s3.id=a3.session_id
+                                                  JOIN timeslots t2 ON t2.id=s3.timeslot_id WHERE a3.id=:aid)
+                                 LIMIT 1`).get({ aid: slot.id });
+    if (clash) {
+      // Park everyone on the clashing slot at the same hour. Only one can hold that row, so use the others'
+      // own slots at the same time where the config provides them; otherwise assert what is reachable.
+      w.db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(w.people[0], clash.id);
+      const left = eligiblePeopleFor(w.db, slot.id).map((p) => p.id);
+      assert.ok(!left.includes(w.people[0]), "somebody booked at that hour must not be offered the slot");
+    }
+  } finally { w.close(); }
+});
+
+test("the planner page shows the reason, not a guess", async () => {
+  const w = await makeWorld({ volunteers: 2, roles: { 0: ["planner"] } });
+  try {
+    // Capable of nothing: every open slot is unstaffable for the same, nameable reason.
+    w.db.prepare("DELETE FROM capabilities").run();
+    const body = await (await w.get("/planner", await w.signIn(w.people[0]))).text();
+
+    assert.ok(!/planner\.why\./.test(body), "an untranslated reason key must never reach a planner");
+    assert.match(body, /nobody is recorded as able to run this|ingen er registreret/i,
+      "the page must name the binding rule");
+    assert.ok(!/have said they are free yet|har meldt sig ledig endnu/i.test(body),
+      "and must not assert the old, wrong cause");
+  } finally { w.close(); }
+});

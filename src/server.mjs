@@ -27,7 +27,7 @@ import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
-         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason } from "./queries.mjs";
+         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason, slotEmptyReason } from "./queries.mjs";
 import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
          personByCalendarToken } from "./calendar.mjs";
 
@@ -308,10 +308,18 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // Look up candidates only for the open slots on screen — one query per gap, not per row. Gaps are the
     // minority, and the alternative is a single query returning every person for every slot in the season.
     const eligibleByAssignment = new Map();
-    for (const r of rows) if (r.personId == null) eligibleByAssignment.set(r.assignmentId, eligiblePeopleFor(db, r.assignmentId));
+    // And for the slots that came back with NOBODY, why. Only for those: a season is mostly staffable, so this
+    // is a handful of extra queries on the rows a planner is actually stuck on.
+    const emptyReasons = new Map();
+    for (const r of rows) {
+      if (r.personId != null) continue;
+      const people = eligiblePeopleFor(db, r.assignmentId);
+      eligibleByAssignment.set(r.assignmentId, people);
+      if (people.length === 0) emptyReasons.set(r.assignmentId, slotEmptyReason(db, r.assignmentId).reason);
+    }
 
     send(res, 200, renderPlanner({
-      t, session: c.session, roles: c.roles, who: c.who, rows, eligibleByAssignment, gapsOnly, weeks,
+      t, session: c.session, roles: c.roles, who: c.who, rows, eligibleByAssignment, emptyReasons, gapsOnly, weeks,
       pendingProposals: sid ? countProposals(db, sid, today()) : 0,
       // Counts ride in the query string so the message can say what happened rather than just "done".
       flash: plannerFlash(t, query.get("r"), {
