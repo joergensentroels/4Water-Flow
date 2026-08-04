@@ -1,11 +1,14 @@
 # Execution plan — 4water scheduling
 
-Ten increments. **Each one ends with `npm test` green and is independently shippable**; the app is usable by
-volunteers from D onward even while planners are still on the spreadsheet. Order follows
-`../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile, and
-chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
+Planned as ten increments; it ran to twenty-four. **Each one ends with `npm test` green and is independently
+shippable**; the app is usable by volunteers from D onward even while planners are still on the spreadsheet.
+Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
+and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–P all complete, 221 tests green** (`npm test` — no network, no database, no setup).
+Status: **✅ A–X complete, 296 tests green** (`npm test` — no network, no database, no setup).
+
+**Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
+deployment that could not have worked, and why is written down there rather than left for somebody to rediscover.
 
 ## Round two: K–P
 
@@ -22,6 +25,25 @@ browser, which found four more bugs a green suite could not see.
 | **O** | profile + operational status | rectification and own-data download; the status page leads with whether the season is current, because a past season looks identical to a broken app |
 | **P** | rollover + release engineering | next season pre-filled and validated; LICENSE, CONTRIBUTING, CI, a real version |
 
+## Round three: Q–X
+
+P declared itself finished. Everything below was found afterwards, and the pattern is worth more than the list:
+**each increment's defect was in the path adjacent to the one just fixed.** Fix the planner's page size, miss the
+admin's. Refuse a `Host`-derived URL for the calendar link, leave the invite link building one. Explain an empty
+shift exchange, leave the planner's empty candidate list asserting the wrong cause. By the fourth time it was
+cheaper to enumerate siblings deliberately than to keep discovering them.
+
+| | | |
+|---|---|---|
+| **Q** | edit the weekly pattern from Administration | add and remove timeslots; one validator for load and for save |
+| **R** | version control | first commit, `.gitattributes`, CI |
+| **S** | OIDC endpoint discovery | replaces three hardcoded NextCloud paths; every discovered endpoint must be same-origin and https, because the token endpoint receives the client secret |
+| **T** | the Node floor, target sizes, the outbox | `>= 22.5` was wrong in three places — `node:sqlite` was behind a flag until 22.13; the planner's assign dropdown measured 117×19px; every composed message was written where nobody could read it |
+| **U** | leader and follower per session | `needs` per activity; one slot per role; the eligibility rule gained the role gate so board, planner and auto-roster inherit it together |
+| **V** | 4water's visual identity | black-and-white frame from their site, a water blue chosen because theirs measures 3.3:1 on white, droplet drawn inline because the CSP forbids remote images |
+| **W** | subscribable calendar feed | UTC instants resolved through `Intl` rather than a hand-written VTIMEZONE; the link is a revocable credential stored only as a hash |
+| **X** | what a green suite could not see | a fresh deployment opened **no slots at all**; the notifier and nudge timer were never wired in production; three UI strings asserted causes that were false; invitations were never deleted; the admin screen was 953 KB |
+
 ## A definition of done I amended rather than met — deliberately, and here is why
 
 Increment D's criterion said *"an ineligible claim is a 403 with the right message."* It is a **303 redirect
@@ -35,17 +57,37 @@ has to rediscover.
 
 ## Measured, not assumed — at the size the spec actually describes
 
-200 volunteers, six slots a week, a full half-year season (257 sessions, 10k availability rows):
+Measured twice. First at 200 volunteers with six slots a week (257 sessions, 10k availability rows), and again
+after roles doubled the assignment rows for every partner dance — 200 volunteers, a busier weekly rhythm than
+Copenhagen's, 380 sessions, 586 slots, 22,080 availability rows, a 1.1 MB database.
+
+**Speed is not the problem at this size, and saying so is the point of measuring.** Second run, real HTTP
+responses: home 14ms, shift exchange 11ms, planner 2ms, status 13ms, CSV 15ms, auto-roster over four weeks
+137ms. `node:sqlite` and a hand-rolled router are nowhere near being the bottleneck for a volunteer
+organisation, and anyone optimising them here is guessing.
+
+**Page size was the problem, twice, and the second time was the same mistake as the first:**
 
 | | before | after |
 |---|---|---|
 | `/planner` HTML | **534 KB** | **84 KB** (four-week default) |
 | `/planner` queries | 257 | 40 |
+| `/admin` HTML | **953 KB** | **127 KB** (25 people, searchable) |
 | `planForSeason` | 1 query, 4 ms | unchanged |
 | a volunteer's board | 1 query, 1 ms | unchanged |
 | `autoRoster`, whole season | 276 ms, 414 queries | unchanged |
 
-Two real defects came out of that, neither visible to a passing suite:
+`/admin` carried twelve small forms per person — three roles, six capabilities, status, export, two erase modes
+— each with its own CSRF token, so 200 people was about 2,400 forms. Identical defect to the planner's, fixed
+there first, written up there first, and not looked for one file away. The aggravating detail: `/planner?weeks=all`
+is 647 KB and somebody chose it by clicking "the whole season"; `/admin` was what you got by tapping the tab.
+
+Two measurements deliberately **not** acted on, with the reasoning rather than silence: `/availability` (194 KB)
+and `/plan` (128 KB) scale with **season length, not headcount**, so they are identical for Copenhagen's forty.
+Capping availability would stop a volunteer answering the season in one pass, which is how the nudge and the bulk
+actions are meant to be used.
+
+Two real defects came out of the first run, neither visible to a passing suite:
 
 1. **The planner's candidate list was alphabetical while auto-roster ordered by fairness.** Same eligibility
    rule, two different answers to "who should take this" — so a planner filling gaps by hand kept picking
@@ -56,21 +98,65 @@ Two real defects came out of that, neither visible to a passing suite:
 
 ## Still not verified — flagged where it matters, not buried
 
-- **The Docker image has never been built.** Docker is not installed on the machine this was written on. Said
-  plainly at the top of `RUNBOOK.md`.
-- **OIDC has never talked to a real NextCloud.** Written to spec and unit-tested with an injected `fetch`; the
-  checklist to run against the real server is `docs/OIDC.md`. Invite links are a fully working path meanwhile.
+### What a green suite could not see, twice
+
+Read this first, because it is the part that should change how much anyone trusts the number at the top.
+
+Two features were **completely dead in production** while their tests passed, and both for the same reason:
+`tools/testkit.mjs` supplied something the real boot path did not, so every test ran against a world the
+deployment never had.
+
+1. **A fresh deployment opened no slots at all.** `seedStructure` creates sessions; `openEverySession` creates
+   the open assignment rows a volunteer claims and a planner fills. Production called only the first. Booted on
+   an empty database: **102 sessions, 0 assignments.** The shift exchange had nothing to claim, the planner
+   nothing to assign, auto-roster nothing to propose, and `/status` reported "0 of 0 slots unfilled", which reads
+   as healthy. The same hole was in the admin's config edit and in the season rollover. Worse: `rollover.test.mjs`
+   **asserted the count was zero**, with a comment of mine explaining that `openEverySession` "is not part of a
+   rollover" — a test holding the bug in place.
+2. **The notifier and the nudge timer were never wired.** `makeNotifier` and `startJobs` were called only from
+   tests. So no announcement ever fired, the availability nudge never ran once, and the outbox was permanently
+   empty — while seventeen tests proved the machinery worked, all of them passing in a notifier production did
+   not have.
+
+The countermeasure is `test/journey.test.mjs`, which touches the harness nowhere: it boots `node src/server.mjs`
+on an empty database under `NODE_ENV=production` and walks the whole product over HTTP. It is the slowest test in
+the suite and the only one that would have caught either. **If you add something a real deployment has to wire
+up, add it there too.**
+
+### Still unproven
+
+- **The Docker image has never been built.** Docker is not installed on the machine this was written on, and
+  installing it was out of scope. Said plainly at the top of `RUNBOOK.md`. What *is* verified is everything
+  checkable without a daemon: every path the Dockerfile copies exists, the compose file keeps its properties,
+  secrets and the database are excluded from image and git, and the app boots and answers its healthcheck under
+  the image's exact environment including `NODE_ENV=production`.
+- **OIDC has never talked to a real NextCloud.** Written to spec, unit-tested with an injected `fetch`, and now
+  reading the provider's own discovery document — including refusing any endpoint that is not same-origin and
+  https, since the token endpoint receives the client secret. The checklist for the real server is
+  `docs/OIDC.md`. Invite links are a fully working path meanwhile, and `/status` says which mode sign-in is in.
+- **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
+  reported pain, not measured against somebody using it.
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
-- **Two placeholders remain in `config/pattern.json`:** the clock times (the Wed/Sun rhythm is from the real
-  export; the times were never stated) and `board.cutoffDays`, which is spec question Q18.
+- **Three placeholders remain in `config/pattern.json`:** the clock times (the Wed/Sun rhythm is from the real
+  export; the times were never stated), `board.cutoffDays` (spec Q18), and `calendar.eventMinutes` — no shift
+  length was ever stated, so 90 minutes is invented. `calendar.timezone` is **not** a placeholder: it is what
+  puts a 19:00 shift at 19:00 in a subscriber's calendar, and getting it wrong shifts every event silently.
+- **Retention runs only if the operator installed the cron line.** Deliberate — a container that deletes data on
+  a schedule nobody configured is worse — but it means "deleted automatically" is true of the software and
+  conditional on the deployment. `/status` shows backup age; if backups are not running, neither is retention.
 
 ## Standing rules for every increment
 
 - **Zero dependencies.** `node:*` only. No `node_modules`, ever.
 - **No Copenhagen vocabulary in code.** `test/seams.test.mjs` fails the build otherwise. New user-visible
   text means a new key in `strings/da.json` *and* `strings/en.json` — a test asserts the two files agree.
-- **Eligibility is defined once** (`ELIGIBLE_OPEN_IDS`). Never write a second version of it.
+- **Eligibility is defined once.** Five named gates in `src/queries.mjs` — `GATE.open/capable/role/available/free`
+  — composed into `eligiblePredicate`, which `ELIGIBLE_OPEN_IDS`, the claim guard, the planner's candidate list
+  and auto-roster all build on. The gates are named individually so the two "why is this empty" explanations can
+  relax them one at a time without a second copy of the rule. Never write a second version of it.
+- **A string that explains WHY something is the case must be justified** in `test/claims.test.mjs`. Three shipped
+  confidently wrong; a false explanation renders exactly as well as a true one, so no test catches it.
 - **Silence is not consent** — absence of an availability answer means unavailable.
 - **Every increment adds tests that would fail without it.** A test that passes before the change tests
   nothing.
@@ -184,5 +270,8 @@ what leaves the box, final read of every user-visible string in both locales.
 | Clock times for the Wed/Sun pattern | `19:00` and `15:00` in `config/pattern.json` | B |
 | `board.cutoffDays` (spec Q18) | `2` | D |
 | "Active volunteer" = current season or longer? | current season | G |
-| Whether swap (named two-party exchange) is wanted at all | not built — the open board likely absorbs it | after D lands |
+| Whether swap (named two-party exchange) is wanted at all | not built — the open board likely absorbs it | after D lands; **still open** |
 | NextCloud OIDC issuer, client id, redirect URI | dev provider | any real deployment |
+| How long a shift runs | `calendar.eventMinutes: 90` — invented | before volunteers subscribe to the calendar |
+| The department's time zone | `Europe/Copenhagen` — **not** invented, and load-bearing for the feed | before another department deploys |
+| The address the instance answers on | `FOURWATER_BASE_URL` unset — invite and calendar links then render as paths | before an admin emails an invitation |

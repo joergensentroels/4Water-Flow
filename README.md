@@ -40,8 +40,16 @@ staleness the spreadsheet already fights. Only `confirmed` counts — an auto-ro
 not locked in is not something the volunteer has done.
 
 **3. Eligibility is defined once.**
-`ELIGIBLE_OPEN_IDS` in `src/queries.mjs` is shared by the board listing and the claim guard. Two copies
-would drift, and the drift is not cosmetic — a volunteer could claim a slot the board never offered them.
+Five named gates in `src/queries.mjs` — is the slot open, is the person capable of the activity, does the role
+match, have they said they are free, are they already busy at that hour — composed into one predicate that the
+board listing, the claim guard, the planner's candidate list and auto-roster all build on. Two copies would
+drift, and the drift is not cosmetic: a volunteer could claim a slot the board never offered them, or a planner
+could be shown a suggestion the system would then refuse.
+
+The gates are named individually rather than written as one block because two screens have to explain
+themselves. "Nothing here you can take" and "nobody can take this" both mean *one of these five gates emptied
+the list*, and saying which one requires relaxing them one at a time — from the same definition, so an
+explanation cannot drift into contradicting the rule it describes.
 
 **4. Silence is not consent.**
 A volunteer with no availability row counts as **unavailable**, not available. Assigning someone who never
