@@ -11,6 +11,7 @@ import { sign, verify, parseCookies, cookieHeader, newCsrf, checkCsrf, sessionSe
 import { assertDevAllowed, devSignIn, oidcConfig, beginOidc, checkState, completeOidc, linkIdentity,
          createInvite, redeemInvite, revokeInvite, rolesOf, requireRole,
          discoverOidc, validateEndpoint, clearDiscoveryCache, NEXTCLOUD_FALLBACK, DISCOVERY_TTL_MS } from "../src/auth.mjs";
+import { OUTBOUND_TIMEOUT_MS } from "../src/outbound.mjs";
 
 const SECRET = "x".repeat(48);
 const db0 = () => { const db = new DatabaseSync(":memory:"); migrate(db); return db; };
@@ -265,6 +266,18 @@ test("every outbound request in the app goes through the bounded helper", () => 
     const text = readFileSync(path.join(ROOT, rel), "utf8");
     assert.match(text, /fetchBounded\(/, `${rel} imports the bound but never calls it`);
   }
+});
+
+// Written because it caught me twenty minutes after I wrote the doc. RUNBOOK quotes the error message an
+// operator will grep for; I then moved the bound from notify.mjs's own 10s to the shared 8s and the quoted
+// string was silently wrong. Prose fails exactly like code and never gets re-executed — same shape as the
+// three UI strings that asserted false causes, and the reason the Node floor has a test of its own.
+test("the timeout the RUNBOOK quotes is the timeout the code applies", () => {
+  const runbook = readFileSync(path.join(ROOT, "RUNBOOK.md"), "utf8");
+  const quoted = runbook.match(/did not answer within (\d+)s/);
+  assert.ok(quoted, "RUNBOOK should show the message an operator will see in notifications.error");
+  assert.equal(Number(quoted[1]), OUTBOUND_TIMEOUT_MS / 1000,
+    `RUNBOOK says ${quoted[1]}s, the code says ${OUTBOUND_TIMEOUT_MS / 1000}s`);
 });
 
 test("state is compared safely and a mismatch fails", () => {
