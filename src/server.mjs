@@ -554,7 +554,12 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       try { oidcState = { enabled: true, ...(await discoverOidc(oidc)) }; }
       catch (e) { oidcState = { enabled: true, source: "fallback", error: e.message }; }
     }
-    const status = collectStatus(db, { pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState });
+    // `channel` only — never the webhook, whose path is the credential. The page needs to know whether one is
+    // configured so it does not tell an operator "no webhook is configured" while one plainly is.
+    const status = collectStatus(db, {
+      pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState,
+      notify: { channel: notifyConfig(env).channel },
+    });
     send(res, 200, renderStatus({ t, session: c.session, roles: c.roles, who: c.who, status }));
   });
 

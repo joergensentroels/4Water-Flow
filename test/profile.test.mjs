@@ -261,3 +261,37 @@ test("the status page says whether sign-in read the provider's endpoint list", w
   assert.match(page, /returned 404/, "with the reason, or nobody can fix it");
   assert.match(page, /class="status warn"/, "and carry the warning level a reader can see");
 }));
+
+// A queued message means two very different things depending on whether a webhook exists, and the old wording
+// asserted one of them unconditionally: "(no webhook is configured)". notify.mjs writes the row as queued
+// BEFORE calling the webhook, so a process killed between the two — a container restart, a reboot — leaves
+// queued rows on an instance whose webhook is perfectly fine. The operator would then go and check a setting
+// that was never the problem.
+test("the queued-messages line follows the configuration, instead of asserting it", withWorld({}, async (w) => {
+  const base = { pattern: w.pattern, today: w.today, backupDir: null };
+  const queue = (channel) => w.db.prepare(`INSERT INTO notifications (kind, person_id, channel, body, status, created_at)
+                                           VALUES ('slot_open', NULL, ?, 'x', 'queued', '2026-05-20T10:00:00Z')`).run(channel);
+  const t = makeT("en");
+  const render = (notify) => renderStatus({
+    t, session: { csrf: "x" }, roles: ["planner"], who: "P",
+    status: collectStatus(w.db, { ...base, notify }),
+  }).__raw;
+
+  // No webhook: queueing is by design, so it stays a note and says why.
+  queue("outbox");
+  const outbox = render({ channel: "outbox" });
+  assert.match(outbox, /no chat webhook is configured/);
+  assert.match(outbox, /class="status ok"/, "queueing by design is not a warning");
+
+  // A webhook IS configured and rows are still queued: the honest reading is an interrupted send, and the page
+  // must not claim the opposite of the configuration it can see.
+  const withHook = render({ channel: "mattermost" });
+  assert.ok(!/no chat webhook is configured/.test(withHook),
+    "telling an operator there is no webhook while one is configured sends them to fix the wrong thing");
+  assert.match(withHook, /never confirmed as sent/);
+  assert.match(withHook, /class="status warn"/, "an interrupted send deserves a warning, not a note");
+
+  // With nothing queued, neither wording is an alarm.
+  w.db.prepare("DELETE FROM notifications").run();
+  assert.match(render({ channel: "mattermost" }), /class="status ok"/);
+}));

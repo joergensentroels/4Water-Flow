@@ -225,13 +225,16 @@ test("the outbox says so when nothing was actually delivered, and does not touch
   const outbox = listOutbox(w.db);
 
   const undelivered = renderOutbox({ t, roles: ["planner"], who: "P", outbox, webhookConfigured: false }).__raw;
-  assert.match(undelivered, /nothing here was actually delivered/, "silence about this is how a planner assumes people were told");
+  // Scoped to the rows still marked not-sent. The first version of this asserted "nothing here was actually
+  // delivered", which the page can disprove by itself: remove a webhook, or keep older history, and there are
+  // 'sent' rows in the list right underneath the banner.
+  assert.match(undelivered, /was not delivered to anyone/, "silence about this is how a planner assumes people were told");
   assert.match(undelivered, /please answer/, "the body is the point of the page");
 
   // With a webhook configured the warning goes away — and either way the URL is never in the page, because it
   // never reaches the render function at all.
   const delivered = renderOutbox({ t, roles: ["planner"], who: "P", outbox, webhookConfigured: true }).__raw;
-  assert.ok(!/nothing here was actually delivered/.test(delivered));
+  assert.ok(!/was not delivered to anyone/.test(delivered));
   for (const page of [undelivered, delivered]) {
     assert.ok(!page.includes("SECRET"), "a webhook URL must never reach the outbox page");
     assert.ok(!page.includes("/hooks/"));
@@ -257,5 +260,24 @@ test("the outbox filters by status, and reports what it did not show", () => {
   assert.equal(capped.truncated, 6);
   assert.match(renderOutbox({ t, roles: ["planner"], who: "P", outbox: capped, webhookConfigured: true }).__raw,
     /6 older messages are not shown/);
+  w.db.close();
+});
+
+// The banner used to say "nothing here was actually delivered" whenever no webhook was configured. But the page
+// can show 'sent' rows from a period when one existed — remove the webhook, or keep older history, and the
+// banner contradicts the list directly beneath it, where rows are plainly marked Sent. It now claims only what
+// is true regardless of history: the ones still marked not-sent went nowhere.
+test("the no-webhook banner does not contradict the rows underneath it", () => {
+  const w = world();
+  const ins = w.db.prepare(`INSERT INTO notifications (kind, person_id, channel, body, status, created_at)
+                            VALUES ('slot_open', NULL, ?, ?, ?, '2026-05-20T10:00:00Z')`);
+  ins.run("mattermost", "this one really did go out", "sent");
+  ins.run("outbox", "this one did not", "queued");
+
+  const page = renderOutbox({ t, roles: ["planner"], who: "P", outbox: listOutbox(w.db), webhookConfigured: false }).__raw;
+  assert.match(page, /Sent/, "a delivered row is on the page");
+  assert.ok(!/nothing here was actually delivered/.test(page),
+    "so the banner must not claim otherwise — it would be visibly wrong on its own page");
+  assert.match(page, /still marked/, "it names the rows it is actually talking about");
   w.db.close();
 });

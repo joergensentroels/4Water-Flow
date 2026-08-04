@@ -11,7 +11,7 @@ import { layout, csrfField, navFor } from "../views.mjs";
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-export function collectStatus(db, { pattern, today, backupDir, oidc = null }) {
+export function collectStatus(db, { pattern, today, backupDir, oidc = null, notify = null }) {
   const seasonRow = db.prepare("SELECT id, from_date AS from_, to_date AS to_ FROM seasons WHERE key=?").get(pattern.season.key);
   const facts = [];
 
@@ -57,9 +57,18 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null }) {
   const failed = db.prepare("SELECT COUNT(*) n FROM notifications WHERE status='failed'").get().n;
   const queued = db.prepare("SELECT COUNT(*) n FROM notifications WHERE status='queued'").get().n;
   facts.push({ key: "failed", value: failed, level: failed === 0 ? "ok" : "bad" });
-  // Queued is NOT a failure: with no webhook configured every message queues by design. It is only worth
-  // flagging as unread work, which is why it is a note rather than an alarm.
-  facts.push({ key: "queued", value: queued, level: "ok" });
+  // Queued is NOT a failure when there is no webhook: every message queues by design and a planner reads them
+  // in the outbox. But the old wording asserted "(no webhook is configured)" unconditionally, and that can be
+  // FALSE: notify.mjs writes the row as queued BEFORE calling the webhook, so a process killed between the two
+  // — a container restart, a reboot — leaves queued rows on an instance whose webhook is perfectly fine. The
+  // operator would then go and check a setting that was never the problem, while the real story is a send that
+  // was interrupted and may or may not have arrived. Different sentence, and a warning rather than a note.
+  const interrupted = notify?.channel && notify.channel !== "outbox";
+  facts.push({
+    key: "queued", value: queued,
+    note: interrupted ? "interrupted" : "no_webhook",
+    level: queued > 0 && interrupted ? "warn" : "ok",
+  });
 
   // ---- backups ----
   let newest = null;
@@ -104,7 +113,7 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
       gaps: () => t("status.gaps", { n: f.value, of: f.detail }),
       silent: () => t("status.silent", { n: f.value, of: f.detail }),
       failed: () => t("status.failed", { n: f.value }),
-      queued: () => t("status.queued", { n: f.value }),
+      queued: () => t(f.note === "interrupted" ? "status.queuedInterrupted" : "status.queued", { n: f.value }),
       backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { hours: f.value, kept: f.detail }),
       oidc: () => f.note === "discovery" ? t("status.oidcDiscovery") : t("status.oidcFallback", { why: f.detail }),
     }[f.key];
