@@ -1,15 +1,30 @@
-# 4water scheduling — slice 1 (data layer)
+# 4water Flow
 
-Volunteer scheduling for 4water. This is **slice 1 only**: schema, seeding, and the vagtbørs behaviour.
-No HTTP, no login, no UI — those are later slices. Design decisions and open questions live in
-`../4water-scheduling-spec.md`.
+Volunteer scheduling for 4water: availability, a shift exchange, the plan, planning with an auto-roster, and
+administration. Phone-first, because the reported pain with the spreadsheet it replaces was "it's a nightmare
+to use on the phone". Design decisions and open questions live in `../4water-scheduling-spec.md`.
 
 ```bash
 npm test
 ```
 
-Zero dependencies. Node ≥ 22.5 for the built-in `node:sqlite`, and `node:test` for the suite. Nothing to
-install; there is no `node_modules`.
+```bash
+node tools/demo.mjs
+```
+
+That builds `demo.db` and prints how to start it with the developer sign-in enabled. `RUNBOOK.md` is the real
+deployment; `CONTRIBUTING.md` is how the code is laid out and what will trip you up.
+
+Zero dependencies. Nothing to install; there is no `node_modules`.
+
+**Node ≥ 22.13** (or ≥ 23.4 on the newer line). Not 22.5, which this file used to claim: `node:sqlite` was
+*added* in 22.5.0 but sat behind `--experimental-sqlite` until 22.13.0, so 22.5–22.12 cannot run this at all.
+`src/db.mjs` checks the version and says so, rather than dying at `No such built-in module: node:sqlite`.
+
+`node:sqlite` is **Stability 1.2, "Release candidate"** — not stable. It is what makes zero dependencies
+possible and it is the one part of this stack that could change under a Node upgrade. CI runs the suite on
+both the pinned LTS and current Node so that shows up as a red build rather than a broken deployment; see
+RUNBOOK for what to do if it ever does.
 
 ## The four decisions that shape everything else
 

@@ -156,3 +156,50 @@ test("NODE_ENV=production disables the developer sign-in even if the flag is set
     assert.ok(!/Users|FOURWATER|Error:/.test(body), `the refusal leaked internals: ${body.slice(0, 200)}`);
   } finally { b.child.kill(); await new Promise((r) => b.child.once("exit", r)); b.cleanup(); }
 });
+
+// ---- the Node floor, stated in four places (increment T) ------------------------------------------------
+// It was wrong in three of them: "22.5" is when node:sqlite was ADDED, not when it became usable without
+// --experimental-sqlite (22.13.0). On 22.5–22.12 the app cannot start at all. And package.json `engines`
+// cannot enforce anything here, because a project with no dependencies never has `npm install` run against
+// it — so the runtime check in src/db.mjs is the only thing that actually protects a deployer.
+test("every declared Node floor agrees with what node:sqlite actually needs", async () => {
+  const { MIN_NODE, nodeTooOld } = await import("../src/db.mjs");
+  const floor = MIN_NODE.join(".");
+  assert.deepEqual(MIN_NODE, [22, 13, 0], "node:sqlite is unflagged from 22.13.0; below that the import fails");
+
+  const pkg = JSON.parse(read("package.json"));
+  assert.equal(pkg.engines.node, `>=${MIN_NODE[0]}.${MIN_NODE[1]}`,
+    `package.json engines must match the runtime check (${floor})`);
+
+  // The Dockerfile pin must clear the floor. Parsed, not eyeballed, so lowering it fails here.
+  const pin = read("Dockerfile").match(/^FROM node:(\d+)\.(\d+)/m);
+  assert.ok(pin, "the Dockerfile must pin an exact Node minor");
+  const [maj, min] = [Number(pin[1]), Number(pin[2])];
+  assert.ok(maj > MIN_NODE[0] || (maj === MIN_NODE[0] && min >= MIN_NODE[1]),
+    `Dockerfile pins node:${maj}.${min}, which is below the ${floor} floor`);
+
+  // And no document may still advertise the old, wrong floor. A line may MENTION 22.5 in order to explain why
+  // it is NOT the floor — that is the useful thing to say — so the exculpatory words are listed explicitly and
+  // matched case-insensitively. The first version of this check used /not\b/ against a line reading
+  // "Not 22.5, which this file used to claim" and flagged the correction itself as the error.
+  const OLD_VERSION = /\b22\.(5|6|7|8|9|10|11|12)\b/;
+  const CLAIMS_A_FLOOR = /needs?|require|floor|>=|≥|engines/i;
+  const EXPLAINS_WHY_NOT = /\bnot\b|\buntil\b|\bbehind\b|\badded in\b|\bused to\b|\bcannot\b|\bnever\b|\bbelow\b/i;
+  for (const f of ["README.md", "RUNBOOK.md", "CONTRIBUTING.md", "Dockerfile", "package.json"]) {
+    const offending = read(f).split("\n")
+      .filter((l) => OLD_VERSION.test(l) && CLAIMS_A_FLOOR.test(l) && !EXPLAINS_WHY_NOT.test(l));
+    assert.deepEqual(offending, [], `${f} still states a Node floor below ${floor}:\n  ${offending.join("\n  ")}`);
+  }
+});
+
+test("the version guard rejects what it should and accepts what it should", async () => {
+  const { nodeTooOld } = await import("../src/db.mjs");
+  for (const v of ["22.5.0", "22.9.1", "22.12.99", "21.7.3", "20.11.0"]) {
+    assert.equal(nodeTooOld(v), true, `${v} cannot run node:sqlite unflagged and must be refused`);
+  }
+  for (const v of ["22.13.0", "22.14.0", "23.4.0", "24.18.0", "25.0.0"]) {
+    assert.equal(nodeTooOld(v), false, `${v} is fine and must not be refused`);
+  }
+  // The version this suite is running on, whatever it is, must be acceptable — otherwise the guard is lying.
+  assert.equal(nodeTooOld(process.versions.node), false);
+});

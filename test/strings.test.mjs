@@ -57,6 +57,10 @@ test("every dynamically-built key family is complete in both locales", () => {
     nav: ["home", "availability", "board", "plan", "planner", "admin"],
     // Dance roles, distinct from the app's permission roles: a slot needs a leader or a follower.
     "role.dance": ["l", "f"],
+    // Every notification kind and delivery state shown on the outbox. If a new kind is sent from jobs.mjs or
+    // server.mjs without a string here, the outbox would render "outbox.kind.whatever" at a planner.
+    "outbox.kind": ["availability_nudge", "slot_open"],
+    "outbox.status": ["queued", "failed", "sent"],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 

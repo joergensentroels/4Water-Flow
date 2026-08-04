@@ -58,6 +58,13 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 
 - **`node:sqlite` is synchronous.** `new DatabaseSync(...)`, `db.exec`, `db.prepare(...).run/get/all`. There is
   no `node:sqlite3` and no callbacks.
+- **`node:sqlite` is a release candidate (Stability 1.2), and needs Node ≥ 22.13** — added in 22.5.0 but behind
+  `--experimental-sqlite` until 22.13. `src/db.mjs` checks that at load, which is why it imports `node:sqlite`
+  dynamically and carries a top-level await. `package.json` `engines` cannot enforce it: a project with no
+  dependencies never has `npm install` run against it, so nothing ever reads that field.
+- **`db.prepare()` will not mix `?` and `:named` parameters in one statement.** Pick one per query. Mixing them
+  fails at bind time with "Provided value cannot be bound to SQLite parameter N", which reads like a type error
+  and is not one.
 - **Availability is keyed by DATE, not season**, so `ON DELETE CASCADE` does not reach it. Anything that deletes
   a season must sweep it — see `pruneSeasons`.
 - **The clock is injected** (`buildApp({ today })`). Do not call `new Date()` in a handler; three separate calls

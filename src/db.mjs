@@ -1,5 +1,30 @@
 // Schema and migration. Node's built-in SQLite only — no npm dependencies anywhere in this project.
-import { DatabaseSync } from "node:sqlite";
+//
+// `node:sqlite` arrived in Node 22.5.0 but stayed behind --experimental-sqlite until 22.13.0 (and 23.4.0 on
+// the other line), so 22.5 is NOT a floor this app can run on — the docs said it was, and on 22.5–22.12 the
+// app dies at import with "No such built-in module: node:sqlite" and no hint about why.
+//
+// package.json `engines` cannot help here: this project has no dependencies, so nobody ever runs `npm
+// install`, so nothing ever reads it. A version declared only in a file no tool opens is a wish. Hence a real
+// check, before the import that would otherwise fail cryptically — which is why the import is dynamic and
+// this module carries a top-level await.
+export const MIN_NODE = [22, 13, 0];
+
+export function nodeTooOld(version = process.versions.node) {
+  const [maj, min, pat] = version.split(".").map((n) => parseInt(n, 10) || 0);
+  const [rMaj, rMin, rPat] = MIN_NODE;
+  if (maj !== rMaj) return maj < rMaj;      // 23.x and 24.x are fine; only the 22 line has the flag cutoff
+  if (min !== rMin) return min < rMin;
+  return pat < rPat;
+}
+
+if (nodeTooOld()) {
+  throw new Error(
+    `4water Flow needs Node ${MIN_NODE.join(".")} or newer; this is ${process.versions.node}.\n` +
+    `node:sqlite exists from 22.5.0 but was behind --experimental-sqlite until 22.13.0, so it cannot be used here.`,
+  );
+}
+const { DatabaseSync } = await import("node:sqlite");
 
 export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
   const db = new DatabaseSync(file);

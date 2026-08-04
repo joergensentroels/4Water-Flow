@@ -163,12 +163,52 @@ li.status.warn > b { color: #a86a12; }
 li.status.bad > b { color: var(--no); }
 @media (prefers-color-scheme: dark) { li.status.warn > b { color: #e0b062; } }
 
+/* The outbox. Message bodies are the point of the page, so they get room to breathe and a left rule carrying
+   the delivery state — never colour alone, since the state is also written out in words on the meta line. */
+ul.outbox { list-style: none; margin: 0; padding: 0; }
+ul.outbox > li { border-left: 4px solid var(--line); background: var(--card); border-radius: .3rem;
+  padding: .6rem .8rem; margin: 0 0 .6rem; }
+li.outboxitem.ok   { border-left-color: var(--yes); }
+li.outboxitem.warn { border-left-color: #a86a12; }
+li.outboxitem.bad  { border-left-color: var(--no); }
+@media (prefers-color-scheme: dark) { li.outboxitem.warn { border-left-color: #e0b062; } }
+.outboxmeta { margin: 0 0 .35rem; color: var(--muted); font-size: .82rem; }
+.outboxmeta b { color: var(--fg); }
+/* pre-wrap because a nudge is a written message with its own line breaks, and reflowing it would misrepresent
+   what would actually be posted. Wrapped, not scrolled: this must stay readable on a phone. */
+.outboxbody { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+
+/* Filter chips (the planner's horizon). Separate from nav.tabs because these are filters within a page, not
+   navigation between pages — but the sizing rule is the same one: WCAG 2.2 SC 2.5.8 wants at least 24x24 CSS
+   px per target, and these were 17px-tall inline links a single space apart. 40px with a .5rem gap clears it
+   outright rather than relying on the "inline in a sentence" exception. */
+.chiprow { display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0 1rem; }
+.chiprow .chip {
+  display: inline-grid; place-items: center;
+  min-height: 40px; padding: 0 .85rem;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--card); color: var(--fg);
+  text-decoration: none; font-size: .9rem;
+}
+.chiprow .chip[aria-current] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+.chiprow .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
 /* Labelled fields on the profile and admin forms. */
 label { display: block; margin: .6rem 0; font-size: .9rem; color: var(--muted); }
 label input, label select { display: block; width: 100%; margin-top: .25rem; min-height: var(--tap);
   padding: 0 .6rem; font: inherit; color: var(--fg); background: var(--bg);
   border: 1px solid var(--edge); border-radius: .5rem; }
 label input:focus-visible, label select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* A select that is NOT inside a <label> — the planner's "who takes this slot" dropdown, which is the single
+   most-used control on the busiest screen. The sizing rule above is scoped to `label select`, so that one was
+   rendering 19px tall while --tap: 48px sat at the top of this file claiming every interactive target is at
+   least that. Measured, not noticed: 117x19. No width/display here, so the planner's inline row keeps its
+   layout — only the height and the boundary change. */
+select { min-height: var(--tap); max-width: 100%; padding: 0 .6rem;
+  font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--edge); border-radius: .5rem; }
+select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 
 /* Checkbox lists (activities in a timeslot) read as a row of choices, not a stack of full-width fields. */
 label.inline { display: inline-flex; align-items: center; gap: .4rem; width: auto;

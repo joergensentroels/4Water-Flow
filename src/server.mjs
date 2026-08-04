@@ -7,8 +7,8 @@ import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
          linkIdentity, redeemInvite, createInvite, revokeInvite } from "./auth.mjs";
-import { layout, navFor, formatDate, formatTime, renderErrorPage, renderPrivacy } from "./views.mjs";
-import { slotOpenMessage } from "./notify.mjs";
+import { layout, navFor, formatDate, formatTime, formatRole, renderErrorPage, renderPrivacy } from "./views.mjs";
+import { slotOpenMessage, notifyConfig } from "./notify.mjs";
 import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailability, bulkTargets } from "./pages/availability.mjs";
 import { renderHome, renderPlan } from "./pages/plan.mjs";
 import { renderBoard, flashFor } from "./pages/board.mjs";
@@ -23,6 +23,7 @@ import { makeLimiter, clientKey } from "./ratelimit.mjs";
 import { erasePerson, exportPerson, exportSeasonCsv, runRetention } from "./retention.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
+import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
          eligiblePeopleFor, assignSlot, unassignSlot } from "./queries.mjs";
@@ -255,7 +256,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // Read the slot's details BEFORE releasing it: afterwards person_id is null and the announcement would
     // have nothing to name.
     const detail = db.prepare(`
-      SELECT s.date, t.hour, t.minute, act.label
+      SELECT s.date, t.hour, t.minute, act.label, a.role
         FROM assignments a JOIN sessions s ON s.id=a.session_id
         JOIN timeslots t ON t.id=s.timeslot_id JOIN activities act ON act.id=s.activity_id
        WHERE a.id = ?`).get(id);
@@ -347,7 +348,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const id = Number(c.form.assignmentId);
     const detail = db.prepare(`
-      SELECT s.date, t.hour, t.minute, act.label
+      SELECT s.date, t.hour, t.minute, act.label, a.role
         FROM assignments a JOIN sessions s ON s.id=a.session_id
         JOIN timeslots t ON t.id=s.timeslot_id JOIN activities act ON act.id=s.activity_id
        WHERE a.id = ?`).get(id);
@@ -458,6 +459,22 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     }
     const status = collectStatus(db, { pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState });
     send(res, 200, renderStatus({ t, session: c.session, roles: c.roles, who: c.who, status }));
+  });
+
+  // The outbox. Without this, every message the app composes with no webhook configured — which is the default
+  // — went into a table nobody could read, and /status could only report the count.
+  app.get("/outbox", ({ req, res, query }) => {
+    const c = gate({ req, res }, "planner");
+    if (!c) return;
+    const wanted = query.get("status");
+    const status = ["queued", "failed", "sent"].includes(wanted) ? wanted : null;
+    const outbox = listOutbox(db, { status });
+    // Derived from `channel`, never from `webhook`. The webhook URL IS the credential — its path is the
+    // secret — so it must not travel into a render function at all, not even to be tested for truthiness.
+    send(res, 200, renderOutbox({
+      t, roles: c.roles, who: c.who, outbox,
+      webhookConfigured: notifyConfig(env).channel !== "outbox",
+    }));
   });
 
   // ---- erasure, export, retention (increment N) ---------------------------------------------------------
@@ -573,7 +590,11 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       kind: "slot_open",
       body: slotOpenMessage(t, {
         when: `${formatDate(t, detail.date)} ${formatTime(detail.hour, detail.minute)}`,
-        activity: detail.label,
+        // WITH the role. Increment U put "Salsa · leader" on the board, the plan and the planner and left the
+        // announcement saying only "Salsa" — so the one place the message has to stand alone, in a chat channel
+        // away from the app, was the one place a volunteer could not tell whether it was theirs to take.
+        // formatRole returns "" for a slot with no role, so a workshop reads exactly as it did before.
+        activity: `${detail.label}${formatRole(t, detail.role)}`,
         eligible,
       }),
     });

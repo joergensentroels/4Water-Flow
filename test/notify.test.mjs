@@ -9,6 +9,7 @@ import { seedStructure, seedPeople } from "../src/seed.mjs";
 import { makeNotifier, notifyConfig, stubTransport, slotOpenMessage, nudgeMessage } from "../src/notify.mjs";
 import { isoWeek, runNudge, volunteersNeedingNudge, startJobs } from "../src/jobs.mjs";
 import { setAvailabilityDay } from "../src/queries.mjs";
+import { listOutbox, renderOutbox } from "../src/pages/outbox.mjs";
 
 const SECRET_URL = "https://chat.example.org/hooks/xxxxSECRETxxxx";
 const t = makeT("en");
@@ -190,4 +191,71 @@ test("message bodies fill their placeholders in both locales", () => {
 test("an unknown placeholder is left visible rather than blanked", () => {
   const tl = makeT("en");
   assert.match(tl("notify.nudge", { name: "X" }), /\{from\}/, "a missing value should be obvious, not silent");
+});
+
+// ---- the outbox (increment T) ----------------------------------------------------------------------------
+// The gap this closes: with MATTERMOST_WEBHOOK unset — the DEFAULT — every message is written with
+// status 'queued' and delivered to nobody, and there was no way to read one. /status could say "23 queued"
+// and that was the whole story: the app composed text no human could ever see, while the planner believed
+// the volunteers had been nudged.
+test("the outbox shows undelivered messages first, whatever order they were written in", async () => {
+  const w = world();
+  const notifier = makeNotifier({ db: w.db, config: notifyConfig({}), fetchImpl: stubTransport() });
+  await notifier.send({ kind: "availability_nudge", personId: w.people[0], period: "2026-W20", body: "first, queued" });
+  // A sent one written LATER must still sort after the queued one — newest-first would bury the actionable row.
+  w.db.prepare("INSERT INTO notifications (kind, person_id, channel, body, status, created_at) VALUES ('slot_open', NULL, 'mattermost', 'later, sent', 'sent', '2026-05-20T10:00:00Z')").run();
+  w.db.prepare("INSERT INTO notifications (kind, person_id, channel, body, status, error, created_at) VALUES ('slot_open', NULL, 'mattermost', 'later, failed', 'failed', 'connect ECONNREFUSED', '2026-05-20T11:00:00Z')").run();
+
+  const out = listOutbox(w.db);
+  assert.deepEqual(out.rows.map((r) => r.status), ["queued", "failed", "sent"],
+    "queued needs a human, failed needs a look at the webhook, sent is history");
+  assert.deepEqual(out.counts, { queued: 1, failed: 1, sent: 1 });
+  assert.equal(out.total, 3);
+  assert.equal(out.truncated, 0);
+  // A board announcement has no person; it must read as "everyone", not as a blank.
+  assert.equal(out.rows.find((r) => r.body === "later, sent").person, null);
+  assert.equal(out.rows.find((r) => r.status === "queued").person, "Volunteer 1");
+  assert.match(out.rows.find((r) => r.status === "failed").error, /ECONNREFUSED/);
+  w.db.close();
+});
+
+test("the outbox says so when nothing was actually delivered, and does not touch the webhook URL", () => {
+  const w = world();
+  w.db.prepare("INSERT INTO notifications (kind, person_id, channel, body, status, created_at) VALUES ('availability_nudge', NULL, 'outbox', 'please answer', 'queued', '2026-05-20T10:00:00Z')").run();
+  const outbox = listOutbox(w.db);
+
+  const undelivered = renderOutbox({ t, roles: ["planner"], who: "P", outbox, webhookConfigured: false }).__raw;
+  assert.match(undelivered, /nothing here was actually delivered/, "silence about this is how a planner assumes people were told");
+  assert.match(undelivered, /please answer/, "the body is the point of the page");
+
+  // With a webhook configured the warning goes away — and either way the URL is never in the page, because it
+  // never reaches the render function at all.
+  const delivered = renderOutbox({ t, roles: ["planner"], who: "P", outbox, webhookConfigured: true }).__raw;
+  assert.ok(!/nothing here was actually delivered/.test(delivered));
+  for (const page of [undelivered, delivered]) {
+    assert.ok(!page.includes("SECRET"), "a webhook URL must never reach the outbox page");
+    assert.ok(!page.includes("/hooks/"));
+  }
+  w.db.close();
+});
+
+test("the outbox filters by status, and reports what it did not show", () => {
+  const w = world();
+  const ins = w.db.prepare("INSERT INTO notifications (kind, person_id, channel, body, status, created_at) VALUES ('slot_open', NULL, 'outbox', :b, :s, '2026-05-20T10:00:00Z')");
+  for (let i = 0; i < 5; i++) ins.run({ b: `q${i}`, s: "queued" });
+  for (let i = 0; i < 3; i++) ins.run({ b: `s${i}`, s: "sent" });
+
+  const queued = listOutbox(w.db, { status: "queued" });
+  assert.equal(queued.rows.length, 5);
+  assert.ok(queued.rows.every((r) => r.status === "queued"));
+  assert.equal(queued.counts.sent, 3, "the counts describe everything, not just the filtered view");
+
+  // Truncation must be stated. A page showing 2 of 8 without saying so reads as "that is all of them", which
+  // is exactly the false reassurance this whole page exists to remove.
+  const capped = listOutbox(w.db, { limit: 2 });
+  assert.equal(capped.rows.length, 2);
+  assert.equal(capped.truncated, 6);
+  assert.match(renderOutbox({ t, roles: ["planner"], who: "P", outbox: capped, webhookConfigured: true }).__raw,
+    /6 older messages are not shown/);
+  w.db.close();
 });

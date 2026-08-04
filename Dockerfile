@@ -2,7 +2,9 @@
 # department run the NextCloud box), so "whatever node:22 means today" is not a thing to depend on — a host
 # rebuild should never change the runtime under the app.
 #
-# node:sqlite needs >= 22.5. 22 is the LTS line, so security updates arrive without a major upgrade.
+# node:sqlite needs >= 22.13, NOT >= 22.5 as this comment used to say: it was added in 22.5.0 but stayed
+# behind --experimental-sqlite until 22.13.0. 22.14 clears that with room to spare, and 22 is the LTS line so
+# security updates arrive without a major upgrade. Do not lower this pin below 22.13.
 FROM node:22.14-alpine
 
 # No build step, no dependencies, nothing to compile. There is no `npm install` here because there is nothing

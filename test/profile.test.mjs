@@ -169,6 +169,35 @@ test("backup age is judged, and no backups at all is a fault", withWorld({}, asy
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }));
 
+// The outbox carries volunteers' names and the text of messages about them, so it is planner-only for the same
+// reason /status is — and reachable, since a page nobody can find is the gap it was written to close.
+test("the outbox is planner-gated, linked from status, and readable", withWorld({}, async (w) => {
+  assert.equal((await w.get("/outbox")).status, 303, "signed out goes to sign-in");
+  const volunteer = await w.signIn(w.people[1]);
+  assert.equal((await w.get("/outbox", volunteer)).status, 403,
+    "messages name other volunteers; this is not a volunteer-facing page");
+
+  const planner = await w.signIn(w.people[0]);
+  w.db.prepare(`INSERT INTO notifications (kind, person_id, channel, body, status, created_at)
+                VALUES ('availability_nudge', ?, 'outbox', 'Please tell us when you can help', 'queued', '2026-05-20T10:00:00Z')`)
+    .run(w.people[1]);
+
+  const r = await w.get("/outbox", planner);
+  assert.equal(r.status, 200);
+  const body = await r.text();
+  assert.match(body, /Please tell us when you can help/, "the message text must actually be readable");
+  assert.match(body, /Availability reminder/, "and its kind must render as words, not as outbox.kind.availability_nudge");
+  assert.ok(!/outbox\.[a-z]/i.test(body), "an untranslated key rendered on the page");
+
+  // A bad status in the query string must not break the page or become a SQL fragment.
+  assert.equal((await w.get("/outbox?status=nonsense", planner)).status, 200);
+  assert.equal((await w.get("/outbox?status=queued", planner)).status, 200);
+
+  // And it is reachable: /status links to it, because the counts there are useless without the text.
+  assert.match(await (await w.get("/status", planner)).text(), /href="\/outbox"/,
+    "a page nobody can navigate to is the gap this closed");
+}));
+
 test("the status page is planner-gated and every fact renders as a sentence", withWorld({}, async (w) => {
   assert.equal((await w.get("/status")).status, 303);
   const volunteer = await w.signIn(w.people[1]);

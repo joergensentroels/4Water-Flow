@@ -7,7 +7,9 @@
 // resembles a real 4water volunteer, because a demo database that looks like production is a demo database
 // somebody eventually mistakes for production.
 import { openDb, migrate } from "../src/db.mjs";
-import { loadPattern } from "../src/config.mjs";
+import { loadPattern, makeT } from "../src/config.mjs";
+import { nudgeMessage, slotOpenMessage } from "../src/notify.mjs";
+import { formatDate, formatTime, formatRole } from "../src/views.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { setAvailabilityDay, setAvailabilityHour, assignSlot } from "../src/queries.mjs";
 import { bootstrapAdmin } from "./bootstrap.mjs";
@@ -102,6 +104,45 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
   }
 
   // An admin who can actually sign in, plus a planner who is not an admin — the distinction the screens make.
+  // A few messages, so the outbox demonstrates itself rather than showing three zeros. One of each state,
+  // because those are the three the page must handle: queued needs a human to copy it somewhere, failed needs
+  // a look at the webhook, sent is history. With no webhook configured — the demo's state, and 4water's
+  // starting state — everything real would be 'queued'.
+  //
+  // Composed with the REAL message builders, not with prose written here. Two reasons: the demo then shows the
+  // text 4water would actually receive rather than an approximation of it, and no activity label or weekday
+  // name gets hardcoded — which test/seams.test.mjs caught when the first version of this did exactly that.
+  const dt = makeT(pattern.locale ?? "en");
+  const note = db.prepare(`INSERT INTO notifications (kind, person_id, period, channel, body, status, error, created_at)
+                           VALUES (:kind, :pid, :period, :channel, :body, :status, :error, :at)`);
+  const shown = db.prepare(`SELECT s.date, t.hour, t.minute, act.label, a.role
+                              FROM assignments a
+                              JOIN sessions s ON s.id=a.session_id
+                              JOIN timeslots t ON t.id=s.timeslot_id
+                              JOIN activities act ON act.id=s.activity_id
+                             WHERE s.season_id=? AND a.role IS NOT NULL
+                             ORDER BY s.date, a.role LIMIT 2`).all(seasonId);
+
+  note.run({ kind: "availability_nudge", pid: ids[people - 1], period: "demo", channel: "outbox",
+             body: nudgeMessage(dt, { name: NAMES[people - 1], from: dates[0], to: dates.at(-1) }),
+             status: "queued", error: null, at: `${dates[0]}T09:00:00Z` });
+  for (const [i, s] of shown.entries()) {
+    note.run({
+      kind: "slot_open", pid: null, period: null,
+      channel: i === 0 ? "outbox" : "mattermost",
+      body: slotOpenMessage(dt, {
+        when: `${formatDate(dt, s.date)} ${formatTime(s.hour, s.minute)}`,
+        activity: `${s.label}${formatRole(dt, s.role)}`,
+        eligible: 3 + i,
+      }),
+      // The second one FAILED on purpose: a webhook that has been quietly broken for a week must look
+      // different from a week with nothing to say, and the outbox is where that becomes visible.
+      status: i === 0 ? "queued" : "failed",
+      error: i === 0 ? null : "fetch failed: getaddrinfo ENOTFOUND chat.example.invalid",
+      at: `${s.date}T18:30:00Z`,
+    });
+  }
+
   // Its own roles, not config/pattern.json's — otherwise creating the admin dragged 4water's real season into
   // the demo database, sessions and all.
   const admin = bootstrapAdmin(db, { email: "demo1@example.invalid", name: NAMES[0], roles: pattern.roles });

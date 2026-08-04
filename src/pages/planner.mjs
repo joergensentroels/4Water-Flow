@@ -3,7 +3,7 @@
 //
 // It is a list of days, not a table: a real grid of 6 activities x 26 weeks cannot be read on a 375px screen,
 // and a horizontally scrolling table is the exact thing being replaced.
-import { html } from "../http.mjs";
+import { html, raw } from "../http.mjs";
 import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 const OUTCOME = {
@@ -102,9 +102,19 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
       <p class="hint">
         <a href="/planner?weeks=${weeks ?? "all"}${gapsOnly ? "" : "&gaps=1"}">${gapsOnly ? t("planner.showAll") : t("planner.showGaps")}</a>
       </p>
-      <p class="hint">${t("planner.horizon")}
-        ${[4, 12, "all"].map((wk) => html` <a href="/planner?weeks=${wk}${gapsOnly ? "&gaps=1" : ""}">${wk === "all" ? t("planner.horizonAll") : t("planner.horizonWeeks", { n: wk })}</a>`)}
-      </p>
+      <!-- Chips, not three words of underlined prose. These were inline links about 17px tall with a single
+           space between them: WCAG 2.2 SC 2.5.8 wants a target of at least 24x24 CSS px or enough spacing to
+           keep 24px circles from overlapping, and on a phone they were simply hard to hit accurately. They
+           also never showed WHICH horizon you were looking at, so the page silently lied about its own state
+           after the 4-week default was introduced. aria-current carries that for a screen reader. -->
+      <p class="hint" id="horizon-label">${t("planner.horizon")}</p>
+      <div class="chiprow" role="group" aria-labelledby="horizon-label">
+        ${[4, 12, "all"].map((wk) => {
+          const current = String(weeks ?? "all") === String(wk);
+          return html`<a class="chip" href="/planner?weeks=${wk}${gapsOnly ? "&gaps=1" : ""}"${current ? raw(' aria-current="true"') : ""}>${
+            wk === "all" ? t("planner.horizonAll") : t("planner.horizonWeeks", { n: wk })}</a>`;
+        })}
+      </div>
       ${days.map((d) => html`
         <div class="card">
           <b>${formatDate(t, d.date)}</b>

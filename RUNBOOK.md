@@ -137,6 +137,28 @@ deleting sessions would destroy assignments volunteers have already agreed to.
 | Nobody is being notified | `MATTERMOST_WEBHOOK` set? If not, messages queue in the `notifications` table rather than being lost. Check for rows with `status='failed'`. |
 | The app is up but the plan looks empty | Check the season in **Administration** — a season entirely in the past has no upcoming sessions. |
 | Container keeps restarting | `docker compose logs --tail=100 app`. A missing `FOURWATER_SECRET` is the usual cause and says so. |
+| `4water Flow needs Node 22.13.0 or newer` | Exactly what it says. See **The one dependency risk** below. |
+| `No such built-in module: node:sqlite` | Node older than 22.13. Upgrade Node; nothing else will fix it. |
+| `/status` says sign-in is "guessing NextCloud's usual addresses" | Endpoint discovery is failing. See `docs/OIDC.md` §2 — sign-in still works, but you are one NextCloud upgrade away from an outage. |
+
+## The one dependency risk
+
+This app has **no dependencies**, which removes almost every supply-chain and upgrade problem — and
+concentrates what is left into a single point: it stores everything in `node:sqlite`, Node's built-in SQLite,
+which is **Stability 1.2, "Release candidate"**. Not stable. The API is permitted to change.
+
+What that means in practice:
+
+- **Node ≥ 22.13 is required**, not 22.5 as earlier versions of these documents said. `node:sqlite` was added
+  in 22.5.0 but sat behind `--experimental-sqlite` until 22.13.0. The app checks at startup and refuses with a
+  message naming the version it found, rather than failing at an import nobody can interpret.
+- **The Dockerfile pins an exact Node minor** (currently 22.14) so a host rebuild cannot move the runtime under
+  the app. Do not relax that pin to `node:22`.
+- **CI runs the suite on both the pinned LTS and current Node.** A breaking change in `node:sqlite` therefore
+  shows up as a red build rather than as a broken deployment in the middle of a season.
+- **If it ever does break:** stay on the pinned Node version — nothing forces an upgrade — and raise it as an
+  issue. The database file is ordinary SQLite, readable by any `sqlite3` binary, so the data is never trapped
+  by this choice. That property is what makes the risk acceptable rather than reckless.
 
 ## Things that will bite if you do not know them
 

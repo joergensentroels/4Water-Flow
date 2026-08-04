@@ -4,7 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
+import { makeWorld, csrfFromCookie, makeAvailableEverywhere, waitFor } from "../tools/testkit.mjs";
+import { makeNotifier, notifyConfig, stubTransport } from "../src/notify.mjs";
 import { migrate } from "../src/db.mjs";
 import { loadPattern, validatePattern, roleSlotsFor } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
@@ -281,4 +282,41 @@ test("no path in the app produces a double booking", () => {
   assert.deepEqual(doubled, [], "someone is booked twice in one timeslot");
   assert.ok(ids.length === 6);
   db.close();
+});
+
+// The announcement is the one place the text has to stand alone — read in a chat channel, away from the app.
+// Increment U put the role on the board, the plan and the planner and left this saying only the activity, so
+// the message that most needed to say "leader" was the only one that did not.
+test("a shift-became-free announcement names the role", async () => {
+  // A real notifier, passed as a factory because it needs the database makeWorld creates. Without one,
+  // announceOpenSlot returns early and this test would pass by never announcing anything.
+  const w = await makeWorld({
+    volunteers: 3, roles: { 0: ["planner"] },
+    notifier: (db) => makeNotifier({ db, config: notifyConfig({}), fetchImpl: stubTransport(), log: { warn() {} } }),
+  });
+  try {
+    for (const p of w.people) makeAvailableEverywhere(w.db, p);
+    const roled = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                                 WHERE a.role IS NOT NULL AND s.date >= ? ORDER BY s.date LIMIT 1`).get(w.today);
+    if (!roled) return;                                  // a pattern with no partner dance has nothing to assert
+    // Give it to someone, then have a planner free it — that is the path that announces.
+    const who = w.db.prepare(`SELECT p.id FROM people p WHERE p.preferred_role IN ('l','f','b') LIMIT 1`).get().id;
+    w.db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(who, roled.id);
+
+    const cookie = await w.signIn(w.people[0]);
+    const csrf = csrfFromCookie(cookie);
+    const res = await w.post("/planner/unassign", cookie,
+      new URLSearchParams({ assignmentId: String(roled.id), expect: String(who), csrf }));
+    // Assert the action actually happened. Without this the test passed for the wrong reason once already: the
+    // POST was silently redirected to /signin and "no announcement" looked like the feature being broken.
+    assert.equal(res.headers.get("location"), "/planner?r=unassigned", "the planner must have freed the slot");
+
+    // announceOpenSlot is fired and not awaited — deliberately, so a broken webhook cannot make a volunteer's
+    // hand-back hang — which means the row can land after the response. Polling, not sleeping.
+    const sent = await waitFor(() =>
+      w.db.prepare("SELECT body FROM notifications WHERE kind='slot_open' ORDER BY id DESC LIMIT 1").get());
+    assert.ok(sent, "freeing a slot must announce it");
+    assert.match(sent.body, /leader|follower|fører|følger/,
+      `the announcement must say which role is open, got: ${sent.body}`);
+  } finally { w.close(); }
 });

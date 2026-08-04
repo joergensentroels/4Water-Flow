@@ -116,6 +116,9 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
     <ul class="statuslist">${status.facts.map(line)}</ul>
     <p class="hint">${t("status.hint")}</p>
     <p><a class="btn secondary" href="/planner?gaps=1">${t("planner.showGaps")}</a></p>
+    <!-- The counts above are useless on their own when no webhook is configured: every message queues, and
+         until this link existed there was no way to read one. -->
+    <p><a class="btn secondary" href="/outbox">${t("outbox.link")}</a></p>
     <form method="post" action="/admin/retention">${csrfField(session)}
       <p><button type="submit" class="secondary">${t("admin.retentionRun")}</button></p>
     </form>`;
