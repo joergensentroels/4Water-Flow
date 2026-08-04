@@ -57,16 +57,28 @@ Roughly 40 volunteers per department. Ordinary contact data, no special categori
 
 ## Rights, and how to actually service them
 
-- **Access / portability:** everything about one person is reachable by their `people.id`. There is no export
-  button yet; a planner can answer a request by hand from the admin screen, which is proportionate at this
-  size but is a gap if anyone asks formally.
-- **Rectification:** the admin screen; volunteers edit their own availability.
-- **Erasure:** ⚠ **not implemented.** Marking someone inactive keeps their history, which is the right default
-  for a rota but is not erasure. Deleting a person cascades to capabilities, availability and roles, and sets
-  their assignments to NULL — so history survives as "somebody" rather than being destroyed. That behaviour is
-  in the schema (`ON DELETE CASCADE` / `SET NULL`) but there is no button, and the choice between it and full
-  removal is the board's, not the developer's.
-- **Objection:** in practice, leaving the rota.
+Each of these names the route that services it, so the claim is checkable rather than a promise —
+`test/docs.test.mjs` fails if any route named here is not registered. This section previously said access had "no
+export button yet" and that erasure was "not implemented", while the gap list a few lines below already recorded
+both as closed. It contradicted itself, in the part a board reads to answer whether a subject access request can
+actually be serviced.
+
+- **Access / portability:** a volunteer downloads their own data at `GET /me/export.json`; an admin fetches
+  anybody's at `GET /admin/person/:id/export.json`. JSON, one person per file: identity, capabilities, every
+  availability answer, every assignment, and whether a calendar feed is enabled — never the credential itself. A
+  whole season is also exportable as a spreadsheet at `GET /planner/season.csv`.
+- **Rectification:** a volunteer edits their own name, contact and dance role on their own page; an admin edits
+  anyone's from Administration. Availability is always the volunteer's own.
+- **Erasure:** Administration → a person → Erase, in **two modes, because only the board can choose between
+  them.** *Anonymise* keeps who-taught-what under an unidentifiable label and strips name, contact, dance role,
+  sign-in linkage and the calendar credential — history survives as "somebody". *Remove* deletes the row, and the
+  schema's `ON DELETE CASCADE` / `SET NULL` takes capabilities, availability and roles with it while leaving the
+  assignments as unattributed. The last administrator cannot be erased, so the app cannot be locked out by a
+  deletion.
+- **Restriction:** marking someone inactive stops them being offered or assigned anything while keeping their
+  record — which is the right default for a rota, and is *not* erasure. It is listed separately here precisely
+  because this document once conflated the two.
+- **Objection:** in practice, leaving the rota; an admin marks the person inactive or erases them.
 
 ## Honest gaps
 
