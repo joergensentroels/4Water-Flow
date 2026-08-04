@@ -144,6 +144,21 @@ test("an admin can add a second slot to a day, and only future dates are created
     assert.ok(range.hi <= w.pattern.season.to);
     assert.ok(w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE date < '2026-04-01'").get().n > 0,
       "and the sessions that already existed must be undisturbed");
+
+    // The new sessions must be STAFFABLE, not merely present. This path called seedStructure and not
+    // openEverySession, so adding a class produced dates on the plan with no slots on them: nothing to claim,
+    // nothing to assign, and nothing anywhere to say why. Same defect as the fresh-deployment one, and the
+    // same missing check — the test asserted the sessions existed and stopped there.
+    const naked = w.db.prepare(`SELECT COUNT(*) n FROM sessions s
+                                 JOIN timeslots t ON t.id = s.timeslot_id
+                                WHERE t.hour=17 AND t.minute=30
+                                  AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.session_id = s.id)`).get().n;
+    assert.equal(naked, 0, `${naked} newly added session(s) have no slots — the class could never be staffed`);
+    const opened = w.db.prepare(`SELECT COUNT(*) n FROM assignments a
+                                   JOIN sessions s ON s.id = a.session_id
+                                   JOIN timeslots t ON t.id = s.timeslot_id
+                                  WHERE t.hour=17 AND t.minute=30`).get().n;
+    assert.ok(opened > 0, "adding a class must open its slots");
   } finally { w.close(); }
 });
 

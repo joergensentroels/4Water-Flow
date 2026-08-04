@@ -13,7 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { ROOT, loadPattern } from "../src/config.mjs";
+import { ROOT, loadPattern, roleSlotsFor } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
 import { bootstrapAdmin } from "../tools/bootstrap.mjs";
 import { redeemInvite, rolesOf } from "../src/auth.mjs";
@@ -59,6 +59,26 @@ test("a brand-new deployment seeds its season, not an empty shell", async () => 
       assert.equal(counts.timeslots, pattern.weekly.length);
       assert.ok(counts.sessions > 0, "and actual sessions to schedule");
       assert.equal(counts.roles, pattern.roles.length);
+
+      // POPULATED IS NOT THE SAME AS OPERABLE, and this is where that distinction was missed for the second
+      // time. The earlier version of this test stopped at "sessions > 0". A boot that created 102 sessions and
+      // zero assignment rows passed it — and produced a deployment where the shift exchange had nothing to
+      // claim, the planner nothing to assign, auto-roster nothing to propose, and /status reported "0 of 0
+      // slots unfilled", which reads as healthy.
+      const slots = db.prepare("SELECT COUNT(*) n FROM assignments").get().n;
+      assert.ok(slots > 0, "a fresh boot must open the slots, or nothing on the plan can ever be staffed");
+      const naked = db.prepare(`SELECT COUNT(*) n FROM sessions s
+                                 WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.session_id = s.id)`).get().n;
+      assert.equal(naked, 0, `${naked} session(s) have no slots at all`);
+
+      // And the count matches what the pattern asks for, per session — "at least one" would pass a season that
+      // opened a leader slot for every class and never a follower.
+      const byKey = new Map(pattern.activities.map((a) => [a.key, a]));
+      const wrong = db.prepare(`SELECT act.key, s.date,
+                                       (SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id) AS slots
+                                  FROM sessions s JOIN activities act ON act.id=s.activity_id`).all()
+        .filter((r) => r.slots !== roleSlotsFor(byKey.get(r.key)).length);
+      assert.deepEqual(wrong, [], "a session with the wrong number of slots is half-staffed with nothing to show why");
     } finally { db.close(); }
   } finally { b.child.kill(); await new Promise((r) => b.child.once("exit", r)); cleanup(dir); }
 });

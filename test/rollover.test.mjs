@@ -76,9 +76,19 @@ test("rolling over starts an empty season and carries people and capabilities", 
   const fresh = w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE season_id=?").get(created.id).n;
   assert.ok(fresh > 0, "and have dates to schedule");
 
-  // ...and it starts EMPTY: no assignments, because openEverySession is not part of a rollover.
-  assert.equal(w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
-                              WHERE s.season_id=?`).get(created.id).n, 0, "a new season starts unplanned");
+  // ...and it starts UNPLANNED — which means the slots exist and nobody is in them.
+  //
+  // This used to assert that the count was ZERO, with a comment explaining that openEverySession "is not part
+  // of a rollover". That comment was not recording a decision; it was recording a BUG, and this test was what
+  // held it in place. A new season with no slots cannot be planned at all — empty shift exchange, nothing for
+  // the planner to assign, auto-roster reporting nothing to propose. Asserting the absence of those rows was
+  // asserting that the feature does not work.
+  const rows = w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              WHERE s.season_id=?`).get(created.id).n;
+  const taken = w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
+                               WHERE s.season_id=? AND a.person_id IS NOT NULL`).get(created.id).n;
+  assert.ok(rows > 0, "a new season must open its slots, or there is nothing to plan");
+  assert.equal(taken, 0, "and nobody is assigned to any of them yet — that is what unplanned means");
 
   // People and capabilities are not season-scoped, so they simply survive.
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM capabilities").get().n, capsBefore);

@@ -74,6 +74,26 @@ export function seedStructure(db, pattern, { fromDate = null } = {}) {
   catch (e) { db.exec("ROLLBACK"); throw e; }
 }
 
+// Structure AND the open slots, in one call.
+//
+// This exists because the two steps were separate and PRODUCTION ONLY EVER MADE THE FIRST ONE. A fresh
+// deployment seeded 102 sessions and zero assignments: the shift exchange had nothing to claim, the planner
+// had nothing to assign, auto-roster had nothing to propose, and /status cheerfully reported "0 of 0 slots
+// unfilled" — a working-looking app that could not do the one thing it exists for. The same hole was in the
+// admin's config edit (add a Thursday class, get sessions with no slots) and in the season rollover.
+//
+// This is the SECOND time this class of defect shipped. The first fix added seedStructure to boot and stopped
+// one step short of the rows that make a plan operable, and the test written to catch it asserted
+// `sessions > 0` and never `assignments > 0` — structure, not usability. So the fix is not another reminder to
+// call both: it is one function, so that calling half of it is no longer expressible.
+export function seedSeason(db, pattern, { fromDate = null } = {}) {
+  const { seasonId, sessions } = seedStructure(db, pattern, { fromDate });
+  // Not scoped by fromDate on purpose: any session in this season that lacks its slots gets them, which also
+  // repairs a database seeded by a version that created sessions and no assignments.
+  const slots = openEverySession(db, seasonId, pattern);
+  return { seasonId, sessions, slots };
+}
+
 // Demo people + capabilities + one empty assignment per session, so there is an actual vagtbørs to look at.
 // `names` is passed in; this function invents no one.
 export function seedPeople(db, seasonId, people) {

@@ -10,7 +10,7 @@ import { openDb, migrate } from "../src/db.mjs";
 import { loadPattern, makeT } from "../src/config.mjs";
 import { nudgeMessage, slotOpenMessage } from "../src/notify.mjs";
 import { formatDate, formatTime, formatRole } from "../src/views.mjs";
-import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
+import { seedSeason, seedPeople } from "../src/seed.mjs";
 import { setAvailabilityDay, setAvailabilityHour, assignSlot } from "../src/queries.mjs";
 import { bootstrapAdmin } from "./bootstrap.mjs";
 
@@ -63,7 +63,9 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }
   }
-  const { seasonId } = seedStructure(db, pattern);
+  // seedSeason, so the demo builder cannot drift from what a real boot does — the whole point of that function
+  // is that "structure but no slots" is no longer a state anyone can reach by forgetting a call.
+  const { seasonId, slots: opened } = seedSeason(db, pattern);
   const keys = pattern.activities.map((a) => a.key);
 
   // Deterministic spread of capabilities — no randomness, so the demo looks the same every time and a
@@ -74,8 +76,6 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
     preferredRole: ["l", "f", "b"][i % 3],
     can: [keys[i % keys.length], keys[(i + 1) % keys.length]],
   })));
-  const opened = openEverySession(db, seasonId, pattern);
-
   const dates = db.prepare("SELECT DISTINCT date FROM sessions WHERE season_id=? ORDER BY date").all(seasonId).map((r) => r.date);
   // Three deliberate shapes, because they are the states the screens must handle:
   //   - most people answer most dates

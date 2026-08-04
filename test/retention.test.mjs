@@ -233,11 +233,11 @@ test("the season CSV quotes every field so a comma or apostrophe cannot shift a 
 
   const csv = exportSeasonCsv(w.db, w.seasonId);
   const lines = csv.trim().split("\r\n");
-  assert.equal(lines[0], '"date","time","activity_key","activity","person","state"');
+  assert.equal(lines[0], '"date","time","activity_key","activity","role","person","state"');
   assert.match(csv, /"O'Brien, ""Bo"""/, "internal quotes must be doubled, not dropped");
   // Every row must have the same number of fields as the header, which is the thing bad quoting breaks.
   const fields = (line) => (line.match(/"(?:[^"]|"")*"/g) ?? []).length;
-  for (const line of lines) assert.equal(fields(line), 6, `wrong field count: ${line}`);
+  for (const line of lines) assert.equal(fields(line), 7, `wrong field count: ${line}`);
   assert.ok(csv.endsWith("\r\n"), "spreadsheets expect CRLF line endings from a .csv");
 }));
 
@@ -261,4 +261,30 @@ test("running retention from the admin screen reports what it removed", withAdmi
   const { body } = await w.follow(r, admin);
   assert.match(body, /removed 1 messages|1 beskeder/, "a silent clean-up is indistinguishable from a broken one");
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n, 0);
+}));
+
+// A partner-dance class opens one slot per role, so this export emits TWO rows with the same date, time and
+// activity. Without the role column they are indistinguishable — and for an unfilled pair that means two
+// identical rows with an empty person, which reads as a duplicated line in whatever spreadsheet it lands in.
+test("the season CSV distinguishes the two halves of a class", withAdmin({}, async (w) => {
+  const pair = w.db.prepare(`SELECT s.id, s.date, act.key,
+                                    (SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id) AS slots
+                               FROM sessions s JOIN activities act ON act.id=s.activity_id
+                              WHERE s.season_id=? AND slots > 1 LIMIT 1`).get(w.seasonId);
+  if (!pair) return;                              // a config with no multi-role activity has nothing to assert
+
+  const csv = exportSeasonCsv(w.db, w.seasonId);
+  const header = csv.split("\r\n")[0].split(",").map((f) => f.replace(/"/g, ""));
+  const roleAt = header.indexOf("role");
+  assert.ok(roleAt >= 0, "there must be a role column");
+
+  // The rows for that one session: same date, same activity, different roles, and none of them identical.
+  const cells = (line) => (line.match(/"(?:[^"]|"")*"/g) ?? []).map((f) => f.slice(1, -1).replace(/""/g, '"'));
+  const rows = csv.split("\r\n").slice(1).filter(Boolean).map(cells)
+    .filter((r) => r[0] === pair.date && r[2] === pair.key);
+  assert.equal(rows.length, pair.slots, "one row per slot");
+  const roles = rows.map((r) => r[roleAt]).sort();
+  assert.deepEqual(roles, ["f", "l"], "raw l/f, not a translation — a data export must not change with the locale");
+  assert.equal(new Set(rows.map((r) => r.join("|"))).size, rows.length,
+    "no two rows for one session may be identical, or the file looks like it has duplicates");
 }));

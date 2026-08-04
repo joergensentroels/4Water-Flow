@@ -18,7 +18,7 @@ import { renderAdmin, adminFlash } from "./pages/admin.mjs";
 import { peopleWithDetail, invitesWithDetail, setRole, setCapability, setPersonStatus,
          savePattern, patternFromForm, addActivityToForm, proposeNextSeason,
          addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "./admin.mjs";
-import { seedStructure } from "./seed.mjs";
+import { seedSeason } from "./seed.mjs";
 import { makeLimiter, clientKey } from "./ratelimit.mjs";
 import { erasePerson, exportPerson, exportSeasonCsv, runRetention } from "./retention.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
@@ -599,7 +599,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // Every config edit goes through validate-then-atomic-write, then reloads in this process.
   const applyPattern = (next, res, { fromDate = null, okCode = "saved" } = {}) => {
-    const r = savePattern(db, next, { file: patternFile, seed: (d, p) => seedStructure(d, p, { fromDate }) });
+    // seedSeason, not seedStructure: adding a timeslot used to create the sessions and none of their slots, so
+    // a newly added class appeared on the plan and could never be staffed.
+    const r = savePattern(db, next, { file: patternFile, seed: (d, p) => seedSeason(d, p, { fromDate }) });
     if (!r.ok) return redirect(res, `/admin?r=invalid&m=${encodeURIComponent(r.message)}`);
     reloadPattern(r.pattern);
     redirect(res, `/admin?r=${okCode}&n=${r.seeded?.sessions ?? 0}`);
@@ -686,8 +688,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const configFile = patternFileFor();
   if (configFile !== PATTERN_FILE) console.log(`config: ${configFile}`);
   const boot = loadPattern(configFile);
-  const { sessions } = seedStructure(db, boot);
-  if (sessions > 0) console.log(`seeded ${sessions} new session(s) for season ${boot.season.key}`);
+  const { sessions, slots } = seedSeason(db, boot);
+  if (sessions > 0 || slots > 0) {
+    console.log(`seeded ${sessions} new session(s) and ${slots} open slot(s) for season ${boot.season.key}`);
+  }
+  // A season with sessions and no slots is the shape of the bug this replaced: every screen renders, and there
+  // is nothing to claim, assign or propose. Cheap to check, and it must never be true again.
+  const naked = db.prepare(`SELECT COUNT(*) n FROM sessions s
+                             WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.session_id = s.id)`).get().n;
+  if (naked > 0) console.warn(`⚠ ${naked} session(s) have no slots — the plan will look populated and be unusable.`);
 
   // Say so loudly if nobody can get in yet, rather than serving a working-looking app that refuses everyone.
   const admins = db.prepare(`SELECT COUNT(*) n FROM person_roles pr JOIN roles r ON r.id = pr.role_id

@@ -168,6 +168,7 @@ export function exportPerson(db, personId) {
 export function exportSeasonCsv(db, seasonId) {
   const rows = db.prepare(`
     SELECT s.date, t.hour, t.minute, act.key AS activity, act.label,
+           COALESCE(a.role, '') AS role,
            COALESCE(p.name, '') AS person, a.state
       FROM sessions s
       JOIN timeslots t ON t.id = s.timeslot_id
@@ -175,16 +176,21 @@ export function exportSeasonCsv(db, seasonId) {
       LEFT JOIN assignments a ON a.session_id = s.id
       LEFT JOIN people p ON p.id = a.person_id
      WHERE s.season_id = ?
-     ORDER BY s.date, t.hour, t.minute, act.key`).all(seasonId);
+     ORDER BY s.date, t.hour, t.minute, act.key, a.role`).all(seasonId);
 
   // Quote every field and double internal quotes. A volunteer called O'Brien, or an activity label with a
   // comma in it, must not shift every later column by one.
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = ["date", "time", "activity_key", "activity", "person", "state"];
+  // `role` is not decoration. Since a partner-dance class opens one slot per role, this export emits TWO rows
+  // with the same date, time and activity — and without this column they are indistinguishable, which for an
+  // unfilled pair means two identical empty rows that read as a duplicate. Raw 'l'/'f' rather than a
+  // translation: this is a data export, and a spreadsheet somebody filters should not change wording with the
+  // locale. The value is empty for a slot whose role does not matter.
+  const header = ["date", "time", "activity_key", "activity", "role", "person", "state"];
   const lines = [header.map(esc).join(",")];
   for (const r of rows) {
     lines.push([r.date, `${String(r.hour).padStart(2, "0")}:${String(r.minute).padStart(2, "0")}`,
-                r.activity, r.label, r.person, r.state ?? ""].map(esc).join(","));
+                r.activity, r.label, r.role, r.person, r.state ?? ""].map(esc).join(","));
   }
   return lines.join("\r\n") + "\r\n";   // CRLF: what spreadsheets expect from a .csv
 }
