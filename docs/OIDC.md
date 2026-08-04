@@ -87,9 +87,13 @@ finding worth reporting, not a constant to change.
 | Unknown users are refused | Sign in as someone not on the roster | Redirected to `/signin?unknown=1`, no account created |
 | A pre-registered person is adopted | Add them in Admin with their NextCloud email first, then sign in | Signed in, linked to that existing record |
 
-That seventh row is a deliberate security property, not an oversight: **anyone in 4water's NextCloud instance
-could otherwise appear on the schedule.** An admin adds the person's email first; their first sign-in claims
-that record.
+**"Unknown users are refused" is a deliberate security property, not an oversight:** anyone in 4water's
+NextCloud instance could otherwise appear on the schedule. An admin adds the person's email first; their first
+sign-in claims that record — the last row above.
+
+(This paragraph used to open "That seventh row", which pointed at the tampered-state check two rows above the
+one it describes. An ordinal into a table is a reference that breaks the next time somebody inserts a row, and
+breaks silently, so the rows are named here instead.)
 
 ## 4. Things that will look like bugs and are not
 
@@ -99,8 +103,14 @@ that record.
   cleared and that is all. Say so if anyone asks.
 - **A NextCloud outage blocks OIDC sign-in but not invite links.** If nobody can get in, issue an invite to a
   planner as the way back — worth knowing before you need it.
-- **Sessions last 30 days.** A volunteer entering availability once a season should not be logged out
-  mid-form. The CSRF token is per-session and short-lived; that is what carries the protection.
+- **Sessions last 30 days, and the CSRF token lasts exactly as long.** A volunteer entering availability once a
+  season should not be logged out mid-form. This line used to add "the CSRF token is short-lived; that is what
+  carries the protection", which was simply untrue — the token is sixteen random bytes minted once, with no
+  timestamp, carried inside the same cookie. What carries the protection is that the cookie is `HttpOnly` and
+  signed, so the token cannot be read by script, and the CSP admits no third-party script to try; `SameSite=Lax`
+  is the second lock. Rotating the token would *break* the thing the long session is for, by invalidating the
+  form on any page left open. If you are auditing this, audit those properties — not a lifetime that was never
+  short.
 
 ## 5. If you turn this off again
 

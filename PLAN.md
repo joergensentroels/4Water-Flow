@@ -5,7 +5,7 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete, 341 tests green** — and, as of the AB increment, green on an actual `git clone`
+Status: **✅ A–AH complete, 342 tests green** — and, as of the AB increment, green on an actual `git clone`
 rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a

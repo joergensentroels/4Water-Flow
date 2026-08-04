@@ -69,6 +69,39 @@ test("CSRF: a missing, wrong, or truncated token is rejected", () => {
   assert.equal(checkCsrf({}, "anything"), false, "a session with no csrf must never validate");
 });
 
+// This exists because two documents claimed the CSRF token was "short-lived", and it never was. The comment in
+// session.mjs said it, and docs/OIDC.md used it to justify a thirty-day session — a compensating control named
+// in a security rationale, which nobody re-checked precisely because it was already written down.
+//
+// The behaviour is correct; only the prose was wrong. So this pins the behaviour, which is the part a future
+// change could break silently: the token has no expiry of its own and does not rotate, and its whole lifetime is
+// the session's. If somebody adds rotation, this test fails and sends them to the paragraphs that describe it.
+test("the CSRF token carries no lifetime of its own — it lives and dies with the session", () => {
+  // No timestamp in it. If a future version encodes one, the "no expiry of its own" claim needs revisiting.
+  const token = newCsrf();
+  assert.equal(Buffer.from(token, "base64url").length, 16, "16 random bytes, with nothing else encoded in them");
+
+  // checkCsrf is pure comparison: it takes no clock, so it cannot expire anything. Passing a session whose
+  // signed body expired long ago changes nothing — expiry is verify()'s job, one layer up.
+  const stale = { csrf: token, exp: Math.floor((Date.now() - 100 * 24 * 3600 * 1000) / 1000) };
+  assert.equal(checkCsrf(stale, token), true,
+    "checkCsrf must stay a comparison. If this ever fails, someone gave it a clock — and a token that expires " +
+    "mid-session invalidates the form on any page a volunteer left open, which is the failure the 30-day " +
+    "session exists to prevent.");
+
+  // And the session's own expiry is the only thing that ends it, at the documented thirty days.
+  // docs/OIDC.md §4 states this number to an operator, and it is the only document that does — checked, because
+  // the first version of this message said "docs/OIDC.md and RUNBOOK both state thirty days" and RUNBOOK says
+  // nothing about session length. A false claim inside the assertion message of a test written to catch false
+  // claims: worth leaving recorded rather than quietly corrected.
+  assert.equal(SESSION_MAX_AGE_S, 60 * 60 * 24 * 30, "docs/OIDC.md §4 tells an operator this is thirty days");
+  const secret = "x".repeat(32);
+  const body = verify(sign({ csrf: token }, secret), secret);
+  assert.equal(body.csrf, token, "the token is carried in the signed cookie, not stored anywhere else");
+  assert.equal(verify(sign({ csrf: token }, secret), secret, Date.now() + (SESSION_MAX_AGE_S + 60) * 1000), null,
+    "past the session's own expiry the whole cookie stops verifying, and the token goes with it");
+});
+
 // ---- the dev provider ---------------------------------------------------------------------------------
 test("the dev provider refuses to run in production or without the explicit opt-in", () => {
   assert.throws(() => assertDevAllowed({ NODE_ENV: "production", FOURWATER_AUTH: "dev" }), /never run with NODE_ENV=production/);

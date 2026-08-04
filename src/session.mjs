@@ -3,8 +3,18 @@
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 
 const COOKIE = "4w_session";
-const MAX_AGE_S = 60 * 60 * 24 * 30;    // a volunteer entering availability once a season should not be
-                                        // logged out mid-form; 30 days with a short-lived CSRF token instead
+// A volunteer entering availability once a season should not be logged out mid-form, so this is deliberately
+// long. It used to say "30 days with a short-lived CSRF token instead", which was false: `newCsrf()` is sixteen
+// random bytes with no timestamp, `checkCsrf` only compares them, and the token rides inside this same cookie
+// for the full thirty days. Nothing was ever short-lived. The sentence justified a long session by naming a
+// compensating control that did not exist — the more dangerous direction for a security comment to be wrong in,
+// because it stops the next reader looking.
+//
+// The long life is still the right call, and rotation would be the wrong fix: minting a new token mid-session
+// invalidates the form on any page a volunteer left open, which is exactly the "logged out mid-form" failure
+// this value exists to prevent. What actually protects a POST is below — SameSite=Lax plus a per-session token
+// that script cannot read.
+const MAX_AGE_S = 60 * 60 * 24 * 30;
 
 // The secret is required. Defaulting it to a constant would mean every deployment shares a forgeable
 // cookie, and the failure is invisible — so refuse to start instead.
