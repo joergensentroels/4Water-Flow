@@ -42,6 +42,17 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
 // constraint — which is exactly why `role` is nullable with the constraint declared only in CREATE TABLE.
 // New columns must be nullable or carry a default. Nothing here ever drops or renames: a migration that can
 // lose data has no business running unattended at boot.
+// Columns added after the first release, applied to databases that predate them. Adding one here AND to the
+// CREATE TABLE above is the whole procedure; test/upgrade.test.mjs checks both halves.
+//
+// ⚠ NEVER `NOT NULL` without a DEFAULT. Measured on SQLite 3.53: `ADD COLUMN x TEXT NOT NULL` is ACCEPTED on an
+// empty table and REJECTED on one with rows ("Cannot add a NOT NULL column with default value NULL"). Every test
+// database is empty when migrate() runs, so such a column would pass the entire suite and then refuse to apply to
+// 4water's live database — an upgrade that fails only in production, which is the worst place to learn it. Use
+// `NOT NULL DEFAULT ''` or leave it nullable. (`UNIQUE` is refused either way, so that one fails honestly.)
+//
+// This is why test/upgrade.test.mjs puts real rows in the fixture before simulating the old schema: the ALTER has
+// to run against a populated table, exactly as it will on the real one.
 const ADDED_COLUMNS = [
   { table: "assignments", column: "role", ddl: "ALTER TABLE assignments ADD COLUMN role TEXT" },
   // The calendar subscription's credential, stored only as a SHA-256 hash — a copy of this database must not
