@@ -157,6 +157,27 @@ deleting sessions would destroy assignments volunteers have already agreed to.
 | Danish letters in the export look like `SÃ¸ren` | That would mean the byte-order mark is missing from the file. The export writes one deliberately, because a downloaded `.csv` is read from disk where the response's `charset=utf-8` cannot help, and without the mark a spreadsheet on Windows decodes it in the system codepage. If you see this, the file has been re-saved by something in between — check whatever opened it first. |
 | The plan looks lopsided after auto-roster | Open **How the season is spread** on the planning screen. It lists everyone busiest-first, flags anyone whose shifts nearly all fall on one weekday, and names the volunteers who have been given nothing. See **Is the auto-roster fair?** below. |
 
+## What version is this, and what would make it 1.0.0
+
+**`1.0.0-rc.1`.** `/status` shows it as its last line, which is the answer to the first question any support
+conversation asks. It is also the only thing that reads `package.json` at runtime.
+
+The suffix is deliberate and is the honest part. The app is feature-complete, covered by 330 tests that pass on a
+clean `git clone`, and every mechanically checkable claim in these documents is verified by a test. None of that
+is the same as having worked. **Four things have never happened**, and each is a release-blocker rather than a
+nice-to-have:
+
+1. **The container image has never been built.** Verified as far as is possible without a runtime — the copied
+   file set boots the real entry point, the base tag is checked against the Node floor — but not built.
+2. **Sign-in has never spoken to 4water's NextCloud.** It runs end to end against a conforming provider. Work
+   through `docs/OIDC.md` on the real instance; invite links need none of this and work today.
+3. **No volunteer has used it.** Every usability judgement is reasoned from the reported pain, not observed.
+4. **Three configuration values are invented** — the clock times, the hand-back cutoff, and the shift length.
+   They are marked as placeholders in `config/pattern.json` and only 4water can answer them.
+
+Call it 1.0.0 when a season has actually been planned in it. Until then the suffix is telling whoever inherits
+this the truth, and the truth is useful: it says which parts to be suspicious of first.
+
 ## Is the auto-roster fair?
 
 Measured, on a full 26-week season seeded from nothing: 178 slots, twelve volunteers with deliberately uneven

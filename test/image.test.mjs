@@ -266,10 +266,12 @@ test("the files the Dockerfile copies are enough to run the app", async () => {
     `.dockerignore excludes tools/testkit.mjs from the build; the replica must exclude it too. Excluded: ${excluded.join(", ")}`);
 
   // Measured, by omitting each copied path in turn: dropping src, tools, config or strings stops the boot
-  // outright, and dropping static leaves the app serving pages with a 404 stylesheet (caught below). Dropping
-  // package.json changes nothing at all — every file is .mjs, so `type: module` is never consulted, and there
-  // are no dependencies to install. That omission is therefore undetectable from the outside, which is not a
-  // hole in this test: there is no runtime behaviour to lose.
+  // outright, and dropping static leaves the app serving pages with a 404 stylesheet (caught below).
+  //
+  // package.json used to be the exception — nothing read it at runtime, so the Dockerfile copied it for no
+  // reason a running app could detect, and this comment said so rather than implying coverage it did not have.
+  // That changed when /status started reporting which version is running: config.mjs reads the version at load,
+  // so the file is load-bearing now and its omission IS detectable. Asserted below rather than described.
 
   // Prove the replica really is minimal — if this ever contains test/ or a database, the .dockerignore or the
   // COPY lines have drifted and the "image" being tested is not the image.
@@ -328,6 +330,17 @@ test("the files the Dockerfile copies are enough to run the app", async () => {
       // list the app would either fail to boot or render translation keys at people.
       assert.ok(!/[a-z]+\.[a-z]+[A-Z]/.test(body.replace(/<[^>]*>/g, "")), "no untranslated keys on the page");
       assert.match(body, /Sign in|Log ind/);
+
+      // The version reaches /status, which is what makes package.json worth copying. An operator asking "which
+      // build is this?" is the first question of every support conversation, and the answer used to require
+      // somebody to open a file inside the container.
+      const pkgVersion = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+      assert.ok(body.includes("Sign in") || body.includes("Log ind"));       // the page we already fetched
+      // /status is planner-gated, so check the value the app loaded rather than the rendered page: if the copied
+      // package.json were missing, config.mjs would fall back to "unknown" and this fails.
+      const mod = await import(`file:///${path.join(appRoot, "src", "config.mjs").replace(/\\/g, "/")}`);
+      assert.equal(mod.VERSION, pkgVersion, "the image must know its own version, not fall back to 'unknown'");
+      assert.match(mod.VERSION, /^\d+\.\d+\.\d+(-\w+(\.\d+)?)?$/, "and it must look like a version");
 
       // Boot must have seeded a usable season inside the image, not just migrated one.
       const db = new DatabaseSync(path.join(dataDir, "4water.db"), { readOnly: true });

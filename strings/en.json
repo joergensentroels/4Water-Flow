@@ -188,6 +188,7 @@
   "profile.roles": "Roles",
   "status.title": "Status",
   "status.hint": "This page answers the questions people have when something looks wrong.",
+  "status.version": "Running version {version}.",
   "status.seasonCurrent": "Season {key} is running and ends {until}.",
   "status.seasonEnded": "Season {key} ended {ended}. That is why the plan looks empty — create the next season under Administration.",
   "status.seasonFuture": "Season {key} has not started yet; it begins {starts}.",

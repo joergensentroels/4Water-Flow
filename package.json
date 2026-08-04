@@ -1,6 +1,6 @@
 {
   "name": "4water-scheduling",
-  "version": "1.0.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "description": "Volunteer scheduling for 4water: availability, a shift exchange, planning and auto-rostering. Zero dependencies.",

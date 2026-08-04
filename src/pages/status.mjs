@@ -7,6 +7,7 @@ import { readdirSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
 import { html } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
+import { VERSION } from "../config.mjs";
 
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
 // How many unanswered volunteers to name before falling back to a count. Enough to act on, few enough that the
@@ -138,6 +139,15 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null, noti
       : { key: "oidc", level: "warn", note: "fallback", detail: oidc.error ?? "" });
   }
 
+  // ---- which build is this? ----
+  // LAST, and never a fault. My first attempt put it first, on the reasoning that it is the question every
+  // support conversation opens with — and an existing test caught it, because the season fact is deliberately
+  // first: it explains why every other fact looks empty. That ordering was reasoned before mine and is better.
+  // A version is reference information, not a diagnosis, so it belongs at the end.
+  {
+    facts.push({ key: "version", level: "ok", value: VERSION });
+  }
+
   return { facts, seasonRow };
 }
 
@@ -147,6 +157,7 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
   const line = (f) => {
     // Each fact gets its own sentence, built from the key so a new fact cannot render as a bare number.
     const text = {
+      version: () => t("status.version", { version: f.value }),
       season: () => f.note === "current" ? t("status.seasonCurrent", { key: f.value, until: f.detail })
                   : f.note === "ended" ? t("status.seasonEnded", { key: f.value, ended: f.detail })
                   : f.note === "future" ? t("status.seasonFuture", { key: f.value, starts: f.detail })

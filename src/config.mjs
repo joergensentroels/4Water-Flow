@@ -6,6 +6,21 @@ import path from "node:path";
 export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
 
+// Which build is running, read once at load and shown on /status.
+//
+// `1.0.0-rc.1`, not `1.0.0`, and the suffix is the honest part: this is feature-complete and covered by 330
+// tests, and it has never been built as a container, never spoken to a real NextCloud, and never been used by a
+// volunteer. A version number that claims otherwise is the same overstatement as a comment asserting a cause the
+// code contradicts. What makes it 1.0.0 is written in RUNBOOK.md.
+//
+// This is also the only thing that reads package.json at runtime. Until now the Dockerfile copied it for no
+// reason a running app could detect — which test/image.test.mjs said out loud rather than implying coverage it
+// did not have. Now the copy is load-bearing and that test notices if it goes missing.
+export const VERSION = (() => {
+  try { return String(readJson(path.join(ROOT, "package.json")).version || "unknown"); }
+  catch { return "unknown"; }        // a version nobody can read must not stop the app serving a schedule
+})();
+
 // One validator, used both when loading the file and when the admin screen writes it back. Two copies would
 // let the admin save a file that the next boot refuses to load — a self-inflicted outage.
 export function validatePattern(p) {

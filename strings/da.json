@@ -188,6 +188,7 @@
   "profile.roles": "Roller",
   "status.title": "Status",
   "status.hint": "Denne side svarer på de spørgsmål, man har, når noget virker forkert.",
+  "status.version": "Kører version {version}.",
   "status.seasonCurrent": "Sæson {key} er i gang og slutter {until}.",
   "status.seasonEnded": "Sæson {key} sluttede {ended}. Derfor ser planen tom ud — opret den næste sæson under Administration.",
   "status.seasonFuture": "Sæson {key} er ikke begyndt endnu; den starter {starts}.",
