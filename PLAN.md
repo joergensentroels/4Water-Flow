@@ -5,7 +5,8 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–Z complete, 307 tests green** (`npm test` — no network, no database, no setup).
+Status: **✅ A–AB complete, 316 tests green** — and, as of the AB increment, green on an actual `git clone`
+rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
 deployment that could not have worked, and why is written down there rather than left for somebody to rediscover.
@@ -44,6 +45,8 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **W** | subscribable calendar feed | UTC instants resolved through `Intl` rather than a hand-written VTIMEZONE; the link is a revocable credential stored only as a hash |
 | **X** | what a green suite could not see | a fresh deployment opened **no slots at all**; the notifier and nudge timer were never wired in production; three UI strings asserted causes that were false; invitations were never deleted; the admin screen was 953 KB |
 | **Y** | OIDC end to end, and the image's filesystem | `auth.mjs` said the callback "CANNOT be exercised without a provider", which was untrue and was itself the obstacle: a conforming provider in 90 lines proved PKCE, discovery, and three refusals. Then the same shape one layer down — `deploy.test.mjs` checked the Dockerfile's *inputs*, which cannot fail the way a build fails |
+| **AB** | the suite only ran where it was written | Three of the four tests that boot the real server — including the acceptance gate — read a file `.gitignore` excludes, so they failed with ENOENT on any clone. Invisible because there is no remote: CI has never executed once, so nobody had ever cloned it. Found by a negative control failing on its CONTROL case, which meant my harness was wrong rather than the code |
+| **AA** | the nudge job accounts for itself on `/status` | The page reported seven facts and not the one whose absence hid the worst defect here: a job with nobody to nudge and a job that is dead both produce silence. `jobs` is optional on `buildApp`, the same shape that left `notifier` out of production, so the journey test asserts the line renders on a real boot — a monitor must not carry the defect it monitors |
 | **Z** | the distribution nobody could see | `workloadSpread` was computed for the tests and shown to no one, while a planner locked in 178 proposals blind. Measuring the roster from zero found it evens COUNTS as well as availability permits — and concentrates three of four broad volunteers onto one weekday. Reported, not silently "fixed": which of those is capture and which is continuity is 4water's judgement, not mine |
 
 ## A definition of done I amended rather than met — deliberately, and here is why
@@ -149,6 +152,11 @@ up, add it there too.**
   still has to be run. Invite links are a fully working path meanwhile, and `/status` says which mode sign-in
   is in. The discovery FALLBACK is also verified live rather than only in unit tests: pointed at a provider with
   no well-known document, the app logs the failure, degrades to NextCloud's layout, and keeps working.
+- **CI has never run.** The workflow is written and correct; there is no remote, so it has never executed, and
+  "CI runs the suite on two Node versions" was stated as a fact in `RUNBOOK.md` when it was a plan. The
+  difference was not academic: until the AB increment the first run would have been red, because three tests read
+  a gitignored file. The suite is now verified against a real `git clone`, which is the closest thing to CI
+  available without a remote. **Push, and confirm the first run is green, before trusting that line.**
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
 - **Whether the auto-roster's weekday concentration is a problem is not a technical question.** Measured on a
