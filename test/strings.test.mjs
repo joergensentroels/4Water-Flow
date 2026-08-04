@@ -59,7 +59,13 @@ test("every dynamically-built key family is complete in both locales", () => {
     "role.dance": ["l", "f"],
     // Every notification kind and delivery state shown on the outbox. If a new kind is sent from jobs.mjs or
     // server.mjs without a string here, the outbox would render "outbox.kind.whatever" at a planner.
-    "outbox.kind": ["availability_nudge", "slot_open"],
+    //
+    // DERIVED from the kinds the code actually sends, not hand-kept. It was a literal list, and adding
+    // shift_reminder did not fail here — because a list of what to check cannot notice something missing from
+    // itself. That is the same defect as a CSRF audit against a list somebody has to remember to update, which
+    // this project already rejected once in test/csrf.test.mjs.
+    "outbox.kind": [...new Set(sourceFiles().flatMap((f) =>
+      [...readFileSync(f, "utf8").matchAll(/\bkind:\s*["'](\w+)["']/g)].map((m) => m[1])))],
     "outbox.status": ["queued", "failed", "sent"],
     // Every reason the shift exchange can be empty. A missing one renders "board.why.no_role_stated" at a
     // volunteer, which is worse than the bare "nothing you can take" this replaced — so the list is pinned
@@ -82,6 +88,42 @@ test("every dynamically-built key family is complete in both locales", () => {
     }
   }
   assert.deepEqual(missing, [], `incomplete key families:\n  ${missing.join("\n  ")}`);
+});
+
+// The other direction, which was unchecked: a translation nothing reads.
+//
+// The test above stops a typo rendering as its own key. This stops the opposite — a string written for a screen
+// and never wired up, or one superseded and left behind. Seven had accumulated when this was written:
+// planner.eligible ("{n} can take it") outlived by planner.eligibleFairest, admin.roleOn/roleOff outlived by the
+// "+ role" / "− role" toggles, availability.prompt by availability.intro, and slot.assigned, admin.status and
+// admin.needs by nothing at all. Dead weight is the mild reading; the serious one is that a string looking like
+// it is shown, and not being, is the same shape as workloadSpread being computed for nobody.
+//
+// It also costs somebody real effort: a translator working through da.json has no way to tell which entries
+// matter.
+test("no translation is left unread by the source", () => {
+  const source = sourceFiles().map((f) => readFileSync(f, "utf8")).join("\n");
+  const en = loadStrings("en");
+
+  // Static t("x.y") plus every dynamic family prefix — t(`weekday.${dow}`) makes every weekday.* reachable, and
+  // calling those unused would be a false positive off the same trick the family check above relies on.
+  const staticRefs = new Set([...source.matchAll(STATIC_T)].map((m) => m[1]));
+  const prefixes = [...source.matchAll(/\bt\(\s*`([^`]*)\$\{/g)].map((m) => m[1]).filter((p) => p.endsWith("."));
+  // t.weekday(dow) is a helper hung off t in config.mjs, not a t(`...`) call, so its family needs naming here.
+  if (/t\.weekday\s*=/.test(source)) prefixes.push("weekday.");
+
+  const unread = Object.keys(en).filter((key) => {
+    if (staticRefs.has(key)) return false;
+    if (prefixes.some((p) => key.startsWith(p))) return false;
+    // Some keys are referenced as bare strings in a lookup table rather than inside t() — the OUTCOME map in
+    // pages/planner.mjs is one. An exact quoted occurrence counts, but a bare substring must not: "admin.status"
+    // would otherwise be "found" inside the route path "/admin/status", because a regex dot matches a slash.
+    return !source.includes(`"${key}"`) && !source.includes(`'${key}'`);
+  });
+
+  assert.ok(staticRefs.size > 100, `only ${staticRefs.size} t() calls found — this check is not looking properly`);
+  assert.deepEqual(unread, [],
+    `these translations exist in both locales and nothing reads them:\n  ${unread.join("\n  ")}`);
 });
 
 test("no translation is an empty string or still a placeholder", () => {
