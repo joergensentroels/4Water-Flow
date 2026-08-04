@@ -8,6 +8,7 @@ import { pruneNotifications, pruneSeasons, runRetention, retentionConfig,
 import { rolesOf } from "../src/auth.mjs";
 import { setRole } from "../src/admin.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
+import { validatePattern, exportConfig, loadPattern } from "../src/config.mjs";
 
 const withAdmin = (opts, fn) => async () => {
   const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin"] }, ...opts });
@@ -232,7 +233,8 @@ test("the season CSV quotes every field so a comma or apostrophe cannot shift a 
   assignSlot(w.db, slot, w.people[1], { expectPersonId: null });
 
   const csv = exportSeasonCsv(w.db, w.seasonId);
-  const lines = csv.trim().split("\r\n");
+  assert.equal(csv[0], "﻿", "the export leads with a UTF-8 BOM — see the encoding test below");
+  const lines = csv.slice(1).trim().split("\r\n");
   assert.equal(lines[0], '"date","time","activity_key","activity","role","person","state"');
   assert.match(csv, /"O'Brien, ""Bo"""/, "internal quotes must be doubled, not dropped");
   // Every row must have the same number of fields as the header, which is the thing bad quoting breaks.
@@ -240,6 +242,76 @@ test("the season CSV quotes every field so a comma or apostrophe cannot shift a 
   for (const line of lines) assert.equal(fields(line), 7, `wrong field count: ${line}`);
   assert.ok(csv.endsWith("\r\n"), "spreadsheets expect CRLF line endings from a .csv");
 }));
+
+// This app is for a Danish organisation, so most volunteer names contain æ, ø or å — and the season export is
+// the artefact the board is most likely to open. The response says `charset=utf-8`, which is correct and
+// useless: the file is DOWNLOADED and then opened from disk, where no HTTP header exists. Without a byte-order
+// mark a spreadsheet on Windows decodes it in the system codepage, and "Søren Nørgård" measured out as
+// "SÃ¸ren NÃ¸rgÃ¥rd" — every Danish name on every row.
+test("Danish names survive the round trip a spreadsheet actually makes", withAdmin({}, async (w) => {
+  w.db.prepare("UPDATE people SET name=? WHERE id=?").run("Søren Nørgård", w.people[1]);
+  setAvailabilityDay(w.db, w.people[1], w.pattern.season.from, true);
+  const slot = w.db.prepare("SELECT id FROM assignments WHERE person_id IS NULL LIMIT 1").get().id;
+  assignSlot(w.db, slot, w.people[1], { expectPersonId: null });
+
+  const csv = exportSeasonCsv(w.db, w.seasonId);
+  const bytes = Buffer.from(csv, "utf8");
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "the file must begin with a UTF-8 BOM");
+
+  // A BOM-aware reader — which is what every spreadsheet is — gets the name back exactly.
+  const decoded = new TextDecoder("utf-8", { ignoreBOM: false }).decode(bytes);
+  assert.ok(decoded.includes("Søren Nørgård"), "a BOM-aware reader must see the real name");
+  assert.ok(!decoded.startsWith("﻿"), "and must not see the mark itself");
+
+  // Turning the BOM off reproduces the defect, so this test is measuring the fix rather than describing it.
+  const naked = exportSeasonCsv(w.db, w.seasonId, { bom: false });
+  assert.equal(Buffer.from(naked, "utf8").toString("latin1").includes("SÃ¸ren NÃ¸rgÃ¥rd"), true,
+    "without the BOM, a codepage reader mangles it — which is what this exists to prevent");
+}));
+
+test("the delimiter comes from config, and data containing it still cannot shift a column", withAdmin({}, async (w) => {
+  // A name carrying BOTH separators, so neither choice of delimiter can be safe by luck.
+  w.db.prepare("UPDATE people SET name=? WHERE id=?").run("Hansen; Kjær, Bo", w.people[1]);
+  setAvailabilityDay(w.db, w.people[1], w.pattern.season.from, true);
+  const slot = w.db.prepare("SELECT id FROM assignments WHERE person_id IS NULL LIMIT 1").get().id;
+  assignSlot(w.db, slot, w.people[1], { expectPersonId: null });
+
+  for (const delimiter of [",", ";", "\t", "|"]) {
+    const csv = exportSeasonCsv(w.db, w.seasonId, { delimiter }).slice(1);
+    const lines = csv.trim().split("\r\n");
+    assert.equal(lines[0], ["date", "time", "activity_key", "activity", "role", "person", "state"]
+      .map((h) => `"${h}"`).join(delimiter), `header must use ${JSON.stringify(delimiter)}`);
+    // Field count by quoted-run, which is delimiter-agnostic: if quoting were wrong, the name's own separator
+    // would split it and the count would climb.
+    for (const line of lines) {
+      assert.equal((line.match(/"(?:[^"]|"")*"/g) ?? []).length, 7, `${JSON.stringify(delimiter)}: ${line}`);
+    }
+    assert.ok(csv.includes('"Hansen; Kjær, Bo"'), "the name stays in one field whatever separates the columns");
+  }
+}));
+
+test("a delimiter the config cannot express is refused rather than producing an unreadable file", () => {
+  // Built from the real committed config, so this validates against the same shape a deployment loads rather
+  // than against a hand-rolled stub that might not resemble it.
+  const base = loadPattern();
+  // A quote or a newline as the separator yields a file no parser can read, and multi-character is not CSV.
+  for (const bad of ['"', "\r\n", ", ", "", "ab", 44]) {
+    assert.throws(() => validatePattern({ ...base, export: { csvDelimiter: bad } }),
+      /csvDelimiter/, `${JSON.stringify(bad)} must be refused`);
+  }
+  for (const good of [",", ";", "\t", "|"]) {
+    assert.doesNotThrow(() => validatePattern({ ...base, export: { csvDelimiter: good } }));
+  }
+  assert.throws(() => validatePattern({ ...base, export: "," }), /export must be an object/);
+
+  assert.equal(exportConfig({}).csvDelimiter, ",", "absent means the standard, so an older config keeps working");
+  assert.equal(exportConfig({ export: { csvDelimiter: ";" } }).csvDelimiter, ";");
+
+  // And the shipped config says what the comment beside it says, because a deployment's own file is the thing
+  // that decides this and a stale comment there would mislead whoever inherits it.
+  assert.equal(exportConfig(base).csvDelimiter, ";",
+    "config/pattern.json is a Danish deployment; its spreadsheets split on a semicolon");
+});
 
 test("the season CSV is planner-gated and downloads as a file", withAdmin({}, async (w) => {
   const admin = await w.signIn(w.people[0]);

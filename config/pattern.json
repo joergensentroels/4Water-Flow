@@ -14,13 +14,24 @@
     "3. calendar.eventMinutes (90) is invented too - no shift length was ever stated. calendar.timezone is",
     "   NOT invented; it is what makes the calendar feed put 19:00 at the right instant, and getting it wrong",
     "   shifts every event by the UTC offset for the whole season.",
-    "Both are editable from the Administration screen; nothing needs hand-editing here."
+    "Both are editable from the Administration screen; nothing needs hand-editing here.",
+    "",
+    "export.csvDelimiter is a SEMICOLON here, and that is not a typo. A spreadsheet splits a double-clicked",
+    ".csv on the locale's list separator, which on a Danish Windows is ';' - so a comma-separated file arrives",
+    "with every row crammed into one cell. The code default is ',' because that is what RFC 4180 says and what",
+    "Google Sheets, LibreOffice and pandas expect; this line is the deployment saying who actually opens the",
+    "file. A department whose people use Sheets or a script should set it back to ','.",
+    "The export also carries a UTF-8 byte-order mark, which is not configurable: without it a spreadsheet reads",
+    "the downloaded file in the system codepage and 'Soren Norgard' with Danish letters comes out as mojibake."
   ],
   "department": "cph",
   "locale": "en",
   "calendar": {
     "timezone": "Europe/Copenhagen",
     "eventMinutes": 90
+  },
+  "export": {
+    "csvDelimiter": ";"
   },
   "season": {
     "key": "2026-Q1Q2",

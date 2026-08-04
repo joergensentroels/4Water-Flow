@@ -2,7 +2,7 @@
 // server on an ephemeral port rather than a mock — the bugs worth catching are in the plumbing.
 import { pathToFileURL } from "node:url";
 import { createApp, send, redirect, readForm, html } from "./http.mjs";
-import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig } from "./config.mjs";
+import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, exportConfig } from "./config.mjs";
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
@@ -633,7 +633,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const sid = seasonId();
     if (!sid) return send(res, 404, renderErrorPage(t, 404));
-    send(res, 200, exportSeasonCsv(db, sid), {
+    send(res, 200, exportSeasonCsv(db, sid, { delimiter: exportConfig(cfg).csvDelimiter }), {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="4water-${cfg.season.key}.csv"`,
     });

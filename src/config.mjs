@@ -68,6 +68,22 @@ export function validatePattern(p) {
       }
     }
   }
+
+  // The season export. A delimiter is not a detail here: a spreadsheet splits a double-clicked .csv on the
+  // LOCALE's list separator, so on a Danish Windows a comma-separated file arrives with every row in one cell.
+  // Which separator is right is a property of who opens the file, which makes it configuration rather than a
+  // constant — the same reason no weekday name appears in this codebase.
+  if (p.export !== undefined) {
+    const e = p.export;
+    if (!e || typeof e !== "object" || Array.isArray(e)) err("export must be an object");
+    if (e.csvDelimiter !== undefined) {
+      // Deliberately a short allow-list. A quote or CR/LF as the delimiter would produce a file no parser can
+      // read, and a multi-character separator is not CSV at all.
+      if (typeof e.csvDelimiter !== "string" || ![",", ";", "\t", "|"].includes(e.csvDelimiter)) {
+        err('export.csvDelimiter must be one of "," ";" "\\t" or "|"');
+      }
+    }
+  }
   return p;
 }
 
@@ -78,6 +94,14 @@ export const calendarConfig = (pattern) => ({
   timezone: pattern?.calendar?.timezone || "UTC",
   eventMinutes: pattern?.calendar?.eventMinutes || 90,
   configured: Boolean(pattern?.calendar?.timezone),
+});
+
+// The comma is the default because it is what RFC 4180 says and what every non-spreadsheet reader expects —
+// Google Sheets, LibreOffice, pandas. A deployment whose people open the file in a spreadsheet on a locale that
+// uses a semicolon as the list separator sets it, and config/pattern.json does exactly that with the reason
+// written beside it.
+export const exportConfig = (pattern) => ({
+  csvDelimiter: pattern?.export?.csvDelimiter || ",",
 });
 
 // Absent needs means one person, role irrelevant. Returned as a flat list of role slots, because that is what

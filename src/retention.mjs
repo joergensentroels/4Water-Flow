@@ -188,7 +188,7 @@ export function exportPerson(db, personId) {
 
 // A season as CSV, for planners who want it in a spreadsheet — which, given where this app came from, is a
 // request that will absolutely be made.
-export function exportSeasonCsv(db, seasonId) {
+export function exportSeasonCsv(db, seasonId, { delimiter = ",", bom = true } = {}) {
   const rows = db.prepare(`
     SELECT s.date, t.hour, t.minute, act.key AS activity, act.label,
            COALESCE(a.role, '') AS role,
@@ -210,10 +210,24 @@ export function exportSeasonCsv(db, seasonId) {
   // translation: this is a data export, and a spreadsheet somebody filters should not change wording with the
   // locale. The value is empty for a slot whose role does not matter.
   const header = ["date", "time", "activity_key", "activity", "role", "person", "state"];
-  const lines = [header.map(esc).join(",")];
+  const lines = [header.map(esc).join(delimiter)];
   for (const r of rows) {
     lines.push([r.date, `${String(r.hour).padStart(2, "0")}:${String(r.minute).padStart(2, "0")}`,
-                r.activity, r.label, r.role, r.person, r.state ?? ""].map(esc).join(","));
+                r.activity, r.label, r.role, r.person, r.state ?? ""].map(esc).join(delimiter));
   }
-  return lines.join("\r\n") + "\r\n";   // CRLF: what spreadsheets expect from a .csv
+  const body = lines.join("\r\n") + "\r\n";   // CRLF: what spreadsheets expect from a .csv
+
+  // A UTF-8 byte-order mark, because this file is DOWNLOADED and then opened from disk, where the response's
+  // `charset=utf-8` is not present and cannot help. Without the BOM a spreadsheet on Windows decodes it as the
+  // system ANSI codepage: measured, "Søren Nørgård" renders as "SÃ¸ren NÃ¸rgÃ¥rd". For a Danish organisation
+  // that is most volunteer names in the export, in the one artefact the board is most likely to open.
+  //
+  // `﻿` as an escape, never the literal character: a BOM pasted into source is invisible, so a later edit
+  // can delete or duplicate it with nothing on screen to show for it.
+  //
+  // The cost is honest rather than zero. Readers that strip a leading BOM — Excel, LibreOffice, Google Sheets,
+  // Python's utf-8-sig, Node reading with a BOM-aware decoder — see nothing. A reader that does NOT strip it
+  // gets the mark glued to the first header name, so the first column is called `﻿"date"` instead of
+  // `date`. That is a cosmetic surprise in one cell, against mojibake in every Danish name on every row.
+  return bom ? `﻿${body}` : body;
 }
