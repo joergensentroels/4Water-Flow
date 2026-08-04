@@ -1,6 +1,6 @@
 // The admin screen. One page, four sections — a nonprofit's admin is a volunteer doing this twice a season,
 // so discoverability beats density.
-import { html } from "../http.mjs";
+import { html, raw } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
 
 const OUTCOME = {
@@ -26,7 +26,10 @@ export function adminFlash(t, code, vars) {
   return o ? { text: t(o.key, vars), bad: !!o.bad } : null;
 }
 
-export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash }) {
+// `roster` carries the counts and the search term. Defaults describe an unfiltered, uncapped list so a caller
+// that passes a plain array still renders — the search UI simply does not appear.
+export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash,
+                             roster = { q: "", shown: people.length, matching: people.length, total: people.length, limit: "all" } }) {
   const toggle = (action, fields, label, cls = "secondary") => html`
     <form method="post" action="${action}">
       ${csrfField(session)}
@@ -48,6 +51,24 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
       </div>` : ""}
 
     <h2>${t("admin.people")}</h2>
+    <!-- Search plus a capped default. Twelve forms per person means 200 people was 953 KB of HTML on a screen
+         meant to work from a phone — and unlike the planner's whole-season view, this was not something the
+         admin had asked for. -->
+    <form method="get" action="/admin" class="card">
+      <label>${t("admin.findPerson")}
+        <input type="search" name="q" value="${roster.q}" placeholder="${t("admin.findPlaceholder")}">
+      </label>
+      <button type="submit" class="secondary">${t("admin.find")}</button>
+    </form>
+    <p class="hint">${roster.q
+      ? t("admin.matching", { shown: roster.shown, matching: roster.matching, total: roster.total })
+      : t("admin.showing", { shown: roster.shown, total: roster.total })}</p>
+    ${roster.shown < roster.matching ? html`
+      <div class="chiprow" role="group">
+        ${[25, 100, "all"].map((n) => html`<a class="chip" href="/admin?people=${n}${roster.q ? `&q=${encodeURIComponent(roster.q)}` : ""}"${
+          String(roster.limit) === String(n) ? raw(' aria-current="true"') : ""}>${
+          n === "all" ? t("admin.showAll") : t("admin.showN", { n })}</a>`)}
+      </div>` : ""}
     ${people.map((p) => html`
       <div class="card">
         <b>${p.name}</b>

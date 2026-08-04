@@ -3,14 +3,45 @@ import { writeFileSync, renameSync, readFileSync } from "node:fs";
 import { validatePattern, PATTERN_FILE } from "./config.mjs";
 
 // ---- people, roles, capabilities ----------------------------------------------------------------------
-export function peopleWithDetail(db) {
-  return db.prepare(`
+// Searchable and capped by default, because the editor per person is large and the roster is not.
+//
+// Measured at the size the multi-department plan implies — 200 volunteers, roughly what Lyon was described as
+// bringing — this screen rendered 953 KB. Each person carries twelve small forms (three roles, six
+// capabilities, status, export, two erase modes), every one with its own CSRF token, so 200 people is about
+// 2,400 forms. Exactly the defect already fixed on the planner, where the whole-season view was 534 KB and a
+// four-week default brought it to 84 KB — and unlooked-at here, on a screen whose whole point is being usable
+// from a phone.
+//
+// The distinction that matters: the planner's big view is an OPT-IN, chosen by clicking "the whole season".
+// This was the default. And searching is what an admin wants at 200 people anyway; scrolling 200 cards is bad
+// regardless of bytes.
+export const PEOPLE_PAGE = 25;
+
+export function peopleWithDetail(db, { q = "", limit = PEOPLE_PAGE } = {}) {
+  const term = String(q ?? "").trim();
+  const all = limit === "all";
+  const total = db.prepare("SELECT COUNT(*) n FROM people").get().n;
+  const matching = term
+    ? db.prepare("SELECT COUNT(*) n FROM people WHERE name LIKE :like OR COALESCE(contact,'') LIKE :like").get({ like: `%${term}%` }).n
+    : total;
+
+  const rows = db.prepare(`
     SELECT p.id, p.name, p.contact, p.status, p.auth_provider AS authProvider,
            (p.auth_subject IS NOT NULL) AS linked,
            (SELECT GROUP_CONCAT(r.name) FROM person_roles pr JOIN roles r ON r.id = pr.role_id WHERE pr.person_id = p.id) AS roles,
            (SELECT GROUP_CONCAT(a.key) FROM capabilities c JOIN activities a ON a.id = c.activity_id WHERE c.person_id = p.id) AS can
-      FROM people p ORDER BY p.name
-  `).all().map((r) => ({ ...r, roles: r.roles ? r.roles.split(",") : [], can: r.can ? r.can.split(",") : [] }));
+      FROM people p
+     ${term ? "WHERE p.name LIKE :like OR COALESCE(p.contact,'') LIKE :like" : ""}
+     ORDER BY p.name
+     ${all ? "" : "LIMIT :lim"}
+  `).all({
+    ...(term ? { like: `%${term}%` } : {}),
+    ...(all ? {} : { lim: Number(limit) > 0 ? Number(limit) : PEOPLE_PAGE }),
+  }).map((r) => ({ ...r, roles: r.roles ? r.roles.split(",") : [], can: r.can ? r.can.split(",") : [] }));
+
+  // shown, matching and total are three different numbers, and the page says all three. A list that quietly
+  // stops at 25 of 200 reads as "that is everybody" — the same silent-truncation problem as the outbox.
+  return { rows, shown: rows.length, matching, total, q: term, limit: all ? "all" : Number(limit) || PEOPLE_PAGE };
 }
 
 export function setRole(db, personId, roleName, on) {

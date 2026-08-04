@@ -63,11 +63,13 @@ test("roles and capabilities can be granted and removed through the screen", wit
   assert.ok(rolesOf(w.db, w.people[2]).includes("planner"));
 
   assert.equal(reasonOf(await w.post("/admin/capability", admin, new URLSearchParams({ csrf: token, personId: String(w.people[2]), key, on: "1" }))), "saved");
-  const p = peopleWithDetail(w.db).find((x) => x.id === w.people[2]);
+  // .rows now: peopleWithDetail returns the page plus its counts, because the screen has to say "25 of 200"
+  // rather than quietly stopping at 25.
+  const p = peopleWithDetail(w.db).rows.find((x) => x.id === w.people[2]);
   assert.ok(p.can.includes(key));
 
   assert.equal(reasonOf(await w.post("/admin/capability", admin, new URLSearchParams({ csrf: token, personId: String(w.people[2]), key, on: "0" }))), "saved");
-  assert.ok(!peopleWithDetail(w.db).find((x) => x.id === w.people[2]).can.includes(key));
+  assert.ok(!peopleWithDetail(w.db).rows.find((x) => x.id === w.people[2]).can.includes(key));
 }));
 
 test("removing a capability leaves existing assignments alone", withAdmin({}, async (w) => {
@@ -241,4 +243,52 @@ test("addActivityToForm and patternFromForm do not mutate the pattern they are g
   addActivityToForm(w.pattern, { key: "x_thing", label: "X" });
   patternFromForm(w.pattern, { seasonKey: "other", seasonFrom: "2029-01-01", seasonTo: "2029-02-01" });
   assert.equal(JSON.stringify(w.pattern), snapshot, "a failed save must not have half-applied itself in memory");
+}));
+
+// ---- the roster is capped and searchable -----------------------------------------------------------------
+// Measured at 200 volunteers — roughly what the multi-department plan implies — the admin screen rendered
+// 953 KB. Each person carries twelve small forms, each with its own CSRF token, so 200 people is ~2,400 forms.
+// Identical defect to the planner's whole-season view (534 KB, fixed with a four-week default), and unlooked-at
+// here on a screen whose whole point is working from a phone. The difference that made it worse: the planner's
+// big view is chosen by clicking "the whole season", and this was the default.
+test("the roster is capped by default, searchable, and honest about what it is not showing", withAdmin({}, async (w) => {
+  const { PEOPLE_PAGE } = await import("../src/admin.mjs");
+  // Enough people to exceed a page.
+  const ins = w.db.prepare("INSERT INTO people (name, contact, auth_provider) VALUES (?,?,'oidc')");
+  for (let i = 0; i < PEOPLE_PAGE + 12; i++) ins.run(`Extra ${String(i).padStart(3, "0")}`, `x${i}@example.org`);
+  const total = w.db.prepare("SELECT COUNT(*) n FROM people").get().n;
+
+  const page = peopleWithDetail(w.db);
+  assert.equal(page.shown, PEOPLE_PAGE, "the default must be capped");
+  assert.equal(page.total, total);
+  assert.equal(page.matching, total, "with no search term, everybody matches");
+
+  // "all" really means all — the escape hatch has to work or the cap is a wall.
+  assert.equal(peopleWithDetail(w.db, { limit: "all" }).shown, total);
+
+  // Searching narrows, and the counts stay distinguishable: shown, matching and total are three numbers.
+  const found = peopleWithDetail(w.db, { q: "Extra 00" });
+  assert.ok(found.matching > 0 && found.matching < total, `search should narrow, got ${found.matching}/${total}`);
+  assert.ok(found.rows.every((p) => p.name.includes("Extra 00")));
+  assert.equal(found.total, total, "total still describes the whole roster");
+
+  // Email is searchable too — an admin acting on an invitation has the address, not the name.
+  assert.ok(peopleWithDetail(w.db, { q: "x3@example.org" }).matching >= 1);
+
+  // A nonsense limit falls back to the page size rather than reaching a LIMIT clause.
+  for (const bad of ["", "0", "-5", "banana", null]) {
+    assert.ok(peopleWithDetail(w.db, { limit: bad }).shown <= PEOPLE_PAGE, `limit=${bad} must not uncap the list`);
+  }
+
+  // Over HTTP: the page says what it is not showing, and offers the way to see more. Silently stopping at 25
+  // of 37 reads as "that is everybody", which is the same problem the outbox truncation notice solved.
+  const admin = await w.signIn(w.people[0]);
+  const body = await (await w.get("/admin", admin)).text();
+  assert.match(body, new RegExp(`Showing ${PEOPLE_PAGE} of ${total}`), "it must admit the cap");
+  assert.match(body, /name="q"/, "and offer a search");
+  assert.match(body, /people=all/, "and a way to see everybody");
+
+  // And the cap is real in the rendered page, not just in the query.
+  const cards = (body.match(/href="\/admin\/person\/\d+\/export\.json"/g) ?? []).length;
+  assert.equal(cards, PEOPLE_PAGE, `rendered ${cards} person cards, expected ${PEOPLE_PAGE}`);
 }));

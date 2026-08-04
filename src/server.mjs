@@ -16,7 +16,7 @@ import { renderBoard, flashFor } from "./pages/board.mjs";
 import { renderPlanner, plannerFlash } from "./pages/planner.mjs";
 import { autoRoster, lockInProposals, discardProposals, countProposals } from "./roster.mjs";
 import { renderAdmin, adminFlash } from "./pages/admin.mjs";
-import { peopleWithDetail, invitesWithDetail, setRole, setCapability, setPersonStatus,
+import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapability, setPersonStatus,
          savePattern, patternFromForm, addActivityToForm, proposeNextSeason,
          addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "./admin.mjs";
 import { seedSeason } from "./seed.mjs";
@@ -393,9 +393,16 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const link = freshInvites.get(c.personId) ?? null;
     freshInvites.delete(c.personId);              // shown once, as the label promises
+    // Capped by default and searchable. Only "all" and a positive number are honoured; anything else falls back
+    // to the page size rather than being passed through to a LIMIT.
+    const wanted = query.get("people");
+    const roster = peopleWithDetail(db, {
+      q: query.get("q") ?? "",
+      limit: wanted === "all" ? "all" : Number(wanted) > 0 ? Number(wanted) : PEOPLE_PAGE,
+    });
     send(res, 200, renderAdmin({
       t, session: c.session, roles: c.roles, who: c.who,
-      people: peopleWithDetail(db), invites: invitesWithDetail(db), pattern: cfg, inviteLink: link,
+      people: roster.rows, roster, invites: invitesWithDetail(db), pattern: cfg, inviteLink: link,
       nextSeason: proposeNextSeason(cfg),
       weeklyUse: Object.fromEntries((cfg.weekly ?? []).map((w) => [
         `${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`,
