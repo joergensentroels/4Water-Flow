@@ -253,3 +253,81 @@ test("end to end: fresh database, bootstrap, sign in, reach the admin screen", a
     assert.ok(!/There are no activities in this season/.test(plan), "a bootstrapped deployment must not look empty");
   } finally { b.child.kill(); await new Promise((r2) => b.child.once("exit", r2)); cleanup(dir); }
 });
+
+// ---- the notifier and the nudge timer are WIRED (increment X) ------------------------------------------
+// Same generator as the missing slots, and it went unnoticed the same way: makeNotifier and startJobs were
+// called only from tests. buildApp defaults notifier to null and announceOpenSlot opens with
+// `if (!notifier) return`, so on a real deployment no announcement ever fired and the nudge never ran once —
+// while seventeen tests proved the machinery worked, because testkit passed a notifier production did not.
+//
+// This test therefore refuses to construct a notifier. It boots the real entry point and checks that an action
+// which is supposed to announce actually leaves a row behind.
+test("a real deployment actually writes notifications", async () => {
+  const dir = freshDir();
+  const port = 8165;
+  const dbPath = path.join(dir, "app.db");
+  // The demo pattern, because the shipped season ended in June: a planner screen with an empty horizon would
+  // make this pass for the wrong reason.
+  const b = bootReal(dir, port, {
+    FOURWATER_PATTERN: path.join(ROOT, "demo-pattern.json"),
+    FOURWATER_AUTH: "dev", NODE_ENV: "development",
+  });
+  try {
+    assert.ok(await waitHealthy(port, b.child), `never became healthy:\n${b.out()}`);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.match(b.out(), /notifications:/, "boot must say where notifications go, or nobody can tell they are off");
+
+    // A volunteer on a slot, written directly: the roster is curated, so there is no sign-up path to drive.
+    let personId, slotId;
+    {
+      const db = new DatabaseSync(dbPath);
+      const act = db.prepare("SELECT id FROM activities LIMIT 1").get().id;
+      personId = Number(db.prepare(`INSERT INTO people (name, contact, preferred_role, auth_provider)
+                                    VALUES ('Notify One','n1@example.org','b','oidc')`).run().lastInsertRowid);
+      db.prepare("INSERT OR IGNORE INTO capabilities (person_id, activity_id) VALUES (?,?)").run(personId, act);
+      for (const role of ["volunteer", "planner"]) {
+        const rid = db.prepare("SELECT id FROM roles WHERE name=?").get(role)?.id;
+        if (rid) db.prepare("INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?,?)").run(personId, rid);
+      }
+      slotId = db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                            WHERE a.person_id IS NULL AND s.activity_id=? LIMIT 1`).get(act).id;
+      db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(personId, slotId);
+      db.close();
+    }
+
+    const login = await fetch(`http://127.0.0.1:${port}/auth/dev`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ personId: String(personId) }), redirect: "manual",
+    });
+    const cookie = (login.headers.getSetCookie?.() ?? [login.headers.get("set-cookie")])
+      .filter(Boolean).map((c) => c.split(";")[0]).join("; ");
+    assert.ok(cookie, `dev sign-in failed: ${login.status}`);
+
+    const page = await (await fetch(`http://127.0.0.1:${port}/planner`, { headers: { cookie } })).text();
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)?.[1];
+    assert.ok(csrf, "no CSRF token on the planner");
+
+    // Freeing a slot puts it back on the shift exchange, which is what announces.
+    const r = await fetch(`http://127.0.0.1:${port}/planner/unassign`, {
+      method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ assignmentId: String(slotId), expect: String(personId), csrf }),
+      redirect: "manual",
+    });
+    assert.equal(new URL(r.headers.get("location"), "http://x").searchParams.get("r"), "unassigned",
+      "the slot must actually have been freed, or this proves nothing");
+
+    // The announcement is fired and not awaited, so poll rather than sleep a fixed amount.
+    let rows = [];
+    for (let i = 0; i < 40 && rows.length === 0; i++) {
+      await new Promise((res) => setTimeout(res, 50));
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      rows = db.prepare("SELECT kind, status, body FROM notifications").all();
+      db.close();
+    }
+    assert.ok(rows.length > 0, "freeing a slot on a real deployment must write a notification, not silently nothing");
+    assert.equal(rows[0].kind, "slot_open");
+    // With no webhook configured the channel is the outbox and the row is queued — written, not lost.
+    assert.equal(rows[0].status, "queued");
+    assert.ok(rows[0].body.length > 0, "and it must have a body a planner could copy into the group chat");
+  } finally { b.child.kill(); await new Promise((r) => b.child.once("exit", r)); cleanup(dir); }
+});

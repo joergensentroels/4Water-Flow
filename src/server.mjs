@@ -8,7 +8,8 @@ import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf,
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
          linkIdentity, redeemInvite, createInvite, revokeInvite } from "./auth.mjs";
 import { layout, navFor, formatDate, formatTime, formatRole, renderErrorPage, renderPrivacy } from "./views.mjs";
-import { slotOpenMessage, notifyConfig } from "./notify.mjs";
+import { slotOpenMessage, notifyConfig, makeNotifier } from "./notify.mjs";
+import { startJobs } from "./jobs.mjs";
 import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailability, bulkTargets } from "./pages/availability.mjs";
 import { renderHome, renderPlan } from "./pages/plan.mjs";
 import { renderBoard, flashFor } from "./pages/board.mjs";
@@ -705,7 +706,34 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.warn(`\n⚠ There is no administrator yet, so nobody can sign in or invite anyone.`);
     console.warn(`  Create the first one:  node tools/bootstrap.mjs <email> "<name>"\n`);
   }
+  // The notifier and the nudge timer, WIRED HERE, because nothing else does it.
+  //
+  // Until this existed, makeNotifier and startJobs were called only from tests. buildApp defaults notifier to
+  // null and announceOpenSlot opens with `if (!notifier) return`, so on a real deployment no "a shift became
+  // free" announcement ever fired and the availability nudge never ran once — while seventeen tests proved the
+  // machinery worked, because the test harness passed a notifier that production did not. Same generator as the
+  // missing slots: the harness doing setup the real boot path skipped.
+  //
+  // With no MATTERMOST_WEBHOOK the channel is the outbox, which is not a degraded mode — messages are written
+  // and a planner reads them at /outbox. That is the default and it is fine; silence was the bug.
+  const notifyCfg = notifyConfig(process.env);
+  const notifier = makeNotifier({ db, config: notifyCfg });
+  const bootT = makeT(boot.locale ?? "en");
+  const currentSeasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(boot.season.key)?.id ?? null;
+  const jobs = startJobs({ db, notifier, t: bootT, seasonId: currentSeasonId, today: () => new Date().toISOString().slice(0, 10) });
+  console.log(`notifications: ${notifyCfg.describe()}`);   // describe() never reveals the URL — its path is the secret
+
   const port = Number(process.env.PORT) || 8080;
-  buildApp({ db, pattern: boot, patternFile: configFile }).listen(port, process.env.HOST || "127.0.0.1");
+  const server = buildApp({ db, pattern: boot, patternFile: configFile, notifier })
+    .listen(port, process.env.HOST || "127.0.0.1");
   console.log(`4water listening on http://127.0.0.1:${port}`);
+
+  // Run the nudge check once shortly after boot as well as on the interval. Six hours is a long time to wait to
+  // find out the job is misconfigured, and runNudge is idempotent per (kind, person, period) so an extra call
+  // cannot produce an extra message.
+  setTimeout(() => { jobs.tick().catch(() => {}); }, 5_000).unref?.();
+
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.once(sig, () => { jobs.stop(); server.close(); db.close(); process.exit(0); });
+  }
 }
