@@ -118,7 +118,13 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // The dev sign-in has no CSRF token because there is no session yet. It is gated by assertDevAllowed(),
   // which throws under NODE_ENV=production — the route simply does not function in a real deployment.
-  app.post("/auth/dev", async ({ req, res }) => {
+  // REGISTERED ONLY WHEN ALLOWED, so in production the route does not exist and the router answers 404.
+  // It used to be registered unconditionally and rely on assertDevAllowed throwing, which refused correctly —
+  // no session was issued — but answered 500. That is the wrong answer three ways: it reads as "the server
+  // broke" rather than "there is no such thing here", it files an error in the log for what is actually the
+  // safety posture working, and it tells anyone probing that the route exists and blew up. The assert stays
+  // inside as well, so that making registration unconditional again cannot quietly re-open it.
+  if (devAuth) app.post("/auth/dev", async ({ req, res }) => {
     assertDevAllowed(env);
     const form = await readForm(req);
     const who = devSignIn(db, form.personId, env);
@@ -394,10 +400,20 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const email = String(c.form.email ?? "").trim();
     if (!email) return redirect(res, "/admin");
     const token = createInvite(db, { email });
-    // Absolute URL from the Host header: a relative path is useless in an email, and hardcoding the domain
-    // would break the moment a second department runs its own instance.
-    const proto = secure ? "https" : "http";
-    freshInvites.set(c.personId, `${proto}://${req.headers.host}/invite/${token}`);
+    // FOURWATER_BASE_URL, never the Host header.
+    //
+    // This used to build the absolute URL from req.headers.host, for the good reason that a relative path is
+    // useless in an email and hardcoding a domain breaks the second department. But an invite token GRANTS A
+    // SESSION, and Host is attacker-influencable: a request with a forged Host renders a link on somebody
+    // else's origin, the admin emails it in good faith, and the volunteer clicks it and hands their invite to
+    // whoever owns that host. It is the poisoned-password-reset-link attack with extra steps.
+    //
+    // tools/bootstrap.mjs already used FOURWATER_BASE_URL for exactly this, and so does the calendar feed —
+    // this route was the odd one out, and two link builders with two different policies is the tell. When the
+    // variable is unset the page shows the path and says to prefix the address, which is the honest answer:
+    // the app does not know its own public name unless somebody tells it.
+    const base = String(env.FOURWATER_BASE_URL || "").replace(/\/+$/, "");
+    freshInvites.set(c.personId, `${base}/invite/${token}`);
     redirect(res, "/admin?r=invited");
   });
 

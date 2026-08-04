@@ -57,6 +57,13 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 
 ## Things that will trip you up
 
+- **`test/journey.test.mjs` is the acceptance gate, and it deliberately does not use `tools/testkit.mjs`.**
+  Everything else builds its world with that harness, and twice the harness supplied something production did
+  not — open slots, and a notifier — so a green suite reported success over a deployment that could not work.
+  The journey boots `node src/server.mjs` on an empty database under `NODE_ENV=production` and walks the whole
+  thing over HTTP: bootstrap, invite, sign in, capability, availability, claim, calendar feed, auto-roster, lock
+  in, hand back, outbox, CSV, export. If you add a feature that a real deployment has to wire up, add it there
+  too — that file is the only one that can tell you it was never wired.
 - **`node:sqlite` is synchronous.** `new DatabaseSync(...)`, `db.exec`, `db.prepare(...).run/get/all`. There is
   no `node:sqlite3` and no callbacks.
 - **`node:sqlite` is a release candidate (Stability 1.2), and needs Node ≥ 22.13** — added in 22.5.0 but behind

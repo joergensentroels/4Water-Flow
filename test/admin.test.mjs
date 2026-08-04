@@ -97,12 +97,20 @@ test("creating an invite shows the link exactly once, and it works", withAdmin({
   assert.equal(reasonOf(r), "invited");
 
   const { body } = await w.follow(r, admin);
-  const link = body.match(/<code>(http[^<]+)<\/code>/)?.[1];
+  const link = body.match(/class="tokenbox">([^<]+)</)?.[1];
   assert.ok(link, "the link must be shown after creation — it is never recoverable afterwards");
+
+  // RELATIVE here, because FOURWATER_BASE_URL is unset in the test environment — and that is the property.
+  // This link used to be built from req.headers.host, which is attacker-influencable: an invite token grants a
+  // SESSION, so a forged Host would render the link on somebody else's origin for an admin to email out in good
+  // faith, and the volunteer would hand their invite to whoever owns that host. The app does not guess its own
+  // public name; when nobody has configured it, the page shows the path and says to prefix the address.
+  assert.match(link, /^\/invite\/[\w-]+$/, "no origin may be inferred from the request");
+  assert.ok(!link.includes(new URL(w.base).host), "least of all the request's own Host");
 
   // Second view does not repeat it.
   const again = await (await w.get("/admin", admin)).text();
-  assert.ok(!/<code>http/.test(again), "the raw token must not linger on the page");
+  assert.ok(!/class="tokenbox"/.test(again), "the raw token must not linger on the page");
 
   // And the stored form is a hash, not the token.
   const stored = w.db.prepare("SELECT token FROM invitations").get().token;
@@ -110,7 +118,7 @@ test("creating an invite shows the link exactly once, and it works", withAdmin({
   assert.match(stored, /^[0-9a-f]{64}$/);
 
   // Redeeming it signs the newcomer in and lands them on the screen they need.
-  const inviteToken = new URL(link).pathname.split("/").pop();
+  const inviteToken = link.split("/").pop();
   const redeem = await w.get(`/invite/${inviteToken}`);
   assert.equal(redeem.status, 303);
   assert.equal(redeem.headers.get("location"), "/availability", "a new volunteer's first task is their availability");
@@ -121,12 +129,12 @@ test("a revoked invite cannot be redeemed afterwards", withAdmin({}, async (w) =
   const admin = await w.signIn(w.people[0]);
   const { token } = await w.csrfFrom("/admin", admin);
   const created = await w.post("/admin/invite", admin, new URLSearchParams({ csrf: token, email: "gone@example.org" }));
-  const link = (await w.follow(created, admin)).body.match(/<code>(http[^<]+)<\/code>/)[1];
+  const link = (await w.follow(created, admin)).body.match(/class="tokenbox">([^<]+)</)[1];
   const id = w.db.prepare("SELECT id FROM invitations WHERE email=?").get("gone@example.org").id;
 
   assert.equal(reasonOf(await w.post("/admin/invite/revoke", admin, new URLSearchParams({ csrf: token, id: String(id) }))), "revoked");
 
-  const inviteToken = new URL(link).pathname.split("/").pop();
+  const inviteToken = link.split("/").pop();
   const redeem = await w.get(`/invite/${inviteToken}`);
   assert.equal(redeem.headers.get("location"), "/signin?unknown=1");
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("gone@example.org").n, 0);

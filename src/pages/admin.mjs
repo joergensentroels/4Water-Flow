@@ -40,7 +40,11 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
     ${inviteLink ? html`
       <div class="card">
         <b>${t("admin.inviteLink")}</b>
-        <p><code>${inviteLink}</code></p>
+        <p class="tokenbox">${inviteLink}</p>
+        <!-- Relative when FOURWATER_BASE_URL is unset. The origin is deliberately NOT taken from the Host
+             header: an invite token grants a session, and a forged Host would put this link on someone else's
+             origin for the admin to email out in good faith. -->
+        ${inviteLink.startsWith("http") ? "" : html`<p class="hint">${t("calendar.prefix")}</p>`}
       </div>` : ""}
 
     <h2>${t("admin.people")}</h2>
