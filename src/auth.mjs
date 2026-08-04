@@ -38,10 +38,85 @@ export function oidcConfig(env = process.env) {
   return cfg;
 }
 
-export function beginOidc(cfg, { state = randomBytes(16).toString("base64url"), verifier = randomBytes(32).toString("base64url") } = {}) {
+// ---- endpoint discovery -------------------------------------------------------------------------------
+// The three endpoint paths used to be written out by hand as /apps/oidc/{authorize,token,userinfo}. That is
+// NextCloud's current layout and nothing more: it is not part of any spec, it differs between OIDC apps, and
+// it silently breaks if the admin mounts NextCloud under a subpath. OIDC publishes its endpoints, so ask.
+//
+// SECURITY: the token endpoint receives client_secret. A discovery document that named someone else's host
+// would hand the secret to them, so every discovered endpoint must live on the SAME ORIGIN as the configured
+// issuer. The issuer is operator-supplied config; the document is a network response, and the two are not
+// equally trustworthy. https is required for the same reason, with localhost exempt so a developer can run a
+// test IdP over http.
+export const NEXTCLOUD_FALLBACK = { authorize: "/apps/oidc/authorize", token: "/apps/oidc/token", userinfo: "/apps/oidc/userinfo" };
+
+const trimEnd = (s) => String(s).replace(/\/+$/, "");
+
+export function validateEndpoint(issuer, url, what) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error(`discovery: ${what} is not a URL: ${url}`); }
+  const iss = new URL(trimEnd(issuer));
+  const localhost = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+  if (u.protocol !== "https:" && !localhost) throw new Error(`discovery: ${what} is not https: ${url}`);
+  if (u.origin !== iss.origin) {
+    throw new Error(`discovery: ${what} is on ${u.origin}, not the configured issuer ${iss.origin}`);
+  }
+  return u.toString();
+}
+
+// Cached per issuer, because this runs on every sign-in and a well-known document does not change per login.
+// A short TTL rather than forever: rotating an IdP's endpoints should not need an app restart.
+const discoveryCache = new Map();
+export const DISCOVERY_TTL_MS = 10 * 60 * 1000;
+export const clearDiscoveryCache = () => discoveryCache.clear();
+
+export async function discoverOidc(cfg, fetchImpl = fetch, { now = Date.now() } = {}) {
+  const key = trimEnd(cfg.issuer);
+  const hit = discoveryCache.get(key);
+  if (hit && hit.expires > now) return hit.value;
+
+  const url = `${key}/.well-known/openid-configuration`;
+  let value;
+  try {
+    const res = await fetchImpl(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`discovery: ${url} returned ${res.status}`);
+    const doc = await res.json();
+    // The spec requires issuer to match; a mismatch means we are reading someone else's metadata.
+    if (doc.issuer && trimEnd(doc.issuer) !== key) {
+      throw new Error(`discovery: document declares issuer ${doc.issuer}, expected ${key}`);
+    }
+    value = {
+      authorize: validateEndpoint(key, doc.authorization_endpoint, "authorization_endpoint"),
+      token: validateEndpoint(key, doc.token_endpoint, "token_endpoint"),
+      userinfo: validateEndpoint(key, doc.userinfo_endpoint, "userinfo_endpoint"),
+      source: "discovery",
+    };
+  } catch (e) {
+    // Fall back to NextCloud's layout rather than locking every volunteer out over a missing well-known route
+    // — but say so, loudly and on the status page, because a silent fallback is how a misconfiguration
+    // survives for months. `source` is what /status reads.
+    value = {
+      authorize: key + NEXTCLOUD_FALLBACK.authorize,
+      token: key + NEXTCLOUD_FALLBACK.token,
+      userinfo: key + NEXTCLOUD_FALLBACK.userinfo,
+      source: "fallback",
+      error: e.message,
+    };
+    console.warn(`[oidc] ${e.message} — falling back to NextCloud's endpoint layout`);
+  }
+  discoveryCache.set(key, { value, expires: now + DISCOVERY_TTL_MS });
+  return value;
+}
+
+export async function beginOidc(cfg, {
+  state = randomBytes(16).toString("base64url"),
+  verifier = randomBytes(32).toString("base64url"),
+  fetchImpl = fetch,
+} = {}) {
   if (!cfg.enabled) throw Object.assign(new Error("OIDC is not configured"), { status: 503 });
   const challenge = createHash("sha256").update(verifier).digest("base64url");
-  const u = new URL(`${cfg.issuer.replace(/\/+$/, "")}/apps/oidc/authorize`);
+  const endpoints = await discoverOidc(cfg, fetchImpl);
+  const u = new URL(endpoints.authorize);
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", cfg.clientId);
   u.searchParams.set("redirect_uri", cfg.redirectUri);
@@ -61,7 +136,8 @@ export function checkState(issued, returned) {
 
 // The token exchange is injected so this is testable without a network. Production passes fetch.
 export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch) {
-  const res = await fetchImpl(`${cfg.issuer.replace(/\/+$/, "")}/apps/oidc/token`, {
+  const endpoints = await discoverOidc(cfg, fetchImpl);
+  const res = await fetchImpl(endpoints.token, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -75,7 +151,7 @@ export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch) {
   });
   if (!res.ok) throw Object.assign(new Error(`token endpoint returned ${res.status}`), { status: 502 });
   const tok = await res.json();
-  const info = await fetchImpl(`${cfg.issuer.replace(/\/+$/, "")}/apps/oidc/userinfo`, {
+  const info = await fetchImpl(endpoints.userinfo, {
     headers: { Authorization: `Bearer ${tok.access_token}` },
   });
   if (!info.ok) throw Object.assign(new Error(`userinfo returned ${info.status}`), { status: 502 });

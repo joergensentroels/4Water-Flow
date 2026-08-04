@@ -11,7 +11,7 @@ import { layout, csrfField, navFor } from "../views.mjs";
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-export function collectStatus(db, { pattern, today, backupDir }) {
+export function collectStatus(db, { pattern, today, backupDir, oidc = null }) {
   const seasonRow = db.prepare("SELECT id, from_date AS from_, to_date AS to_ FROM seasons WHERE key=?").get(pattern.season.key);
   const facts = [];
 
@@ -78,6 +78,16 @@ export function collectStatus(db, { pattern, today, backupDir }) {
                  level: ageHours <= 36 ? "ok" : ageHours <= 72 ? "warn" : "bad" });
   }
 
+  // ---- how sign-in is finding the identity provider ----
+  // Only when OIDC is configured: on an invite-only deployment there is nothing to report. The point of this
+  // fact is that a discovery failure falls BACK to NextCloud's endpoint layout rather than locking everyone
+  // out — which is the right behaviour and completely invisible without a line like this one.
+  if (oidc?.enabled) {
+    facts.push(oidc.source === "discovery"
+      ? { key: "oidc", level: "ok", note: "discovery" }
+      : { key: "oidc", level: "warn", note: "fallback", detail: oidc.error ?? "" });
+  }
+
   return { facts, seasonRow };
 }
 
@@ -96,6 +106,7 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
       failed: () => t("status.failed", { n: f.value }),
       queued: () => t("status.queued", { n: f.value }),
       backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { hours: f.value, kept: f.detail }),
+      oidc: () => f.note === "discovery" ? t("status.oidcDiscovery") : t("status.oidcFallback", { why: f.detail }),
     }[f.key];
     return html`<li class="status ${f.level}"><b aria-hidden="true">${BADGE[f.level]}</b> <span>${text ? text() : f.key}</span></li>`;
   };

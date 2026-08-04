@@ -175,6 +175,8 @@
   "status.queued": "{n} beskeder ligger i kø (der er ingen webhook sat op).",
   "status.backupAge": "Nyeste sikkerhedskopi er {hours} timer gammel. {kept} gemt.",
   "status.backupNone": "Der er ingen sikkerhedskopier. Kør oprydningen, eller se RUNBOOK.",
+  "status.oidcDiscovery": "Login læser login-udbyderens egen liste over adresser.",
+  "status.oidcFallback": "Login kunne ikke læse udbyderens liste over adresser og gætter på NextClouds sædvanlige: {why}",
   "admin.rollover": "Ny sæson",
   "admin.rolloverHint": "Den næste sæson starter tom. Frivillige, deres aktiviteter og ugerytmen følger med — kun vagter og tilgængelighed nulstilles. Ret gerne navn og datoer, før du gemmer.",
   "admin.rolloverDo": "Opret {key}",

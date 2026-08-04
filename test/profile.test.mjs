@@ -7,7 +7,8 @@ import path from "node:path";
 import os from "node:os";
 import { makeWorld, makeAvailableEverywhere, csrfFromCookie } from "../tools/testkit.mjs";
 import { myProfile, saveProfile } from "../src/pages/profile.mjs";
-import { collectStatus } from "../src/pages/status.mjs";
+import { collectStatus, renderStatus } from "../src/pages/status.mjs";
+import { makeT } from "../src/config.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
 
 const withWorld = (opts, fn) => async () => {
@@ -194,4 +195,40 @@ test("the profile and status links appear in the navigation for the right people
   const planner = await w.signIn(w.people[0]);
   const pNav = await (await w.get("/", planner)).text();
   assert.match(pNav, /href="\/status"/);
+}));
+
+// ---- how sign-in finds the identity provider (increment S) ---------------------------------------------
+// A discovery failure falls back to NextCloud's endpoint layout rather than locking everyone out. That is the
+// right behaviour AND completely invisible, which is the shape of defect this project keeps finding. So the
+// fallback has to be reportable, and reported.
+test("the status page says whether sign-in read the provider's endpoint list", withWorld({}, async (w) => {
+  const base = { pattern: w.pattern, today: w.today, backupDir: null };
+
+  // Not configured: nothing to say, and an invite-only deployment should not see an OIDC line at all.
+  assert.equal(factFor(collectStatus(w.db, base), "oidc"), undefined,
+    "an invite-only deployment has no identity provider to report on");
+
+  const ok = factFor(collectStatus(w.db, { ...base, oidc: { enabled: true, source: "discovery" } }), "oidc");
+  assert.equal(ok.level, "ok");
+  assert.equal(ok.note, "discovery");
+
+  const degraded = factFor(collectStatus(w.db, {
+    ...base, oidc: { enabled: true, source: "fallback", error: "discovery: /.well-known returned 404" },
+  }), "oidc");
+  assert.equal(degraded.level, "warn", "guessing endpoints is a warning, not normal operation");
+  assert.match(degraded.detail, /404/, "and it must carry the reason, or nobody can fix it");
+
+  // And it reaches the rendered page, with the reason — a fact that collects but never renders is not
+  // reported. Rendered directly rather than over HTTP, because makeWorld configures no identity provider and
+  // the page is RIGHT to omit the line there; the first assertion above is what covers that case.
+  const t = makeT("en");
+  const page = renderStatus({
+    t, session: { csrf: "x" }, roles: ["planner"], who: "P",
+    status: { facts: [{ key: "oidc", level: "warn", note: "fallback", detail: "returned 404" }] },
+  }).__raw;
+  // Not the apostrophe: strings are escaped on output, so "NextCloud's" arrives as "NextCloud&#39;s". That is
+  // the escaping working, and matching on the raw apostrophe would be asserting the opposite.
+  assert.match(page, /guessing NextCloud.{0,6}s usual addresses/, "the OIDC line must render");
+  assert.match(page, /returned 404/, "with the reason, or nobody can fix it");
+  assert.match(page, /class="status warn"/, "and carry the warning level a reader can see");
 }));

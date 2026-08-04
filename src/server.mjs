@@ -5,7 +5,7 @@ import { createApp, send, redirect, readForm, html } from "./http.mjs";
 import { loadPattern, makeT, PATTERN_FILE, patternFileFor } from "./config.mjs";
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
-import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, checkState, completeOidc,
+import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
          linkIdentity, redeemInvite, createInvite, revokeInvite } from "./auth.mjs";
 import { layout, navFor, formatDate, formatTime, renderErrorPage, renderPrivacy } from "./views.mjs";
 import { slotOpenMessage } from "./notify.mjs";
@@ -122,8 +122,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     redirect(res, "/", { "Set-Cookie": setSession({ personId: who.personId }) });
   });
 
-  app.get("/auth/oidc", ({ res }) => {
-    const { url, state, verifier } = beginOidc(oidc);
+  // async because the authorization endpoint now comes from the IdP's discovery document rather than a
+  // hardcoded NextCloud path. The document is cached, so this is one request per issuer per 10 minutes.
+  app.get("/auth/oidc", async ({ res }) => {
+    const { url, state, verifier } = await beginOidc(oidc);
     // state and verifier ride in the session cookie: no server-side store, and they are signed, so a
     // callback cannot be replayed with attacker-chosen values.
     redirect(res, url, { "Set-Cookie": cookieHeader(sign({ oidcState: state, oidcVerifier: verifier, csrf: newCsrf() }, secret), { secure, maxAge: 600 }) });
@@ -443,10 +445,18 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     redirect(res, `/me?r=${r.ok ? "saved" : r.reason}`);
   });
 
-  app.get("/status", ({ req, res }) => {
+  app.get("/status", async ({ req, res }) => {
     const c = gate({ req, res }, "planner");
     if (!c) return;
-    const status = collectStatus(db, { pattern: cfg, today: today(), backupDir: backupConfig(env).dir });
+    // Read the cached discovery result so the page can say whether sign-in found the IdP's own metadata or is
+    // running on the NextCloud-shaped fallback. Cached, so this does not make loading /status hit the network
+    // on every view — and a failure here must not take the status page down with it.
+    let oidcState = null;
+    if (oidc.enabled) {
+      try { oidcState = { enabled: true, ...(await discoverOidc(oidc)) }; }
+      catch (e) { oidcState = { enabled: true, source: "fallback", error: e.message }; }
+    }
+    const status = collectStatus(db, { pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState });
     send(res, 200, renderStatus({ t, session: c.session, roles: c.roles, who: c.who, status }));
   });
 

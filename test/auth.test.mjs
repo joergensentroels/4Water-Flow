@@ -7,7 +7,8 @@ import { loadPattern } from "../src/config.mjs";
 import { seedStructure, seedPeople } from "../src/seed.mjs";
 import { sign, verify, parseCookies, cookieHeader, newCsrf, checkCsrf, sessionSecret, SESSION_MAX_AGE_S } from "../src/session.mjs";
 import { assertDevAllowed, devSignIn, oidcConfig, beginOidc, checkState, completeOidc, linkIdentity,
-         createInvite, redeemInvite, revokeInvite, rolesOf, requireRole } from "../src/auth.mjs";
+         createInvite, redeemInvite, revokeInvite, rolesOf, requireRole,
+         discoverOidc, validateEndpoint, clearDiscoveryCache, NEXTCLOUD_FALLBACK, DISCOVERY_TTL_MS } from "../src/auth.mjs";
 
 const SECRET = "x".repeat(48);
 const db0 = () => { const db = new DatabaseSync(":memory:"); migrate(db); return db; };
@@ -84,24 +85,106 @@ test("dev sign-in returns a real person or null, never a fabricated one", () => 
 });
 
 // ---- OIDC (no network) --------------------------------------------------------------------------------
-test("OIDC is disabled until every setting is present", () => {
+test("OIDC is disabled until every setting is present", async () => {
   assert.equal(oidcConfig({}).enabled, false);
   assert.equal(oidcConfig({ OIDC_ISSUER: "https://cloud.example.org", OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b" }).enabled, false);
   const full = { OIDC_ISSUER: "https://cloud.example.org", OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b", OIDC_REDIRECT_URI: "https://plan.example.org/auth/callback" };
   assert.equal(oidcConfig(full).enabled, true);
-  assert.throws(() => beginOidc(oidcConfig({})), /not configured/);
+  await assert.rejects(beginOidc(oidcConfig({})), /not configured/);
 });
 
-test("the authorize URL carries PKCE S256 and a state", () => {
-  const cfg = oidcConfig({ OIDC_ISSUER: "https://cloud.example.org/", OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b", OIDC_REDIRECT_URI: "https://plan.example.org/auth/callback" });
-  const { url, state, verifier } = beginOidc(cfg);
+// ---- endpoint discovery (increment S) -------------------------------------------------------------------
+// The three endpoint paths used to be hardcoded as NextCloud's /apps/oidc/*. That is one product's current
+// layout, not a spec, and it breaks under a subpath install. These tests pin the discovery behaviour AND the
+// refusals, because the token endpoint is handed client_secret and must never be taken on trust.
+const ISSUER = "https://cloud.example.org";
+const CFG = () => oidcConfig({ OIDC_ISSUER: ISSUER, OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b", OIDC_REDIRECT_URI: "https://plan.example.org/auth/callback" });
+
+// A discovery responder. `doc` is what the well-known route returns; everything else answers as the IdP.
+function idp(doc, { wellKnownOk = true, onCall = () => {} } = {}) {
+  return async (url, opts = {}) => {
+    onCall({ url, body: opts.body?.toString?.() });
+    if (url.includes("/.well-known/openid-configuration")) {
+      return wellKnownOk ? { ok: true, json: async () => doc } : { ok: false, status: 404 };
+    }
+    if (url.includes("token")) return { ok: true, json: async () => ({ access_token: "AT" }) };
+    return { ok: true, json: async () => ({ sub: "nc-42", name: "Volunteer 1", email: "v1@example.org" }) };
+  };
+}
+const goodDoc = (issuer = ISSUER) => ({
+  issuer,
+  authorization_endpoint: `${issuer}/index.php/apps/oidc/authorize`,
+  token_endpoint: `${issuer}/index.php/apps/oidc/token`,
+  userinfo_endpoint: `${issuer}/index.php/apps/oidc/userinfo`,
+});
+
+test("the authorize URL carries PKCE S256 and a state, and comes from discovery", async () => {
+  clearDiscoveryCache();
+  const cfg = oidcConfig({ OIDC_ISSUER: `${ISSUER}/`, OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b", OIDC_REDIRECT_URI: "https://plan.example.org/auth/callback" });
+  const { url, state, verifier } = await beginOidc(cfg, { fetchImpl: idp(goodDoc()) });
   const u = new URL(url);
   assert.equal(u.searchParams.get("response_type"), "code");
   assert.equal(u.searchParams.get("code_challenge_method"), "S256");
   assert.equal(u.searchParams.get("state"), state);
   assert.ok(u.searchParams.get("code_challenge"));
   assert.notEqual(u.searchParams.get("code_challenge"), verifier, "the challenge must be a hash, not the verifier");
-  assert.ok(!url.includes("//apps"), "trailing slash on the issuer must not double up");
+  assert.ok(!url.includes("//index.php"), "trailing slash on the issuer must not double up");
+  assert.match(u.pathname, /^\/index\.php\/apps\/oidc\/authorize$/,
+    "the path must be the one the IdP published, not one we guessed");
+});
+
+test("a discovered endpoint on another host is refused — that is where client_secret would go", () => {
+  assert.throws(() => validateEndpoint(ISSUER, "https://evil.example.net/token", "token_endpoint"),
+    /is on https:\/\/evil\.example\.net, not the configured issuer/);
+  // Subdomains are a different origin too: cloud.example.org and cdn.cloud.example.org are not the same host.
+  assert.throws(() => validateEndpoint(ISSUER, "https://cdn.cloud.example.org/token", "token_endpoint"), /not the configured issuer/);
+  assert.throws(() => validateEndpoint(ISSUER, "http://cloud.example.org/token", "token_endpoint"), /is not https/);
+  assert.throws(() => validateEndpoint(ISSUER, "not-a-url", "token_endpoint"), /is not a URL/);
+  // Same origin is fine, whatever the path.
+  assert.equal(validateEndpoint(ISSUER, `${ISSUER}/index.php/apps/oidc/token`, "token_endpoint"),
+    `${ISSUER}/index.php/apps/oidc/token`);
+  // A developer running a test IdP over plain http on localhost is allowed.
+  assert.equal(validateEndpoint("http://localhost:9000", "http://localhost:9000/token", "token_endpoint"),
+    "http://localhost:9000/token");
+});
+
+test("a discovery document that points elsewhere falls back rather than leaking the secret", async () => {
+  clearDiscoveryCache();
+  const hostile = { ...goodDoc(), token_endpoint: "https://evil.example.net/token" };
+  const got = await discoverOidc(CFG(), idp(hostile));
+  assert.equal(got.source, "fallback", "a rejected document must not be used");
+  assert.equal(got.token, `${ISSUER}${NEXTCLOUD_FALLBACK.token}`);
+  assert.match(got.error, /evil\.example\.net/);
+  assert.ok(!got.token.includes("evil"), "the secret must never be posted to the host in the document");
+});
+
+test("a document declaring a different issuer is refused", async () => {
+  clearDiscoveryCache();
+  const got = await discoverOidc(CFG(), idp(goodDoc("https://other.example.org")));
+  assert.equal(got.source, "fallback");
+  assert.match(got.error, /declares issuer/);
+});
+
+test("no well-known route falls back to NextCloud's layout and says why", async () => {
+  clearDiscoveryCache();
+  const got = await discoverOidc(CFG(), idp(null, { wellKnownOk: false }));
+  assert.equal(got.source, "fallback");
+  assert.equal(got.authorize, `${ISSUER}/apps/oidc/authorize`);
+  assert.match(got.error, /returned 404/);
+});
+
+test("discovery is cached, so it is not fetched on every sign-in", async () => {
+  clearDiscoveryCache();
+  const calls = [];
+  const fetchImpl = idp(goodDoc(), { onCall: (c) => calls.push(c.url) });
+  await discoverOidc(CFG(), fetchImpl);
+  await discoverOidc(CFG(), fetchImpl);
+  const wellKnown = calls.filter((u) => u.includes(".well-known"));
+  assert.equal(wellKnown.length, 1, `fetched the document ${wellKnown.length} times`);
+
+  // And the TTL is honoured, so rotating an IdP's endpoints does not need a restart.
+  await discoverOidc(CFG(), fetchImpl, { now: Date.now() + DISCOVERY_TTL_MS + 1 });
+  assert.equal(calls.filter((u) => u.includes(".well-known")).length, 2, "an expired entry must be refetched");
 });
 
 test("state is compared safely and a mismatch fails", () => {
@@ -111,24 +194,28 @@ test("state is compared safely and a mismatch fails", () => {
   assert.equal(checkState(undefined, "abc"), false);
 });
 
-test("the token exchange sends the verifier and requires a sub", async () => {
-  const cfg = oidcConfig({ OIDC_ISSUER: "https://cloud.example.org", OIDC_CLIENT_ID: "a", OIDC_CLIENT_SECRET: "b", OIDC_REDIRECT_URI: "https://plan.example.org/cb" });
+test("the token exchange sends the verifier, to the discovered endpoint, and requires a sub", async () => {
+  clearDiscoveryCache();
+  const cfg = CFG();
   const calls = [];
-  const fake = async (url, opts = {}) => {
-    calls.push({ url, body: opts.body?.toString?.() });
-    if (url.endsWith("/token")) return { ok: true, json: async () => ({ access_token: "AT" }) };
-    return { ok: true, json: async () => ({ sub: "nc-42", name: "Volunteer 1", email: "v1@example.org" }) };
-  };
-  const id = await completeOidc(cfg, { code: "C", verifier: "V" }, fake);
+  const id = await completeOidc(cfg, { code: "C", verifier: "V" }, idp(goodDoc(), { onCall: (c) => calls.push(c) }));
   assert.equal(id.subject, "nc-42");
-  assert.match(calls[0].body, /code_verifier=V/);
-  assert.match(calls[0].body, /grant_type=authorization_code/);
 
-  const noSub = async (url) => url.endsWith("/token")
-    ? { ok: true, json: async () => ({ access_token: "AT" }) }
-    : { ok: true, json: async () => ({ name: "nobody" }) };
+  const token = calls.find((c) => c.url.includes("/token"));
+  assert.equal(token.url, `${ISSUER}/index.php/apps/oidc/token`, "the published endpoint, not a guessed path");
+  assert.match(token.body, /code_verifier=V/);
+  assert.match(token.body, /grant_type=authorization_code/);
+  assert.ok(calls.some((c) => c.url.includes("/index.php/apps/oidc/userinfo")), "userinfo must also come from the document");
+
+  clearDiscoveryCache();
+  const noSub = async (url) => {
+    if (url.includes(".well-known")) return { ok: true, json: async () => goodDoc() };
+    if (url.includes("/token")) return { ok: true, json: async () => ({ access_token: "AT" }) };
+    return { ok: true, json: async () => ({ name: "nobody" }) };
+  };
   await assert.rejects(() => completeOidc(cfg, { code: "C", verifier: "V" }, noSub), /no sub/);
 
+  clearDiscoveryCache();
   const dead = async () => ({ ok: false, status: 500 });
   await assert.rejects(() => completeOidc(cfg, { code: "C", verifier: "V" }, dead), /token endpoint returned 500/);
 });

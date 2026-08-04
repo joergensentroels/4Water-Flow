@@ -30,29 +30,45 @@ With any one of those blank, the sign-in page silently does not offer NextCloud.
 half-configured OIDC button that always errors is worse than no button — but it also means **a typo shows up
 as a missing button, not an error message.** If the button is absent, check for an empty variable first.
 
-## 2. Verify the endpoint paths
+## 2. Endpoints come from discovery — you should not have to edit code
 
-⚠ **Most likely thing to be wrong.** The code assumes:
+The app asks the instance where its endpoints are:
 
-- authorize: `{issuer}/apps/oidc/authorize`
-- token: `{issuer}/apps/oidc/token`
-- userinfo: `{issuer}/apps/oidc/userinfo`
-
-Confirm against the instance's own discovery document:
-
-```bash
-curl -s https://cloud.4water.org/.well-known/openid-configuration | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o=JSON.parse(s);console.log(o.authorization_endpoint);console.log(o.token_endpoint);console.log(o.userinfo_endpoint)})"
+```
+GET {issuer}/.well-known/openid-configuration
 ```
 
-If they differ, fix the three URL builders in `src/auth.mjs` (`beginOidc` and `completeOidc`). A proper
-discovery-document fetch would be the tidier answer and is a reasonable follow-up; three constants were the
-honest choice while none of it could be tested.
+and uses the `authorization_endpoint`, `token_endpoint` and `userinfo_endpoint` it publishes. The document is
+cached for 10 minutes, so this is not a request per sign-in, and rotating the IdP's endpoints does not need a
+restart. Check what your instance publishes with:
+
+```bash
+curl -s https://cloud.4water.org/.well-known/openid-configuration | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o=JSON.parse(s);console.log(o.issuer);console.log(o.authorization_endpoint);console.log(o.token_endpoint);console.log(o.userinfo_endpoint)})"
+```
+
+**Every discovered endpoint must be on the same origin as `OIDC_ISSUER`, over https.** This is not tidiness:
+the token endpoint is where `OIDC_CLIENT_SECRET` gets posted, so a document naming another host would hand
+your secret to that host. `OIDC_ISSUER` is something you configured; the document is a network response, and
+the two are not equally trustworthy. A document that fails the check — wrong origin, plain http, or an
+`issuer` field that disagrees with `OIDC_ISSUER` — is discarded whole. `localhost` over http is exempt so a
+developer can run a test IdP.
+
+If discovery cannot be read at all, the app **falls back** to NextCloud's usual layout
+(`{issuer}/apps/oidc/{authorize,token,userinfo}`) rather than locking every volunteer out over a missing
+well-known route — and says so on **`/status`**, with the reason. If that line reads "guessing NextCloud's
+usual addresses", discovery is broken and you are one NextCloud upgrade away from a sign-in outage. Fix it
+rather than living on the fallback.
+
+Nothing here requires editing `src/auth.mjs`. If your instance publishes endpoints the app rejects, that is a
+finding worth reporting, not a constant to change.
 
 ## 3. Walk the flow and check each property
 
 | Check | How | Expected |
 |---|---|---|
 | The button appears | Open `/signin` | "Sign in with NextCloud" is shown |
+| Discovery works | Open `/status` as a planner | "reads the identity provider's own endpoint list", not "guessing" |
+| The endpoints are the published ones | Inspect the redirect URL | Its path matches `authorization_endpoint` from §2 |
 | PKCE is sent | Inspect the redirect URL | `code_challenge_method=S256` and a `code_challenge` present |
 | The challenge is a hash | Compare to the cookie | `code_challenge` must NOT equal the verifier |
 | State round-trips | Complete a sign-in | Lands on `/` signed in |

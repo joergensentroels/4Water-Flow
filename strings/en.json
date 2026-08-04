@@ -175,6 +175,8 @@
   "status.queued": "{n} messages are queued (no webhook is configured).",
   "status.backupAge": "The newest backup is {hours} hours old. {kept} kept.",
   "status.backupNone": "There are no backups at all. See RUNBOOK.",
+  "status.oidcDiscovery": "Sign-in reads the identity provider's own endpoint list.",
+  "status.oidcFallback": "Sign-in could not read the provider's endpoint list and is guessing NextCloud's usual addresses: {why}",
   "admin.rollover": "New season",
   "admin.rolloverHint": "The next season starts empty. Volunteers, their activities and the weekly rhythm carry over — only slots and availability reset. Correct the name and dates before saving if they are wrong.",
   "admin.rolloverDo": "Create {key}",
