@@ -169,7 +169,7 @@
   "admin.eraseBadMode": "Unknown erasure method.",
   "admin.retention": "Retention",
   "admin.retentionRun": "Run the clean-up now",
-  "admin.retentionDone": "Clean-up: removed {notifications} messages and {seasons} seasons.",
+  "admin.retentionDone": "Clean-up: removed {notifications} messages, {invitations} invitations and {seasons} seasons.",
   "admin.exportSeason": "Download the season as a spreadsheet",
   "profile.download": "Download my data",
   "admin.retentionHint": "We keep {seasons} seasons and delete messages older than {days} days. The clean-up runs automatically each night alongside the backup.",

@@ -409,6 +409,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
         seasonId() ? sessionsForSlot(db, seasonId(), w) : 0])),
       flash: adminFlash(t, query.get("r"), { message: query.get("m") ?? "", who: query.get("who") ?? "",
                                              mode: query.get("mode") ?? "", notifications: query.get("notifications") ?? 0,
+                                             invitations: query.get("invitations") ?? 0,
                                              seasons: query.get("seasons") ?? 0 }),
     }));
   });
@@ -635,7 +636,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const r = runRetention(db, { pattern: cfg, currentKey: cfg.season.key });
-    redirect(res, `/admin?r=retention_done&notifications=${r.notifications.removed}&seasons=${r.seasons.removed.length}`);
+    // Invitations are reported too. A clean-up that silently deletes a category it does not mention is the same
+    // problem as one that never deletes it: the operator cannot tell what happened.
+    redirect(res, `/admin?r=retention_done&notifications=${r.notifications.removed}` +
+                  `&invitations=${r.invitations.removed}&seasons=${r.seasons.removed.length}`);
   });
 
   // Every config edit goes through validate-then-atomic-write, then reloads in this process.

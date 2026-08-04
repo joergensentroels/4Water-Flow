@@ -288,3 +288,54 @@ test("the season CSV distinguishes the two halves of a class", withAdmin({}, asy
   assert.equal(new Set(rows.map((r) => r.join("|"))).size, rows.length,
     "no two rows for one session may be identical, or the file looks like it has duplicates");
 }));
+
+// ---- invitations were never pruned at all ----------------------------------------------------------------
+// Found by deliberately looking for siblings of two list-size defects. invitations.email is a personal email
+// address, docs/PRIVACY.md lists it as stored personal data, and increment N — the increment whose whole point
+// was "nothing deletes anything, ever" — built retention for notifications and seasons and did not touch this
+// table. So an invitation sent to somebody who never joined left their address in the database permanently.
+test("spent and dead invitations are deleted; live ones are not", withAdmin({}, async (w) => {
+  const { pruneInvitations } = await import("../src/retention.mjs");
+  const now = new Date("2026-08-04T12:00:00Z");
+  const at = (daysAgo) => new Date(now.getTime() - daysAgo * 86400000).toISOString();
+  const ins = w.db.prepare("INSERT INTO invitations (email, token, created_at, accepted_at) VALUES (?,?,?,?)");
+
+  ins.run("old-accepted@example.org", "h1", at(200), at(199));   // spent long ago
+  ins.run("new-accepted@example.org", "h2", at(10), at(9));      // spent recently
+  ins.run("ancient-pending@example.org", "h3", at(200), null);   // expired long ago, never redeemable
+  ins.run("recent-pending@example.org", "h4", at(3), null);      // still live — an admin may be waiting on it
+  // Revoked: revokeInvite stamps accepted_at with the epoch as a sentinel, so it is older than any cutoff.
+  ins.run("revoked@example.org", "h5", at(2), new Date(0).toISOString());
+
+  const r = pruneInvitations(w.db, { olderThanDays: 90, ttlDays: 14, now });
+  const left = w.db.prepare("SELECT email FROM invitations ORDER BY email").all().map((x) => x.email);
+
+  assert.deepEqual(left, ["new-accepted@example.org", "recent-pending@example.org"],
+    "only a recently-spent invite and a still-live one should survive");
+  assert.equal(r.removed, 3);
+  assert.equal(r.spent, 2, "the old accepted one and the revoked one");
+  assert.equal(r.expired, 1);
+
+  // A revoked invitation is dead the moment it is revoked — keeping the address after that has no purpose.
+  assert.ok(!left.includes("revoked@example.org"));
+  // And a second run has nothing to do.
+  assert.equal(pruneInvitations(w.db, { olderThanDays: 90, ttlDays: 14, now }).removed, 0);
+}));
+
+test("runRetention reports invitations, and the summary names them", withAdmin({}, async (w) => {
+  const now = new Date("2026-08-04T12:00:00Z");
+  w.db.prepare(`INSERT INTO invitations (email, token, created_at, accepted_at)
+                VALUES ('gone@example.org','hx',?,?)`)
+    .run(new Date(now.getTime() - 300 * 86400000).toISOString(), new Date(now.getTime() - 299 * 86400000).toISOString());
+
+  const r = runRetention(w.db, { pattern: w.pattern, currentKey: w.pattern.season.key, now });
+  assert.equal(r.invitations.removed, 1, "runRetention must actually prune them, not just expose the function");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM invitations").get().n, 0);
+
+  // A clean-up that silently deletes a category it does not mention is as opaque as one that never deletes it.
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const posted = await w.post("/admin/retention", admin, new URLSearchParams({ csrf: token }));
+  const { body } = await w.follow(posted, admin);
+  assert.match(body, /invitations|invitationer/i, "the summary must say how many invitations went");
+}));

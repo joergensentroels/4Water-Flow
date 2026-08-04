@@ -48,8 +48,10 @@ Roughly 40 volunteers per department. Ordinary contact data, no special categori
 - **Lawful basis:** *legitimate interest* — a volunteer organisation cannot schedule volunteers without
   knowing who they are and when they are free. Consent is a poor fit: withdrawing it would have to mean
   leaving the rota, which makes the consent less than free.
-- **Retention:** suggest **two seasons of history, then delete**. That keeps "is this person active" answerable
-  across a boundary while not accumulating years of who-taught-what. ⚠ Not implemented — see below.
+- **Retention:** **two seasons of history, then delete**, which keeps "is this person active" answerable across
+  a boundary without accumulating years of who-taught-what. Implemented and configurable in
+  `config/pattern.json` under `retention`; it runs as part of the nightly backup, so it is only as reliable as
+  that cron line. Notifications and invitations are bounded separately, by days rather than seasons.
 - **Transfers:** none outside the EU, provided the host stays in the EU. Worth confirming where Lyon's server
   physically is.
 
@@ -68,16 +70,39 @@ Roughly 40 volunteers per department. Ordinary contact data, no special categori
 
 ## Honest gaps
 
-1. **No retention job.** Nothing deletes anything, ever. The suggested two-season rule needs implementing —
-   the natural place is alongside the nightly backup.
-2. **No erasure button.** See above. Doing it properly needs a decision about whether past assignments keep a
-   name.
+**This section was itself out of date, which is worth saying plainly at the top of it.** Four of the five gaps
+listed here were closed by later work, and the document went on telling the board that nothing was ever
+deleted, that there was no erasure, and that volunteers were never told anything. A privacy document that
+understates what the software does is a smaller problem than one that overstates it, but it is the same defect:
+a confident claim nobody checked. What follows is the current state.
+
+**Closed:**
+
+1. ~~No retention job.~~ `runRetention` prunes notifications older than the configured window, invitations that
+   are spent or dead, and seasons beyond the keep count. It runs from `tools/backup.mjs`, so the nightly cron
+   line in RUNBOOK is what makes it happen — **if that line is not installed, nothing is deleted.** The
+   two-season default is honoured; a zero or a typo falls back to the default rather than deleting everything.
+2. ~~No erasure button.~~ Administration → a person → Erase, in two modes. *Anonymise* keeps who-taught-what
+   with an unidentifiable label and strips name, contact, dance role, sign-in linkage and the calendar
+   credential; *remove* deletes the row. The last administrator cannot be erased.
+4. ~~`notifications.body` is unbounded.~~ Bounded by `retention.notificationDays`, default 90.
+5. ~~No privacy notice shown to volunteers.~~ A short notice is linked from the availability screen and the
+   volunteer's own page, and it covers the calendar link explicitly.
+
+**Still true, and not fixable in code:**
+
 3. **Backups extend retention.** Fourteen daily copies live in the volume and on NextCloud, so a deletion is
-   not fully effective for a fortnight. This is normal and worth stating rather than hiding.
-4. **`notifications.body` contains names** (a nudge is addressed to someone). It is capped only by the app's
-   own retention of that table, which is currently unbounded — the same gap as (1).
-5. **No privacy notice shown to volunteers.** They should be told what is held and why, ideally on the
-   availability screen where they first enter data. A sentence and a link would do it.
+   not fully effective for a fortnight. Normal, and worth stating rather than hiding.
+
+**Newly known:**
+
+6. **Retention depends on an operator installing a cron line.** The app cannot schedule it — deliberately, since
+   a container that deletes data on a timer nobody configured is worse. But it means "deleted automatically" is
+   true of the software and conditional on the deployment. Check `/status` for the backup age: if backups are
+   not running, retention is not either.
+7. **An invitation address outlives the invitation by design, briefly.** A spent invite is kept for the
+   retention window rather than deleted on acceptance, so an admin can still see recent activity on the
+   Administration screen. Shorten `retention.notificationDays` if the board prefers otherwise.
 
 ## Security measures that bear on this
 

@@ -169,7 +169,7 @@
   "admin.eraseBadMode": "Ukendt slettemetode.",
   "admin.retention": "Opbevaring",
   "admin.retentionRun": "Kør oprydning nu",
-  "admin.retentionDone": "Oprydning: {notifications} beskeder og {seasons} sæsoner fjernet.",
+  "admin.retentionDone": "Oprydning: fjernede {notifications} beskeder, {invitations} invitationer og {seasons} sæsoner.",
   "admin.exportSeason": "Hent sæsonen som regneark",
   "profile.download": "Hent mine oplysninger",
   "admin.retentionHint": "Vi beholder {seasons} sæsoner og sletter beskeder ældre end {days} dage. Oprydningen kører automatisk hver nat sammen med sikkerhedskopien.",

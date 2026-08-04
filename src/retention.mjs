@@ -63,11 +63,34 @@ export function pruneSeasons(db, { keep, currentKey = null }) {
   return { removed: counted, keptCount: all.length - doomed.length, orphanedAvailability: orphaned };
 }
 
+// Spent and dead invitations. Found by asking where else an unbounded thing was hiding after two list-size
+// defects — and this one is worse than a big page: invitations.email is a personal email address, docs/PRIVACY.md
+// lists it as stored personal data, and NOTHING has ever deleted one. Increment N built retention for
+// notifications and seasons and did not touch this table, so an invite sent to somebody who never joined leaves
+// their address in the database permanently, with no lawful basis for keeping it.
+//
+// Two cases, both genuinely dead:
+//   - ACCEPTED: the person record is now the record of truth, and the invitation table does not store who
+//     issued it, so there is no audit value left in the row. Revoked invitations land here too — revokeInvite
+//     stamps accepted_at with the epoch as a sentinel, which makes them immediately older than any cutoff, and
+//     that is right: a revoked invite is dead the moment it is revoked.
+//   - UNACCEPTED and past the redemption window: it can never be redeemed again, so it is an email address and
+//     nothing else. Given a grace period beyond expiry so an admin can still see a recent one on the screen.
+export function pruneInvitations(db, { olderThanDays = 90, ttlDays = 14, now = new Date() } = {}) {
+  const cutoff = new Date(now.getTime() - olderThanDays * 86400000).toISOString();
+  const deadCutoff = new Date(now.getTime() - (olderThanDays + ttlDays) * 86400000).toISOString();
+
+  const spent = db.prepare("DELETE FROM invitations WHERE accepted_at IS NOT NULL AND accepted_at < ?").run(cutoff).changes;
+  const expired = db.prepare("DELETE FROM invitations WHERE accepted_at IS NULL AND created_at < ?").run(deadCutoff).changes;
+  return { removed: spent + expired, spent, expired, cutoff, deadCutoff };
+}
+
 export function runRetention(db, { pattern, currentKey, now = new Date() }) {
   const cfg = retentionConfig(pattern);
   const notes = pruneNotifications(db, { olderThanDays: cfg.notificationDays, now });
+  const invites = pruneInvitations(db, { olderThanDays: cfg.notificationDays, now });
   const seasons = pruneSeasons(db, { keep: cfg.seasons, currentKey });
-  return { config: cfg, notifications: notes, seasons };
+  return { config: cfg, notifications: notes, invitations: invites, seasons };
 }
 
 // ---- erasure ------------------------------------------------------------------------------------------
