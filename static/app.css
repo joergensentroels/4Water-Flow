@@ -163,6 +163,16 @@ li.status.warn > b { color: #a86a12; }
 li.status.bad > b { color: var(--no); }
 @media (prefers-color-scheme: dark) { li.status.warn > b { color: #e0b062; } }
 
+/* A secret shown exactly once — an invite link, a calendar URL. Must be selectable and fully visible: a
+   truncated credential is a credential nobody can use, and this is the only time it will ever be shown. */
+.tokenbox {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .82rem; line-height: 1.5;
+  background: var(--bg); border: 1px solid var(--edge); border-radius: .4rem;
+  padding: .5rem .6rem; margin: .4rem 0;
+  overflow-wrap: anywhere; user-select: all;
+}
+
 /* The outbox. Message bodies are the point of the page, so they get room to breathe and a left rule carrying
    the delivery state — never colour alone, since the state is also written out in words on the meta line. */
 ul.outbox { list-style: none; margin: 0; padding: 0; }

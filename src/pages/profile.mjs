@@ -48,6 +48,8 @@ export function saveProfile(db, personId, form) {
 
 const OUTCOME = {
   saved: { key: "profile.saved" },
+  calendar_created: { key: "calendar.created" },
+  calendar_revoked: { key: "calendar.revoked" },
   name_required: { key: "profile.nameRequired", bad: true },
   bad_contact: { key: "profile.badContact", bad: true },
   contact_taken: { key: "profile.contactTaken", bad: true },
@@ -57,7 +59,10 @@ export function profileFlash(t, code) {
   return o ? { text: t(o.key), bad: !!o.bad } : null;
 }
 
-export function renderProfile({ t, session, roles, who, me, score, flash }) {
+// `calendar` defaults to "not set up", so a caller that does not care about the feed — and every test written
+// before it existed — still renders a valid page rather than throwing on a missing property.
+export function renderProfile({ t, session, roles, who, me, score, flash,
+                                calendar = { exists: false, fresh: null, timezoneConfigured: true } }) {
   const body = html`
     <h2>${t("profile.title")}</h2>
 
@@ -85,6 +90,36 @@ export function renderProfile({ t, session, roles, who, me, score, flash }) {
         ${me.capabilities.length ? me.capabilities.map((c) => c.label).join(", ") : t("profile.noCapabilities")}</p>
       <p class="hint">${t("profile.capabilitiesNote")}</p>
       <p class="hint">${t("profile.roles")}: ${me.roles.length ? me.roles.map((r) => t(`role.${r}`)).join(", ") : "—"}</p>
+    </div>
+
+    <!-- The calendar subscription. Stated plainly rather than buried: this link is a password. A calendar
+         client cannot sign in, so anyone holding the URL can read this volunteer's shifts — which is a fair
+         trade for shifts that appear on their phone without being sought out, but only if they know. -->
+    <div class="card">
+      <h3>${t("calendar.title")}</h3>
+      <p class="hint">${t("calendar.what")}</p>
+      ${calendar.fresh ? html`
+        <p class="hint"><b>${t("calendar.copyNow")}</b></p>
+        <p class="tokenbox">${calendar.fresh}</p>
+        <!-- Relative when FOURWATER_BASE_URL is unset. Say so, because pasting a path into a calendar app does
+             nothing and the volunteer has no way to know why. The origin is deliberately NOT taken from the
+             Host header: a request with a forged Host would render a link pointing at somebody else's server,
+             and the volunteer would paste their own token into it. -->
+        ${calendar.fresh.startsWith("http") ? "" : html`<p class="hint">${t("calendar.prefix")}</p>`}
+        <p class="hint">${t("calendar.secret")}</p>`
+      : calendar.exists ? html`
+        <p class="hint">${t("calendar.alreadyOn")}</p>` : ""}
+
+      ${calendar.timezoneConfigured ? "" : html`<p class="hint"><b>${t("calendar.noTimezone")}</b></p>`}
+
+      <form method="post" action="/me/calendar">${csrfField(session)}
+        <p><button type="submit" class="secondary">${calendar.exists ? t("calendar.regenerate") : t("calendar.create")}</button></p>
+      </form>
+      ${calendar.exists ? html`
+        <form method="post" action="/me/calendar">${csrfField(session)}
+          <input type="hidden" name="action" value="revoke">
+          <p><button type="submit" class="secondary">${t("calendar.revoke")}</button></p>
+        </form>` : ""}
     </div>
 
     <p><a class="btn secondary" href="/me/export.json">${t("profile.download")}</a></p>

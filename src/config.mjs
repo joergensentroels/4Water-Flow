@@ -49,8 +49,36 @@ export function validatePattern(p) {
     for (const k of w.activities) if (!keys.has(k)) err(`weekly references unknown activity "${k}"`);
   }
   if (!Array.isArray(p.roles) || !p.roles.includes("volunteer")) err("roles must include volunteer");
+
+  // The calendar feed needs to know when "19:00" actually is, and how long a shift runs — neither of which the
+  // schema records. Absent means the defaults below, so an older config keeps working.
+  if (p.calendar !== undefined) {
+    const c = p.calendar;
+    if (!c || typeof c !== "object" || Array.isArray(c)) err("calendar must be an object");
+    if (c.timezone !== undefined) {
+      if (typeof c.timezone !== "string") err("calendar.timezone must be a string like \"Europe/Copenhagen\"");
+      // Asked of Intl rather than pattern-matched: a typo like "Europe/Copenhagn" looks perfectly well-formed
+      // and would silently put every shift in UTC, an hour or two off, all season.
+      try { new Intl.DateTimeFormat("en-US", { timeZone: c.timezone }); }
+      catch { err(`calendar.timezone "${c.timezone}" is not a time zone this system knows`); }
+    }
+    if (c.eventMinutes !== undefined) {
+      if (!Number.isInteger(c.eventMinutes) || c.eventMinutes < 15 || c.eventMinutes > 600) {
+        err("calendar.eventMinutes must be a whole number of minutes, 15..600");
+      }
+    }
+  }
   return p;
 }
+
+// Defaults live here, next to their validation, so there is one answer to "how long is a shift".
+// UTC as the fallback zone is deliberate: it is wrong for every department, which makes a missing
+// calendar.timezone visible as an offset rather than plausible-looking and quietly incorrect.
+export const calendarConfig = (pattern) => ({
+  timezone: pattern?.calendar?.timezone || "UTC",
+  eventMinutes: pattern?.calendar?.eventMinutes || 90,
+  configured: Boolean(pattern?.calendar?.timezone),
+});
 
 // Absent needs means one person, role irrelevant. Returned as a flat list of role slots, because that is what
 // both the seeder and every screen actually want: one entry per person the session requires.

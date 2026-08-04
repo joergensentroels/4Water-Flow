@@ -16,6 +16,21 @@ the retention period; the rest is factual and can be checked against the code.
 | Sign-in linkage | `people.auth_provider`, `auth_subject` | derived on first sign-in |
 | Invitation addresses | `invitations.email` | admin |
 | Messages sent about them | `notifications.body` | generated |
+| Calendar-feed credential | `people.calendar_token_hash` | the volunteer, if they ask for a feed |
+
+**The calendar feed deserves its own paragraph**, because it is the one place this app hands out a URL that
+works without signing in. A calendar client cannot present a session, so the link itself is the credential.
+The consequences are deliberate, and all of them are stated to the volunteer on their own page and in the
+in-app privacy notice rather than left to be discovered:
+
+- Only a **SHA-256 hash** is stored, exactly as for invitations. A copy of the database does not yield working
+  calendar URLs.
+- The raw link is shown **once**, when it is created, and cannot be recovered afterwards — only replaced.
+- **Anyone holding the link can read that volunteer's shifts.** Not the whole plan and nothing else about
+  them, but that much. It is theirs to replace or switch off at any time, and both take effect immediately.
+- A feed contains only that person's own assignments. It is not a second route to the roster.
+- **Erasure destroys the credential.** Anonymising also marks the row inactive, which by itself would already
+  stop the feed serving — but that would leave a live secret in the database, so `erasePerson` nulls it.
 
 **What is deliberately NOT stored:** no passwords (sign-in is NextCloud's job or a single-use link), no
 payment details, no attendance or performance records, no free-text notes about people, and no analytics or

@@ -109,6 +109,7 @@ export function renderPrivacy({ t, roles = [], signedIn = false }) {
         <p>${t("privacy.what")}</p>
         <p>${t("privacy.why")}</p>
         <p>${t("privacy.who")}</p>
+        <p>${t("privacy.calendar")}</p>
         <p>${t("privacy.rights")}</p>
       </div>
       <p><a class="btn secondary" href="${signedIn ? "/availability" : "/signin"}">${t("privacy.back")}</a></p>`,

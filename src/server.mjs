@@ -2,7 +2,7 @@
 // server on an ephemeral port rather than a mock — the bugs worth catching are in the plumbing.
 import { pathToFileURL } from "node:url";
 import { createApp, send, redirect, readForm, html } from "./http.mjs";
-import { loadPattern, makeT, PATTERN_FILE, patternFileFor } from "./config.mjs";
+import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig } from "./config.mjs";
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
@@ -26,7 +26,9 @@ import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
-         eligiblePeopleFor, assignSlot, unassignSlot } from "./queries.mjs";
+         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor } from "./queries.mjs";
+import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
+         personByCalendarToken } from "./calendar.mjs";
 
 // `today` is a single injected clock for the whole app: "upcoming" here, the hand-back cutoff in the board,
 // and the nudge window later all need one, and three separate calls to new Date() is how those drift apart
@@ -363,6 +365,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // The raw invite token is shown ONCE, right after creation, and never stored — only its hash is. So it is
   // held in memory keyed by the admin's person id until they navigate away.
   const freshInvites = new Map();
+  // Same one-shot pattern for a freshly minted calendar link, and for the same reason: only the hash is
+  // stored, so this is the single moment the raw token can be shown. Cleared as soon as it has been rendered.
+  const freshCalendarLinks = new Map();
 
   app.get("/admin", ({ req, res, query }) => {
     const c = gate({ req, res }, "admin");
@@ -434,7 +439,70 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       t, session: c.session, roles: c.roles, who: c.who, me,
       score: sid ? score(db, c.personId, sid) : 0,
       flash: profileFlash(t, query.get("r")),
+      calendar: {
+        exists: hasCalendarToken(db, c.personId),
+        // Shown ONCE, immediately after creation, exactly like an invite token: only its hash is stored, so
+        // there is nothing to show later. Held in memory keyed by person, not in the URL — a capability URL in
+        // a query string ends up in logs and browser history.
+        fresh: freshCalendarLinks.get(c.personId) ?? null,
+        // The feed puts events at a real instant, which needs a real time zone. If nobody set one the app
+        // falls back to UTC and SAYS so, rather than quietly placing every shift an hour or two out.
+        timezoneConfigured: calendarConfig(cfg).configured,
+      },
     }));
+    freshCalendarLinks.delete(c.personId);
+  });
+
+  // The feed itself. No session: a calendar client cannot present one, so the token in the path IS the
+  // credential. Read-only, and it must never set a cookie or reveal whether a token merely exists.
+  app.get("/calendar/:token.ics", ({ req, res, params }) => {
+    const key = clientKey(req);
+    if (limiter.blocked(key)) return send(res, 429, "", { "Retry-After": "600", "Content-Type": "text/plain" });
+    const who = personByCalendarToken(db, params.token);
+    if (!who) {
+      // A wrong token is a failed authentication, so it counts toward the same limiter that guards sign-in —
+      // this endpoint is the one an attacker can hammer without an account. 404, not 403: "that token is
+      // wrong" and "there is no such feed" must be indistinguishable.
+      limiter.fail(key, "calendar-token");
+      return send(res, 404, "", { "Content-Type": "text/plain" });
+    }
+    const cal = calendarConfig(cfg);
+    // A little history, so a feed is not empty in the first week of a season.
+    const from = new Date(Date.parse(`${today()}T00:00:00Z`) - 60 * 86400000).toISOString().slice(0, 10);
+    const body = buildIcs({
+      rows: calendarRowsFor(db, who.personId, from),
+      calendarName: t("calendar.name", { app: t("app.title") }),
+      timeZone: cal.timezone,
+      eventMinutes: cal.eventMinutes,
+      t,
+    });
+    send(res, 200, body, {
+      "Content-Type": "text/calendar; charset=utf-8",
+      // Not attachment: a subscribing client fetches this repeatedly and must not be offered a download.
+      "Content-Disposition": 'inline; filename="4water.ics"',
+      "Cache-Control": "private, max-age=300",
+    });
+  });
+
+  app.post("/me/calendar", async ({ req, res }) => {
+    const c = await postGate({ req, res });
+    if (!c) return;
+    if (c.form.action === "revoke") {
+      revokeCalendarToken(db, c.personId);
+      freshCalendarLinks.delete(c.personId);
+      return redirect(res, "/me?r=calendar_revoked");
+    }
+    // Rotate on every create: asking for a link when one exists means the old one is lost or leaked, and
+    // handing back the same secret would make "regenerate" a lie.
+    const made = calendarTokenFor(db, c.personId, { rotate: true });
+    if (made?.token) {
+      // Absolute when the deployment says what it is called: a calendar client cannot resolve a relative path.
+      // Without FOURWATER_BASE_URL the path is still correct and the page says to prefix the site address —
+      // guessing an origin from the Host header would let a proxied request mint a link pointing anywhere.
+      const base = String(env.FOURWATER_BASE_URL || "").replace(/\/+$/, "");
+      freshCalendarLinks.set(c.personId, `${base}/calendar/${made.token}.ics`);
+    }
+    redirect(res, "/me?r=calendar_created");
   });
 
   app.post("/me", async ({ req, res }) => {

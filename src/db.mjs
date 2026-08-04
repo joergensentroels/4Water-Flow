@@ -44,6 +44,9 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
 // lose data has no business running unattended at boot.
 const ADDED_COLUMNS = [
   { table: "assignments", column: "role", ddl: "ALTER TABLE assignments ADD COLUMN role TEXT" },
+  // The calendar subscription's credential, stored only as a SHA-256 hash — a copy of this database must not
+  // yield working calendar URLs. NULL means the volunteer has not asked for a feed.
+  { table: "people", column: "calendar_token_hash", ddl: "ALTER TABLE people ADD COLUMN calendar_token_hash TEXT" },
 ];
 
 function applyColumnAdditions(db) {
@@ -84,6 +87,9 @@ export function migrate(db) {
       -- with no NextCloud identity. A COLUMN, never a branch in application logic.
       auth_provider  TEXT NOT NULL DEFAULT 'oidc',
       auth_subject   TEXT,
+      -- SHA-256 of the volunteer's calendar-feed token. The raw token is shown once and never stored, exactly
+      -- like an invitation. NULL until they ask for a feed.
+      calendar_token_hash TEXT,
       UNIQUE (auth_provider, auth_subject)
     );
 

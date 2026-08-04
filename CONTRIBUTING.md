@@ -50,6 +50,7 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 | `src/*.mjs` | logic — one concern per file |
 | `src/pages/*.mjs` | one screen each, rendering only |
 | `src/server.mjs` | routes and wiring, no logic |
+| `src/calendar.mjs` | the ICS feed: local-time→UTC via Intl, RFC 5545 escaping and folding, feed tokens |
 | `config/`, `strings/` | the seams. Everything department-specific, and nothing else |
 | `tools/` | things you run: backup, demo, bootstrap, the test harness |
 | `docs/` | OIDC checklist, privacy position |

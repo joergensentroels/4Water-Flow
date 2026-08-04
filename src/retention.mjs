@@ -109,8 +109,12 @@ export function erasePerson(db, personId, { mode, now = new Date() }) {
     if (mode === "anonymise") {
       // A stable, obviously-not-a-name label. Keyed on the id so two erased people stay distinguishable in
       // the history without either being identifiable.
+      // calendar_token_hash goes too. The feed would already stop serving, because resolving a token filters on
+      // status='active' and this row becomes inactive — but that is a filter in another module doing an
+      // erasure's job. A right-to-erasure that leaves a live credential in the database because something
+      // elsewhere currently declines to honour it is exactly the kind of safe-by-coincidence this keeps finding.
       db.prepare(`UPDATE people SET name = ?, contact = NULL, preferred_role = NULL, status = 'inactive',
-                                     auth_provider = 'erased', auth_subject = NULL
+                                     auth_provider = 'erased', auth_subject = NULL, calendar_token_hash = NULL
                    WHERE id = ?`).run(`#${personId}`, personId);
       db.prepare("DELETE FROM availability_day WHERE person_id=?").run(personId);
       db.prepare("DELETE FROM availability_hour WHERE person_id=?").run(personId);
@@ -143,6 +147,10 @@ export function exportPerson(db, personId) {
   return {
     exportedAt: null,      // stamped by the caller: this module takes no clock so its output is comparable
     person,
+    // Whether a calendar subscription is live is a fact about them and belongs in a subject access request.
+    // The token hash deliberately is NOT here: it is a credential, not personal data, and an export lands in
+    // a downloaded file. Whether one exists is the useful part; its value would only be a liability.
+    calendarFeedEnabled: Boolean(db.prepare("SELECT calendar_token_hash h FROM people WHERE id=?").get(personId)?.h),
     roles: q("SELECT r.name FROM person_roles pr JOIN roles r ON r.id=pr.role_id WHERE pr.person_id=?").map((r) => r.name),
     capabilities: q("SELECT a.key, a.label FROM capabilities c JOIN activities a ON a.id=c.activity_id WHERE c.person_id=?"),
     availabilityByDay: q("SELECT date, available FROM availability_day WHERE person_id=? ORDER BY date"),

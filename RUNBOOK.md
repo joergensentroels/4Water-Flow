@@ -29,6 +29,17 @@ openssl rand -hex 32
 Put that in `FOURWATER_SECRET`. The app **refuses to start** without it rather than falling back to a
 guessable default — if it exits complaining about `FOURWATER_SECRET`, that is working as intended.
 
+Two more are worth setting even though nothing forces them:
+
+- **`FOURWATER_BASE_URL`** — e.g. `https://plan-cph.4water.org`. Without it, the bootstrap invite link and the
+  volunteer calendar link are printed as paths, and a volunteer pasting `/calendar/….ics` into their calendar
+  app gets nothing. The app will not guess the origin from the `Host` header on purpose: a request with a
+  forged Host would render a link pointing at someone else's server, and the volunteer would paste their own
+  token into it.
+- **`calendar.timezone` in `config/pattern.json`** — already set to `Europe/Copenhagen`. This is what puts a
+  19:00 shift at 19:00 in a subscriber's calendar. Change the department and forget this, and every event is
+  silently off by the UTC offset for the whole season.
+
 ```bash
 docker compose up -d --build
 ```

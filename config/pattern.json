@@ -11,10 +11,17 @@
     "   export; the times are invented.",
     "2. ONE timeslot per day is also invented. The real export has four parallel schedules and a Master",
     "   Schedule, which implies a richer grid - several times on a day is normal and fully supported.",
+    "3. calendar.eventMinutes (90) is invented too - no shift length was ever stated. calendar.timezone is",
+    "   NOT invented; it is what makes the calendar feed put 19:00 at the right instant, and getting it wrong",
+    "   shifts every event by the UTC offset for the whole season.",
     "Both are editable from the Administration screen; nothing needs hand-editing here."
   ],
   "department": "cph",
   "locale": "en",
+  "calendar": {
+    "timezone": "Europe/Copenhagen",
+    "eventMinutes": 90
+  },
   "season": {
     "key": "2026-Q1Q2",
     "from": "2026-01-01",

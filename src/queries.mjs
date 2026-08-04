@@ -251,6 +251,24 @@ export function myUpcoming(db, personId, seasonId, fromDate, limit = 20) {
   `).all({ pid: personId, sid: seasonId, from: fromDate, lim: limit });
 }
 
+// Everything the calendar feed needs, for one person, across ALL seasons.
+//
+// Not season-scoped, unlike every other view: a calendar spans a rollover, and a volunteer whose subscription
+// went blank on the day the new season opened would reasonably conclude the app had lost their shifts.
+// Bounded by date instead, with a little history so the feed is not empty in the first week of a season.
+export function calendarRowsFor(db, personId, fromDate) {
+  return db.prepare(`
+    SELECT a.id AS assignmentId, s.date, a.role, t.hour, t.minute,
+           act.label AS activityLabel, a.state
+      FROM assignments a
+      JOIN sessions   s ON s.id = a.session_id
+      JOIN timeslots  t ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+     WHERE a.person_id = :pid AND s.date >= :from
+     ORDER BY s.date, t.hour, t.minute
+  `).all({ pid: personId, from: fromDate });
+}
+
 export function setAvailabilityDay(db, personId, date, available) {
   db.prepare(`INSERT INTO availability_day (person_id, date, available) VALUES (:pid, :d, :a)
               ON CONFLICT (person_id, date) DO UPDATE SET available = :a`)

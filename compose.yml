@@ -33,6 +33,10 @@ services:
       # and the app refuses to start rather than pretend.
       FOURWATER_SECRET: ${FOURWATER_SECRET:?set FOURWATER_SECRET in .env — openssl rand -hex 32}
 
+      # The address this instance answers on. Not required to run, but without it the first-admin invite link
+      # and every volunteer's calendar link are shown as paths, and a path is useless in a calendar app.
+      FOURWATER_BASE_URL: ${FOURWATER_BASE_URL:-}
+
       # NextCloud OIDC. Leave unset and the sign-in page simply does not offer it; invite links still work.
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
