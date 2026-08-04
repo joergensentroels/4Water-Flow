@@ -25,6 +25,7 @@ import os from "node:os";
 import { ROOT, loadPattern } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
 import { bootstrapAdmin } from "../tools/bootstrap.mjs";
+import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 
 const PORT = 8166;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -59,7 +60,22 @@ const reasonOf = (res) => new URL(res.headers.get("location"), "http://x").searc
 test("a real deployment can be set up and used end to end", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "4water-journey-"));
   const dbFile = path.join(dir, "app.db");
-  const pattern = loadPattern(path.join(ROOT, "demo-pattern.json"));
+
+  // A season spanning today, written into this test's OWN temp directory.
+  //
+  // It used to read demo-pattern.json from the repository root. `.gitignore` excludes that file, so on a fresh
+  // clone this test failed with ENOENT before doing anything: the acceptance gate was the one test nobody else
+  // could run. It survived because the repo has no remote yet, so CI has never executed once.
+  //
+  // tools/season-fixture.mjs, not tools/testkit.mjs. The rule this file lives by is that nothing may hand the
+  // app state a real deployment would not have — and a pattern file is exactly what an operator DOES hand it,
+  // via the documented FOURWATER_PATTERN. Writing one stands in for the operator, not for the application.
+  const patternFile = path.join(dir, "pattern.json");
+  writeSeasonSpanningToday(patternFile, { key: "journey" });
+  const pattern = loadPattern(patternFile);
+  assert.ok(pattern.season.from <= new Date().toISOString().slice(0, 10) &&
+            pattern.season.to >= new Date().toISOString().slice(0, 10),
+    "the journey needs a season that contains today, or every screen is legitimately empty");
 
   // ---- 1. the operator's first step, in the order RUNBOOK gives: bootstrap BEFORE boot ----
   let invite;
@@ -76,7 +92,7 @@ test("a real deployment can be set up and used end to end", async () => {
     cwd: ROOT,
     env: { ...process.env,
            FOURWATER_DB: dbFile,
-           FOURWATER_PATTERN: path.join(ROOT, "demo-pattern.json"),   // a season that spans today
+           FOURWATER_PATTERN: patternFile,                             // a season that spans today
            FOURWATER_BASE_URL: BASE,                                  // so links come out absolute
            FOURWATER_SECRET: "j".repeat(48),
            PORT: String(PORT), HOST: "127.0.0.1",
@@ -223,6 +239,14 @@ test("a real deployment can be set up and used end to end", async () => {
     const status = await (await admin.get("/status")).text();
     assert.match(status, /is running and ends|kører og slutter/, "the status page must report the season as current");
     assert.ok(!/status\.[a-z]/i.test(status), "and every fact must render as a sentence");
+
+    // The nudge job must ACCOUNT FOR ITSELF here, and this assertion is the whole reason that line is worth
+    // having. `jobs` is optional on buildApp — the same optional-argument shape that left `notifier` missing
+    // from production for most of this project — so a status page that silently omits the line would be a
+    // monitor carrying the identical defect to the one it monitors. Only a real boot can catch that, and this
+    // is the only file that boots for real.
+    assert.match(status, /availability reminder|Påmindelsen om tilgængelighed/i,
+      "a real boot must wire the nudge job into /status, or the page cannot report a dead timer");
 
     const csv = await admin.get("/planner/season.csv");
     assert.equal(csv.status, 200);

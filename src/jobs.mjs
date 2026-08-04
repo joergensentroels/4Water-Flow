@@ -65,6 +65,18 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
   // Skipping is the right response rather than queueing: the tick is a periodic check whose whole design is
   // that a missed one costs nothing.
   let running = false;
+
+  // The job reports on itself, because the worst defect in this project was this job never running at all while
+  // seventeen tests proved it worked. A test caught that once; nothing would have caught it happening AGAIN on a
+  // live instance, because a nudge nobody needed and a nudge job that is dead look identical from outside.
+  //
+  // `lastRun` is deliberately the last time the job RAN, not the last time it sent something — those differ
+  // exactly in the healthy case where everyone has already answered, which is the case that would otherwise
+  // read as broken. In memory, so it resets on restart: honest, and no schema for an operational detail. The
+  // boot tick runs five seconds in, so an instance that has been up a while and still says "never" is telling
+  // you the timer is not wired.
+  const state = { startedAt: Date.now(), lastRun: null, lastSent: null, lastError: null, everyMs };
+
   const tick = async () => {
     if (running) {
       log.warn?.(`[jobs] previous nudge run has not finished — skipping this tick`);
@@ -73,10 +85,22 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
     running = true;
     try {
       const sid = typeof seasonId === "function" ? seasonId() : seasonId;
-      if (!sid) return;
+      if (!sid) {
+        // Counts as a run: the job did its job, which was to look and find no current season. Not recording it
+        // would make a perfectly-behaved instance with a past season indistinguishable from a dead timer, and
+        // /status already reports the season separately.
+        state.lastRun = Date.now();
+        state.lastSent = 0;
+        return;
+      }
       const r = await runNudge(db, { notifier, t, seasonId: sid, today: today() });
+      state.lastRun = Date.now();
+      state.lastSent = r.sent.length;
+      state.lastError = null;
       if (r.sent.length) log.log?.(`[jobs] availability nudge sent to ${r.sent.length} volunteer(s) for ${r.period}`);
     } catch (e) {
+      state.lastRun = Date.now();     // it ran; it failed. Both are facts an operator needs.
+      state.lastError = e.message;
       log.warn?.(`[jobs] nudge failed: ${e.message}`);   // a broken job must not take the server down
     } finally {
       running = false;
@@ -84,5 +108,5 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
   };
   const timer = setInterval(tick, everyMs);
   timer.unref?.();                 // never hold the process open just for the timer
-  return { stop: () => clearInterval(timer), tick };
+  return { stop: () => clearInterval(timer), tick, state: () => ({ ...state }) };
 }

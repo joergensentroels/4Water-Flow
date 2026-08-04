@@ -37,7 +37,7 @@ import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
 // `patternFile` is injectable so a test never rewrites the repository's own config. Without it, running the
 // admin suite would silently edit config/pattern.json — a test that damages the thing it is testing.
 export function buildApp({ db, pattern = loadPattern(), env = process.env, notifier = null,
-                           patternFile = PATTERN_FILE,
+                           patternFile = PATTERN_FILE, jobs = null,
                            today = () => new Date().toISOString().slice(0, 10) } = {}) {
   const secret = sessionSecret(env);
   const secure = env.NODE_ENV === "production";
@@ -570,6 +570,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const status = collectStatus(db, {
       pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState,
       notify: { channel: notifyConfig(env).channel },
+      // The nudge job's own account of itself. Optional here for the same reason `notifier` is — a test builds
+      // an app without a timer — and that is exactly how the notifier came to be missing in production, so
+      // test/journey.test.mjs asserts this line renders on a real boot rather than trusting this call site.
+      jobs,
     });
     send(res, 200, renderStatus({ t, session: c.session, roles: c.roles, who: c.who, status }));
   });
@@ -772,7 +776,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const port = Number(process.env.PORT) || 8080;
   const host = process.env.HOST || "127.0.0.1";
-  const server = buildApp({ db, pattern: boot, patternFile: configFile, notifier })
+  const server = buildApp({ db, pattern: boot, patternFile: configFile, notifier, jobs })
     .listen(port, host, () => console.log(`4water listening on http://${host}:${port}`));
 
   // listen() is ASYNCHRONOUS, so the success line has to be its callback. Printed on the next statement — which

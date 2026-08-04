@@ -10,6 +10,7 @@ import { myProfile, saveProfile } from "../src/pages/profile.mjs";
 import { collectStatus, renderStatus } from "../src/pages/status.mjs";
 import { makeT } from "../src/config.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
+import { startJobs } from "../src/jobs.mjs";
 
 const withWorld = (opts, fn) => async () => {
   const w = await makeWorld({ volunteers: 3, roles: { 0: ["planner"] }, ...opts });
@@ -150,6 +151,85 @@ test("silence is counted, and a failed notification is an alarm while a queued o
   assert.equal(factFor(s3, "failed").level, "bad", "a message that could not be sent needs attention");
   assert.equal(factFor(s3, "queued").value, 2);
   assert.equal(factFor(s3, "queued").level, "ok", "with no webhook configured, queueing is the design");
+}));
+
+// The fact this page most needed and did not have. The nudge job never ran once in production for most of this
+// project's life and no screen could have said so, because a job with nobody to nudge and a job that is dead
+// both produce silence. These pin the readings, and the one that matters most is "ran, sent nothing" being
+// HEALTHY — get that wrong and the page cries wolf at a perfectly-behaved instance every day.
+test("the nudge job's own account of itself is reported, and doing nothing is not a fault", withWorld({}, async (w) => {
+  const base = { pattern: w.pattern, today: w.pattern.season.from, backupDir: null };
+  const at = Date.parse("2026-08-04T12:00:00Z");
+  const jobsWith = (state) => ({ state: () => ({ everyMs: 6 * 3600_000, ...state }) });
+
+  // Not wired at all: no line, the same way an invite-only deployment has no OIDC line. The other half of that
+  // — it MUST be there on a real boot — is asserted in test/journey.test.mjs, which is where being forgotten
+  // would actually be caught.
+  assert.equal(factFor(collectStatus(w.db, base), "nudge"), undefined);
+
+  // Just started and not yet ticked. The boot tick is five seconds in, so this is "not yet", not "broken".
+  const young = factFor(collectStatus(w.db, { ...base, now: at,
+    jobs: jobsWith({ startedAt: at - 10_000, lastRun: null }) }), "nudge");
+  assert.equal(young.level, "ok", "ten seconds after boot, never-run is normal");
+
+  // Up for an hour and still never run: the timer is not wired. This is the state that was invisible.
+  const dead = factFor(collectStatus(w.db, { ...base, now: at,
+    jobs: jobsWith({ startedAt: at - 3600_000, lastRun: null }) }), "nudge");
+  assert.equal(dead.level, "bad", "an hour up with no run means the job is not running");
+  assert.equal(dead.note, "never");
+
+  // Ran, sent nothing. THE case that must read as healthy: everyone answered.
+  const quiet = factFor(collectStatus(w.db, { ...base, now: at,
+    jobs: jobsWith({ startedAt: at - 3600_000, lastRun: at - 600_000, lastSent: 0 }) }), "nudge");
+  assert.equal(quiet.level, "ok", "nothing to send is success, not silence");
+  assert.equal(quiet.value, 10, "and it reports how long ago, in minutes");
+  assert.equal(quiet.detail, 0);
+
+  // Two intervals without a run: stalled.
+  const stalled = factFor(collectStatus(w.db, { ...base, now: at,
+    jobs: jobsWith({ startedAt: at - 40 * 3600_000, lastRun: at - 13 * 3600_000, lastSent: 2 }) }), "nudge");
+  assert.equal(stalled.level, "warn", "past two intervals the timer has stopped");
+
+  // And a run that threw.
+  const broke = factFor(collectStatus(w.db, { ...base, now: at,
+    jobs: jobsWith({ startedAt: at - 3600_000, lastRun: at - 60_000, lastError: "boom" }) }), "nudge");
+  assert.equal(broke.level, "bad");
+  assert.equal(broke.note, "error");
+
+  // Each reading must render as its own sentence — a fact that collects but never renders is not reported.
+  const t = makeT("en");
+  for (const [state, expect] of [
+    [{ startedAt: at - 3600_000, lastRun: null }, /has not run once/],
+    [{ startedAt: at - 3600_000, lastRun: at - 600_000, lastSent: 0 }, /last ran 10 minutes ago and sent 0/],
+    [{ startedAt: at - 3600_000, lastRun: at - 60_000, lastError: "boom" }, /ran 1 minutes ago and failed/],
+  ]) {
+    const page = renderStatus({ t, session: { csrf: "x" }, roles: ["planner"], who: "P",
+      status: collectStatus(w.db, { ...base, now: at, jobs: jobsWith(state) }) }).__raw;
+    assert.match(page, expect);
+  }
+}));
+
+// Straight at startJobs, because the readings above are only trustworthy if the job actually maintains that
+// state — and the distinction it exists for is "ran and sent nothing" versus "never ran".
+test("the job records that it ran even when there was nothing to do", withWorld({}, async (w) => {
+  const quiet = { send: async () => ({ ok: true }) };
+  const jobs = startJobs({ db: w.db, notifier: quiet, t: makeT("en"), seasonId: w.seasonId,
+                           today: () => w.pattern.season.from, everyMs: 60_000, log: {} });
+  try {
+    assert.equal(jobs.state().lastRun, null, "nothing has run yet");
+    await jobs.tick();
+    assert.ok(jobs.state().lastRun !== null, "a tick must record that it happened");
+  } finally { jobs.stop(); }
+
+  // With no current season the tick returns early — and that must still count as a run, or a correctly-behaving
+  // instance whose season has ended is indistinguishable from a dead timer.
+  const none = startJobs({ db: w.db, notifier: quiet, t: makeT("en"), seasonId: () => null,
+                           today: () => w.pattern.season.from, everyMs: 60_000, log: {} });
+  try {
+    await none.tick();
+    assert.ok(none.state().lastRun !== null, "looking and finding no season is still the job having run");
+    assert.equal(none.state().lastSent, 0);
+  } finally { none.stop(); }
 }));
 
 test("backup age is judged, and no backups at all is a fault", withWorld({}, async (w) => {

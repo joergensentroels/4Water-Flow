@@ -51,6 +51,31 @@ function readDockerfile() {
   return { copies, env, cmd, healthcheck: hc ? hc[1].trim() : null, workdir, user };
 }
 
+// The generalisation of a defect found by accident: test/journey.test.mjs read `demo-pattern.json` from the
+// repository root, and `.gitignore` excludes that file. So the acceptance gate — the one test written because a
+// green suite twice reported success over a deployment that could not work — was the one test nobody with a
+// fresh clone could run. It survived because this repo has no remote yet, so CI has never executed once.
+//
+// A suite that only runs where it was written is not a suite. This asserts the general property rather than
+// that one file: every path the tests reach for under the repo root must be something git actually carries.
+test("no test depends on a file git does not carry", () => {
+  const ignored = [];
+  for (const rel of readdirSync(path.join(ROOT, "test"))) {
+    if (!rel.endsWith(".mjs")) continue;
+    const text = readFileSync(path.join(ROOT, "test", rel), "utf8");
+    // Only paths built from ROOT — a temp directory the test creates itself is exactly what it should use.
+    for (const m of text.matchAll(/path\.join\(ROOT,\s*([^)]*)\)/g)) {
+      const parts = [...m[1].matchAll(/"([^"]+)"/g)].map((p) => p[1]);
+      if (!parts.length) continue;
+      const target = path.join(...parts);
+      const check = spawnSync("git", ["check-ignore", "-q", target], { cwd: ROOT });
+      // 0 = ignored, 1 = not ignored, other = git unavailable (a tarball, no git): then skip rather than fail.
+      if (check.status === 0) ignored.push(`test/${rel} reads ${target.replace(/\\/g, "/")}, which .gitignore excludes`);
+    }
+  }
+  assert.deepEqual(ignored, [], `these tests cannot run on a fresh clone:\n${ignored.join("\n")}`);
+});
+
 // The simulation below runs the HOST's node, not the image's. So the one thing it structurally cannot see is
 // the base tag: change `FROM node:22.14-alpine` to `node:20-alpine` and the simulation still passes, while the
 // real container crash-loops on db.mjs's own version guard. The floor is declared in six files and only one of

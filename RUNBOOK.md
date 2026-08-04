@@ -192,8 +192,13 @@ What that means in practice:
   message naming the version it found, rather than failing at an import nobody can interpret.
 - **The Dockerfile pins an exact Node minor** (currently 22.14) so a host rebuild cannot move the runtime under
   the app. Do not relax that pin to `node:22`.
-- **CI runs the suite on both the pinned LTS and current Node.** A breaking change in `node:sqlite` therefore
-  shows up as a red build rather than as a broken deployment in the middle of a season.
+- **CI is set up to run the suite on both the pinned LTS and current Node, and has never actually run**, because
+  this repository has no remote yet. The workflow is correct and the intent stands — a breaking change in
+  `node:sqlite` should show up as a red build rather than as a broken deployment mid-season — but it is a plan,
+  not a thing that has happened, and the difference mattered: three tests read a file `.gitignore` excludes, so
+  the first CI run would have been red for a reason having nothing to do with Node. That is fixed, and the suite
+  is verified against an actual `git clone` rather than against this working copy. **Push the repo and confirm
+  the first run is green before relying on this line.**
 - **If it ever does break:** stay on the pinned Node version — nothing forces an upgrade — and raise it as an
   issue. The database file is ordinary SQLite, readable by any `sqlite3` binary, so the data is never trapped
   by this choice. That property is what makes the risk acceptable rather than reckless.

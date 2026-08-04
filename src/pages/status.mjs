@@ -11,7 +11,8 @@ import { layout, csrfField, navFor } from "../views.mjs";
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-export function collectStatus(db, { pattern, today, backupDir, oidc = null, notify = null }) {
+export function collectStatus(db, { pattern, today, backupDir, oidc = null, notify = null, jobs = null,
+                                    now = Date.now() }) {
   const seasonRow = db.prepare("SELECT id, from_date AS from_, to_date AS to_ FROM seasons WHERE key=?").get(pattern.season.key);
   const facts = [];
 
@@ -70,6 +71,31 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null, noti
     level: queued > 0 && interrupted ? "warn" : "ok",
   });
 
+  // ---- is the availability nudge actually running? ----
+  // The fact this page most needed and did not have. The nudge never ran once in production for most of this
+  // project's life, and no screen could have told anyone: a job with nobody to nudge and a job that is dead both
+  // produce silence. So report the job's own last RUN rather than its last message.
+  //
+  // Only when the caller wired the job in — but that is the same optional-argument shape that let the notifier
+  // be forgotten, so test/journey.test.mjs asserts this line is present on a real boot rather than trusting it.
+  if (jobs) {
+    const s = jobs.state();
+    const upMs = now - s.startedAt;
+    if (s.lastRun === null) {
+      // The boot tick fires five seconds in. Before that, "never" is just "not yet"; well after it, it means
+      // the timer is not running.
+      facts.push({ key: "nudge", value: null, note: "never",
+                   level: upMs < 60_000 ? "ok" : "bad", detail: Math.floor(upMs / 60_000) });
+    } else {
+      const agoMin = Math.floor((now - s.lastRun) / 60_000);
+      // Two missed intervals is a stalled timer. One is a long-running tick or a clock nudge.
+      const stale = now - s.lastRun > 2 * s.everyMs;
+      facts.push({ key: "nudge", value: agoMin, detail: s.lastSent,
+                   note: s.lastError ? "error" : null,
+                   level: s.lastError ? "bad" : stale ? "warn" : "ok" });
+    }
+  }
+
   // ---- backups ----
   let newest = null;
   if (backupDir && existsSync(backupDir)) {
@@ -116,6 +142,9 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
       queued: () => t(f.note === "interrupted" ? "status.queuedInterrupted" : "status.queued", { n: f.value }),
       backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { hours: f.value, kept: f.detail }),
       oidc: () => f.note === "discovery" ? t("status.oidcDiscovery") : t("status.oidcFallback", { why: f.detail }),
+      nudge: () => f.note === "never" ? t("status.nudgeNever", { minutes: f.detail })
+                 : f.note === "error" ? t("status.nudgeError", { minutes: f.value })
+                 : t("status.nudgeRan", { minutes: f.value, sent: f.detail }),
     }[f.key];
     return html`<li class="status ${f.level}"><b aria-hidden="true">${BADGE[f.level]}</b> <span>${text ? text() : f.key}</span></li>`;
   };

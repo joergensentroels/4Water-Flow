@@ -27,6 +27,7 @@ import path from "node:path";
 import os from "node:os";
 import { ROOT } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
+import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 
 const IDP_PORT = 8296;
 const APP_PORT = 8297;
@@ -112,11 +113,16 @@ const listen = (server, port) => new Promise((r) => server.listen(port, "127.0.0
 const close = (server) => new Promise((r) => server.close(r));
 
 function startApp(dir, extra = {}) {
+  // A season containing today, in this test's own directory. It used to point at demo-pattern.json in the
+  // repository root, which .gitignore excludes — so like the journey and first-run tests, this one could not
+  // run on a fresh clone. See tools/season-fixture.mjs.
+  const patternFile = path.join(dir, "pattern.json");
+  writeSeasonSpanningToday(patternFile, { key: "oidc" });
   const child = spawn(process.execPath, [path.join(ROOT, "src", "server.mjs")], {
     cwd: ROOT,
     env: { ...process.env,
            FOURWATER_DB: path.join(dir, "app.db"),
-           FOURWATER_PATTERN: path.join(ROOT, "demo-pattern.json"),
+           FOURWATER_PATTERN: patternFile,
            FOURWATER_SECRET: "o".repeat(48),
            PORT: String(APP_PORT), HOST: "127.0.0.1",
            OIDC_ISSUER: IDP,

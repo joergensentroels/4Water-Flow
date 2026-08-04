@@ -17,6 +17,7 @@ import { ROOT, loadPattern, roleSlotsFor } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
 import { bootstrapAdmin } from "../tools/bootstrap.mjs";
 import { redeemInvite, rolesOf } from "../src/auth.mjs";
+import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 
 const freshDir = () => mkdtempSync(path.join(os.tmpdir(), "4water-first-"));
 const cleanup = (d) => { try { rmSync(d, { recursive: true, force: true }); } catch {} };
@@ -266,10 +267,14 @@ test("a real deployment actually writes notifications", async () => {
   const dir = freshDir();
   const port = 8165;
   const dbPath = path.join(dir, "app.db");
-  // The demo pattern, because the shipped season ended in June: a planner screen with an empty horizon would
-  // make this pass for the wrong reason.
+  // A season containing today, because the shipped one ends in June and an empty planner horizon would make
+  // this pass for the wrong reason. Written into this test's own directory: it used to point at
+  // demo-pattern.json in the repository root, which .gitignore excludes, so this test could not run on a fresh
+  // clone either. See tools/season-fixture.mjs.
+  const patternFile = path.join(dir, "pattern.json");
+  writeSeasonSpanningToday(patternFile, { key: "firstrun" });
   const b = bootReal(dir, port, {
-    FOURWATER_PATTERN: path.join(ROOT, "demo-pattern.json"),
+    FOURWATER_PATTERN: patternFile,
     FOURWATER_AUTH: "dev", NODE_ENV: "development",
   });
   try {
