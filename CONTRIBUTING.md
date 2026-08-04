@@ -88,6 +88,40 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 - **Config edits write a file.** `buildApp` takes `patternFile` so tests never rewrite the repository's own
   config — which they silently did until it was caught.
 
+## Contrast and target size — the standard, and how to check it
+
+Nothing in this repository said what accessibility standard was applied, which meant the next person to change a
+colour had no way to know a check existed. It does, and the numbers matter for volunteers reading a schedule on a
+phone outdoors.
+
+**The standard.** WCAG 2.2 **1.4.3** for text (4.5:1, or 3:1 for large text), **1.4.11** for the visual boundary
+of an author-styled control (3:1), and **2.5.8** for target size (24×24 CSS px, or spacing that keeps 24px circles
+on adjacent targets from overlapping). Native radios and checkboxes are exempt under 1.4.11's default-rendering
+exception and are skipped.
+
+**Where it currently stands**, measured over every screen in both colour schemes:
+
+| | text floor | controls floor |
+|---|---|---|
+| Light | 5.99 (a link on `/admin`) | 3.66 |
+| Dark | 7.14 (a hint on `/availability`) | 3.24 |
+
+Both are above the minimum with margin, so a palette change has room — but not much on the dark controls.
+
+**Two things that make this check lie if you do not know them:**
+
+1. **Content inside a collapsed `<details>` is not measured.** `getComputedStyle` reports it as `display: none`
+   and any sane sweep skips it — so the planner's distribution card and the availability bulk actions are
+   invisible to the check until every `<details>` is opened first. A sweep that has not done that reports zero
+   failures while never having looked at them. This is exactly how "I reasoned the new CSS adds no new colour
+   pair" nearly became a verified claim without a measurement behind it.
+2. **A sweep that finds nothing must be shown to find something.** Give one rule a deliberately failing colour and
+   confirm the report names it. Doing that is what proved the distribution rows were being reached: sabotaging
+   `ul.dist small` produced `failures=1, floor=1.39, on /planner`, which the clean run could not have told you.
+
+The colour tokens themselves also carry their reasoning: 4water's own water blue measures 3.3:1 on white, which
+fails 1.4.3, so `--accent` is a darker relative of it. Do not "correct" it back to the brand hex.
+
 ## Before opening a pull request
 
 - `npm test` green.
