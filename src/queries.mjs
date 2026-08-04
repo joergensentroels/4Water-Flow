@@ -57,6 +57,52 @@ export const GATE = {
 // themselves, then the mechanical one. boardEmptyReason walks this list and reports the first that empties.
 const GATE_ORDER = ["capable", "role", "available", "free"];
 
+// The reason codes, named once and exported.
+//
+// They were string literals scattered through the two functions below, and test/strings.test.mjs kept a
+// hand-written list of them so it could check a translation exists for each. A list of what to check cannot
+// notice something missing from itself: add a thirteenth reason and the test stays green while the volunteer
+// reading the shift exchange gets "board.why.whatever_new" on screen. Exactly the failure that list exists to
+// prevent, and the same one that let a new notification kind slip past its own check.
+//
+// So there is one definition. The functions return values from here and the test enumerates the same object;
+// drift is not expressible.
+export const BOARD_EMPTY_REASONS = {
+  NONE_OPEN: "none_open",
+  NO_CAPABILITIES: "no_capabilities",
+  NOTHING_IN_YOURS: "nothing_in_your_activities",
+  NO_ROLE_STATED: "no_role_stated",
+  OTHER_ROLE: "only_the_other_role",
+  NO_AVAILABILITY: "no_availability",
+  NOT_FREE_THEN: "not_free_then",
+  ALREADY_BUSY: "already_busy_then",
+};
+
+export const SLOT_EMPTY_REASONS = {
+  NO_VOLUNTEERS: "no_volunteers",
+  NOBODY_CAPABLE: "nobody_capable",
+  NOBODY_IN_THAT_ROLE: "nobody_in_that_role",
+  NOBODY_FREE: "nobody_free",
+  ALL_ALREADY_BUSY: "all_already_busy",
+};
+
+// Which reason each gate produces on the planner's side. Keyed by GATE_ORDER, so a new gate without a reason is
+// `undefined` here rather than a silently missing explanation — and the test below asserts the mapping is total.
+export const SLOT_REASON_BY_GATE = {
+  capable: SLOT_EMPTY_REASONS.NOBODY_CAPABLE,        // grant somebody the capability
+  role: SLOT_EMPTY_REASONS.NOBODY_IN_THAT_ROLE,      // recruit, or ask a both-role teacher — availability is fine
+  available: SLOT_EMPTY_REASONS.NOBODY_FREE,         // the only case where the old message was true
+  free: SLOT_EMPTY_REASONS.ALL_ALREADY_BUSY,         // free, but already on something at that hour; move it
+};
+
+// Every gate must produce a reason, checked at load rather than in a test: a gate added without one would report
+// `undefined` to a planner staring at an unfillable slot.
+for (const gate of GATE_ORDER) {
+  if (!SLOT_REASON_BY_GATE[gate]) {
+    throw new Error(`gate "${gate}" has no entry in SLOT_REASON_BY_GATE — a planner would be told undefined`);
+  }
+}
+
 // The predicate itself, parameterised by how the PERSON is named. The board asks "which slots suit this
 // person" (:pid) and the planner asks "which people suit this slot" (p.id) — opposite directions, one rule.
 // Writing it twice is how a volunteer ends up able to claim something the board never offered, or a planner
@@ -159,7 +205,7 @@ export function boardEmptyReason(db, personId, seasonId, fromDate = "0000-00-00"
   };
 
   // Nothing open at all: not about this volunteer, so say that and nothing else.
-  if (countWith([]) === 0) return { reason: "none_open" };
+  if (countWith([]) === 0) return { reason: BOARD_EMPTY_REASONS.NONE_OPEN };
 
   let passed = [];
   for (const gate of GATE_ORDER) {
@@ -170,23 +216,23 @@ export function boardEmptyReason(db, personId, seasonId, fromDate = "0000-00-00"
     // conflating them would recreate the uselessness this function exists to remove.
     if (gate === "capable") {
       const mine = db.prepare("SELECT COUNT(*) n FROM capabilities WHERE person_id=?").get(personId).n;
-      return { reason: mine === 0 ? "no_capabilities" : "nothing_in_your_activities" };
+      return { reason: mine === 0 ? BOARD_EMPTY_REASONS.NO_CAPABILITIES : BOARD_EMPTY_REASONS.NOTHING_IN_YOURS };
     }
     if (gate === "role") {
       const prefers = db.prepare("SELECT preferred_role FROM people WHERE id=?").get(personId)?.preferred_role;
       // No stated role is the volunteer's to fix in seconds; the other case is genuinely somebody else's shift.
-      return { reason: prefers ? "only_the_other_role" : "no_role_stated" };
+      return { reason: prefers ? BOARD_EMPTY_REASONS.OTHER_ROLE : BOARD_EMPTY_REASONS.NO_ROLE_STATED };
     }
     if (gate === "available") {
       const answered = db.prepare(`SELECT (SELECT COUNT(*) FROM availability_day WHERE person_id=:p)
                                         + (SELECT COUNT(*) FROM availability_hour WHERE person_id=:p) AS n`)
         .get({ p: personId }).n;
-      return { reason: answered === 0 ? "no_availability" : "not_free_then" };
+      return { reason: answered === 0 ? BOARD_EMPTY_REASONS.NO_AVAILABILITY : BOARD_EMPTY_REASONS.NOT_FREE_THEN };
     }
-    return { reason: "already_busy_then" };            // the double-booking gate
+    return { reason: BOARD_EMPTY_REASONS.ALREADY_BUSY };   // the double-booking gate
   }
   // Every gate passes and the board is still empty — only possible if the caller filtered further.
-  return { reason: "none_open" };
+  return { reason: BOARD_EMPTY_REASONS.NONE_OPEN };
 }
 
 // WHY nobody can take this slot — the same question as boardEmptyReason, asked from the other end.
@@ -211,22 +257,15 @@ export function slotEmptyReason(db, assignmentId) {
   `).get({ aid: assignmentId }).n;
 
   // No active volunteers at all: nothing about this slot, and nothing a planner can do on this screen.
-  if (countWith([]) === 0) return { reason: "no_volunteers" };
+  if (countWith([]) === 0) return { reason: SLOT_EMPTY_REASONS.NO_VOLUNTEERS };
 
   let passed = [];
   for (const gate of GATE_ORDER) {
     const next = [...passed, gate];
     if (countWith(next) > 0) { passed = next; continue; }
-    return {
-      reason: {
-        capable: "nobody_capable",        // grant somebody the capability
-        role: "nobody_in_that_role",      // recruit or ask a both-role teacher — availability is not the problem
-        available: "nobody_free",         // the only case where the old message was true
-        free: "all_already_busy",         // they are free and already on something at that hour; move the session
-      }[gate],
-    };
+    return { reason: SLOT_REASON_BY_GATE[gate] };
   }
-  return { reason: "nobody_free" };       // unreachable while the list is empty, but never guess silently
+  return { reason: SLOT_EMPTY_REASONS.NOBODY_FREE };   // unreachable while the list is empty, never guess silently
 }
 
 // Claiming. The guard IS the race protection: `person_id IS NULL` inside the UPDATE means two volunteers
