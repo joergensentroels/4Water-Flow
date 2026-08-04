@@ -24,8 +24,13 @@ export function devSignIn(db, personId, env = process.env) {
 // ---- OIDC against NextCloud ---------------------------------------------------------------------------
 // Authorization code + PKCE. PKCE is not optional here: the code lands in a redirect URL, and without a
 // verifier anything that can read that URL (browser history, a proxy log, an extension) can trade it.
-// NOTE: this path CANNOT be exercised from the development machine — there is no NextCloud to talk to.
-// docs/OIDC.md carries the checklist to run against the real server before trusting it.
+// This comment used to read "this path CANNOT be exercised from the development machine — there is no NextCloud
+// to talk to", and that sentence is why nobody tried for a long time. The absence of NextCloud does not prevent
+// exercising THIS SIDE of the protocol: test/oidc-endtoend.test.mjs stands up a conforming provider and drives
+// discovery, PKCE, the code exchange, userinfo and the three refusals over real HTTP.
+//
+// What is genuinely out of reach is NextCloud's own behaviour — its paths, its claim names, whether it honours
+// PKCE. docs/OIDC.md carries the checklist for that, and it still has to be run.
 export function oidcConfig(env = process.env) {
   const cfg = {
     issuer: env.OIDC_ISSUER || "",

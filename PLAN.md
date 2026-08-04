@@ -130,10 +130,19 @@ up, add it there too.**
   checkable without a daemon: every path the Dockerfile copies exists, the compose file keeps its properties,
   secrets and the database are excluded from image and git, and the app boots and answers its healthcheck under
   the image's exact environment including `NODE_ENV=production`.
-- **OIDC has never talked to a real NextCloud.** Written to spec, unit-tested with an injected `fetch`, and now
-  reading the provider's own discovery document — including refusing any endpoint that is not same-origin and
-  https, since the token endpoint receives the client secret. The checklist for the real server is
-  `docs/OIDC.md`. Invite links are a fully working path meanwhile, and `/status` says which mode sign-in is in.
+- **OIDC has never talked to a real NextCloud** — but it is no longer unexecuted, and the distinction matters.
+  I repeated "never verified end to end" often enough that it started sounding like a fact about the world
+  rather than about the tooling I had reached for. A conforming provider is a few hundred lines, so
+  `test/oidc-endtoend.test.mjs` now runs the whole flow over real HTTP against one: discovery is fetched and its
+  published paths used, the redirect carries PKCE and a state, the callback exchanges the code with a verifier
+  the provider actually checks against the challenge, userinfo maps onto a pre-registered person, and the three
+  refusals hold — an identity nobody put on the roster, a tampered state, a replayed callback.
+  **What that does not prove is NextCloud.** Their endpoint paths, their claim names, whether they return
+  `name` or `preferred_username`, whether they honour PKCE at all — every one of those is a property of their
+  server, and a test written to the spec tests this app rather than theirs. The checklist in `docs/OIDC.md`
+  still has to be run. Invite links are a fully working path meanwhile, and `/status` says which mode sign-in
+  is in. The discovery FALLBACK is also verified live rather than only in unit tests: pointed at a provider with
+  no well-known document, the app logs the failure, degrades to NextCloud's layout, and keeps working.
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written

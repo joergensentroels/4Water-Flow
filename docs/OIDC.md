@@ -1,11 +1,21 @@
 # NextCloud sign-in — the checklist to run against the real server
 
-**This is the one part of the app that has never been executed against anything real.** There was no
-NextCloud instance available while it was written, so the flow is built to specification and unit-tested with
-an injected `fetch` — the shape of the requests is verified, the server's actual answers are not.
+**This has never run against NextCloud. It has run against a conforming provider.** The two are different
+claims and this page used to make only the pessimistic one.
 
-Work through this list once, on the real instance, before you rely on it. Until then, admin-issued invite
-links are a fully working sign-in path and need none of this.
+`test/oidc-endtoend.test.mjs` starts a minimal OpenID Connect provider and drives the whole flow over real
+HTTP with real redirects: the app fetches the discovery document and uses the endpoint paths it publishes, the
+authorize redirect carries PKCE and a state, the callback exchanges the code with a verifier the provider checks
+against the challenge, `userinfo` maps onto a pre-registered person, and three refusals hold — an identity
+nobody put on the roster, a tampered `state`, and a replayed callback. The discovery fallback is exercised too:
+pointed at a provider with no well-known document, the app logs the failure and degrades to NextCloud's layout
+rather than breaking.
+
+**So what is left unverified is NextCloud specifically**, and that is not a formality. Its endpoint paths, its
+claim names, whether it returns `name` or `preferred_username`, whether it honours PKCE, what it does with an
+unknown `scope` — every one is a property of their server, and a provider written to the spec tests this app
+rather than theirs. Work through this list once, on the real instance, before you rely on it. Until then,
+admin-issued invite links are a fully working sign-in path and need none of this.
 
 ## 1. Register the app in NextCloud
 
