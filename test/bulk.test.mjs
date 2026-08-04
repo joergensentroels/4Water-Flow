@@ -121,7 +121,7 @@ test("volunteers are told what is stored, on the screen where they first enter i
   const privacy = await w.get("/privacy", cookie);
   assert.equal(privacy.status, 200);
   const text = await privacy.text();
-  for (const re of [/name/i, /schedule|vagtplan/i, /no tracking|ingen sporing/i, /delete|slettet/i]) {
+  for (const re of [/name/i, /schedule|lægge planen/i, /no tracking|ingen sporing/i, /delete|slettet/i]) {
     assert.match(text, re, `the notice should cover ${re}`);
   }
   assert.equal((await w.get("/privacy")).status, 200, "and be readable before signing in");

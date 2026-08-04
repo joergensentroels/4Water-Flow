@@ -1,5 +1,5 @@
 {
-  "app.title": "4water Vagtplan",
+  "app.title": "4water Lineup",
   "html.lang": "da",
   "nav.home": "Forside",
   "nav.availability": "Tilgængelighed",
@@ -133,7 +133,7 @@
   "privacy.link": "Sådan behandler vi dine oplysninger",
   "privacy.title": "Dine oplysninger",
   "privacy.what": "Vi gemmer dit navn, din kontaktadresse, hvilke aktiviteter du kan stå for, hvornår du kan hjælpe, og hvilke vagter du har taget.",
-  "privacy.why": "Vi bruger det udelukkende til at lave vagtplanen. Der er ingen sporing, ingen statistik og ingen tredjeparter.",
+  "privacy.why": "Vi bruger det udelukkende til at lægge planen. Der er ingen sporing, ingen statistik og ingen tredjeparter.",
   "privacy.who": "Planlæggere og administratorer i 4water kan se dine oplysninger. Andre frivillige kan se dit navn på planen.",
   "privacy.rights": "Du kan altid se og rette dine egne oplysninger. Vil du have dem slettet, så skriv til en administrator.",
   "privacy.back": "Tilbage",
