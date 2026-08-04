@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { loadPattern } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
+import { readFileSync } from "node:fs";
 import { openSlotsFor, claimSlot, handBackSlot, score, setAvailabilityDay, setAvailabilityHour,
-         boardEmptyReason, BOARD_EMPTY_REASONS } from "../src/queries.mjs";
+         boardEmptyReason, BOARD_EMPTY_REASONS, GATE, PLANNER_WRITE_HONOURS } from "../src/queries.mjs";
 
 const pattern = loadPattern();
 const CAN_KEY = pattern.activities[0].key;          // the activity our capable people can run
@@ -137,4 +138,53 @@ test("a hand-back inside the cutoff still releases the slot but flags that a pla
   assert.equal(r.ok, true);
   assert.equal(r.pastCutoff, true, "inside the cutoff the caller must be told to notify a planner");
   assert.equal(db.prepare("SELECT person_id FROM assignments WHERE id=?").get(target.assignmentId).person_id, null);
+});
+
+// Being inside the cutoff must not weaken the ownership check — the late path is a different RETURN VALUE, not
+// a different set of rules.
+//
+// This test started life claiming something stronger: that the late path, which used to be a second copy of the
+// update with its `changes` discarded, would report a bogus success. Probing it by restoring the unchecked
+// version left this green, because `handBackSlot` returns `not_yours` from the ownership check several lines
+// before either update runs. The stronger claim was unreachable and the test could not have caught it. What is
+// left is what it can honestly assert, and that is still worth asserting: the cutoff branch does not become a
+// second, laxer door into the same write.
+test("being inside the cutoff does not weaken the ownership check", () => {
+  // `silent` never claimed anything, so this is somebody else's slot. No availability setup: hand-back checks
+  // ownership and nothing else, and seeding a row here would only obscure that.
+  const { db, target, able, silent, seasonId } = world();
+  claimSlot(db, target.assignmentId, able);
+  const dayBefore = new Date(Date.parse(`${target.date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
+  const r = handBackSlot(db, target.assignmentId, silent, { today: dayBefore, cutoffDays: 2 });
+  assert.deepEqual(r, { ok: false, reason: "not_yours" },
+    "being inside the cutoff must not turn somebody else's slot into a successful late hand-back");
+  assert.equal(db.prepare("SELECT person_id FROM assignments WHERE id=?").get(target.assignmentId).person_id, able,
+    "and the slot must still belong to the person who claimed it");
+  assert.equal(score(db, able, seasonId), 1);
+});
+
+// A gate added to GATE is inherited for free by the board, the claim guard, the candidate list and auto-roster,
+// and NOT by assignSlot, which re-derives the checks because a planner is allowed to overwrite an occupied slot
+// and to assign somebody who never answered. That gap shipped the double-booking bug once already. The load-time
+// check in queries.mjs makes the omission impossible to commit silently; this asserts the check is real, and that
+// its two halves both bite.
+test("a new eligibility gate cannot be added without deciding what a planner's direct write does about it", () => {
+  assert.deepEqual(Object.keys(GATE).sort(), Object.keys(PLANNER_WRITE_HONOURS).sort(),
+    "every gate needs an answer for the planner's write path, and every answer needs a gate");
+
+  // Each answer has to say something, and the two deliberate divergences have to be marked as deliberate rather
+  // than left looking like the oversight they resemble.
+  for (const [gate, note] of Object.entries(PLANNER_WRITE_HONOURS)) {
+    assert.ok(note.length >= 40, `${gate}: too short to record a decision`);
+  }
+  assert.match(PLANNER_WRITE_HONOURS.open, /deliberate/i);
+  assert.match(PLANNER_WRITE_HONOURS.available, /deliberate/i);
+
+  // And the reasons the "yes" gates promise are the ones assignSlot actually returns — checked against the real
+  // function rather than trusted, since a note cannot verify itself.
+  const src = readFileSync(new URL("../src/queries.mjs", import.meta.url), "utf8");
+  for (const code of ["not_capable", "wrong_role", "already_booked", "said_no"]) {
+    assert.ok(src.includes(`reason: "${code}"`), `assignSlot no longer returns ${code}, which a note here promises`);
+  }
 });

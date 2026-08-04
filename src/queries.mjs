@@ -103,6 +103,42 @@ for (const gate of GATE_ORDER) {
   }
 }
 
+// And how the planner's DIRECT write honours each gate — because `assignSlot` cannot simply use
+// eligiblePredicate, and the gap that creates has already shipped a bug.
+//
+// A planner is allowed two things the shared rule forbids: reassigning an occupied slot, and assigning somebody
+// who has not answered. So assignSlot re-derives the checks by hand, and two of them deliberately differ. That
+// is defensible. What is not defensible is it happening by accident, which is what happened with the
+// double-booking gate: it was added to GATE, the board and auto-roster inherited it for free, assignSlot did
+// not, and nobody noticed until demo data grew nine double-bookings — one person listed as both the leader AND
+// the follower of the same class. The predicate said the rule; the write did not enforce it.
+//
+// So a new gate now has to be answered for here as well. Not enforcement — this is a note, and a note cannot
+// check that assignSlot really does what it says. What it does is make the omission impossible to commit
+// silently: add a sixth gate and the app refuses to load until somebody has decided what a planner's direct
+// write should do about it. That decision is the step that was skipped.
+export const PLANNER_WRITE_HONOURS = {
+  open: "NO, deliberately — a planner may reassign an occupied slot. `expectPersonId` is the guard instead, so " +
+        "overwriting somebody is only possible if the planner was looking at that somebody.",
+  capable: "yes — a direct query, refusing with `not_capable`.",
+  role: "yes — a direct query, refusing with `wrong_role`.",
+  available: "PARTLY, deliberately — an explicit 'cannot' refuses with `said_no`, but silence is allowed and " +
+             "reported back as `unanswered` so the planner is told to go and ask. The gate treats silence as no; " +
+             "a planner has presumably just asked them in person.",
+  free: "yes — refusing with `already_booked`. Re-queried rather than reused because it also returns the label " +
+        "of the clashing activity, which the gate cannot produce.",
+};
+for (const gate of Object.keys(GATE)) {
+  if (!PLANNER_WRITE_HONOURS[gate]) {
+    throw new Error(`gate "${gate}" has no entry in PLANNER_WRITE_HONOURS — decide what a planner's direct ` +
+      `assignment does about it before shipping it. The double-booking rule was added to GATE and missed in ` +
+      `assignSlot exactly this way, and the board was safe while a planner assignment was not.`);
+  }
+}
+for (const gate of Object.keys(PLANNER_WRITE_HONOURS)) {
+  if (!GATE[gate]) throw new Error(`PLANNER_WRITE_HONOURS describes "${gate}", which is not a gate any more`);
+}
+
 // The predicate itself, parameterised by how the PERSON is named. The board asks "which slots suit this
 // person" (:pid) and the planner asks "which people suit this slot" (p.id) — opposite directions, one rule.
 // Writing it twice is how a volunteer ends up able to claim something the board never offered, or a planner
@@ -298,19 +334,36 @@ export function handBackSlot(db, assignmentId, personId, { today, cutoffDays = 0
   if (!row) return { ok: false, reason: "no_such_slot" };
   if (row.person_id !== personId) return { ok: false, reason: "not_yours" };
 
+  // Past the cutoff it still releases, but the caller is told to notify a planner: at that point a human needs
+  // to know, otherwise the board quietly becomes the no-show channel. Both dates are parsed at UTC midnight, so
+  // the difference is an exact number of days and no DST offset can shift it across a boundary.
+  let pastCutoff = false, daysUntil = null;
   if (today && cutoffDays > 0) {
-    const days = Math.round((Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
-    // Past the cutoff it still releases, but the caller is told to notify a planner: at that point a human
-    // needs to know, otherwise the board quietly becomes the no-show channel.
-    if (days < cutoffDays) {
-      db.prepare("UPDATE assignments SET person_id = NULL WHERE id = :aid AND person_id = :pid")
-        .run({ aid: assignmentId, pid: personId });
-      return { ok: true, pastCutoff: true, daysUntil: days };
-    }
+    daysUntil = Math.round((Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+    pastCutoff = daysUntil < cutoffDays;
   }
+
+  // ONE update, and its result is read whichever branch we are in. There used to be two copies of this
+  // statement: the one inside the past-cutoff branch returned `{ ok: true }` without ever looking at `changes`,
+  // and the one here checked it properly.
+  //
+  // Being honest about what that was and was not. It is NOT a reachable bug: the ownership check a few lines up
+  // already returned `not_yours`, and node:sqlite is synchronous in one process, so `changes` was always 1 by
+  // the time either copy ran. I first wrote this comment claiming the late path would report a bogus success —
+  // then probed it by restoring the unchecked version, and the test I had written to catch it stayed green,
+  // because it never reached the update at all. The claim was mine, unverified, in a comment. Exactly the thing
+  // this codebase keeps having to correct.
+  //
+  // What it WAS: the same write in two places, one of which discarded its result, so the guarantee held only
+  // because of a check three lines away. That is worth collapsing on its own merits — a second copy is what
+  // drifts when someone later relaxes the ownership check, or moves this behind anything asynchronous, or runs
+  // two containers against one volume. One statement, one place that reads `changes`.
   const info = db.prepare("UPDATE assignments SET person_id = NULL WHERE id = :aid AND person_id = :pid")
     .run({ aid: assignmentId, pid: personId });
-  return info.changes === 1 ? { ok: true, pastCutoff: false } : { ok: false, reason: "not_yours" };
+  if (info.changes !== 1) return { ok: false, reason: "not_yours" };
+  // Shape kept exactly: a test asserts the ordinary result deep-equals `{ ok: true, pastCutoff: false }`, so
+  // daysUntil must not appear on that path.
+  return pastCutoff ? { ok: true, pastCutoff: true, daysUntil } : { ok: true, pastCutoff: false };
 }
 
 // ---- Reading the plan ---------------------------------------------------------------------------------
