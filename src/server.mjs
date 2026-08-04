@@ -27,7 +27,7 @@ import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
-         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor } from "./queries.mjs";
+         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason } from "./queries.mjs";
 import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
          personByCalendarToken } from "./calendar.mjs";
 
@@ -241,10 +241,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = gate({ req, res });
     if (!c) return;
     const sid = seasonId();
+    const open = sid ? openSlotsFor(db, c.personId, sid, today()) : [];
     send(res, 200, renderBoard({
       t, session: c.session, roles: c.roles, who: c.who,
-      open: sid ? openSlotsFor(db, c.personId, sid, today()) : [],
+      open,
       mine: sid ? myUpcoming(db, c.personId, sid, today()) : [],
+      // Only diagnosed when there is nothing to show: a handful of counts, and no reason to run them on the
+      // common path where the volunteer has slots to look at.
+      emptyReason: open.length === 0 && sid ? boardEmptyReason(db, c.personId, sid, today()).reason : null,
       flash: flashFor(t, query.get("r")),
     }));
   });

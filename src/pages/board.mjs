@@ -21,7 +21,9 @@ export function flashFor(t, code) {
   return o ? { text: t(o.key), bad: !!o.bad } : null;
 }
 
-export function renderBoard({ t, session, roles, who, open, mine, flash }) {
+// `emptyReason` is only consulted when `open` is empty, and defaults to null so a caller that does not compute
+// it still renders a valid page — just without the explanation.
+export function renderBoard({ t, session, roles, who, open, mine, flash, emptyReason = null }) {
   const slotRow = (r, action, label, extra = "") => html`
     <li><div class="daterow">
       <span class="when">
@@ -37,7 +39,23 @@ export function renderBoard({ t, session, roles, who, open, mine, flash }) {
   const body = html`
     <h2>${t("board.title")}</h2>
     ${open.length === 0
-      ? html`<p class="empty">${t("board.empty")}</p>`
+      ? html`
+        <!-- WHY it is empty, and what to do about it. "No open slots you can take" is true whether nothing is
+             open or eleven things are open and the volunteer never said which role they teach — and only one of
+             those is theirs to fix. The reason comes from the same eligibility gates as the rule, so it cannot
+             drift into telling them something false.
+             The generic line is shown ONLY as the fallback. Printing both read as a contradiction — "there are
+             no open slots you can take. there are openings, but…" — which I noticed by reading the page rather
+             than by counting assertions. -->
+        ${emptyReason ? html`
+          <div class="card">
+            <p>${t(`board.why.${emptyReason}`)}</p>
+            ${emptyReason === "no_role_stated" || emptyReason === "only_the_other_role"
+              ? html`<p><a class="btn secondary" href="/me">${t("board.why.fixMe")}</a></p>` : ""}
+            ${emptyReason === "no_availability" || emptyReason === "not_free_then"
+              ? html`<p><a class="btn secondary" href="/availability">${t("board.why.fixAvailability")}</a></p>` : ""}
+          </div>`
+        : html`<p class="empty">${t("board.empty")}</p>`}`
       : html`<ul class="dates">${open.map((r) => slotRow(r, `/board/${r.assignmentId}/claim`, t("board.claim")))}</ul>`}
 
     <h2>${t("board.mine")}</h2>

@@ -13,34 +13,58 @@
 // sees a suggestion the system would then refuse.
 //
 // `person` is always a fragment this module controls (":pid" or "p.id"), never anything user-supplied.
-const eligiblePredicate = (person) => `
-  a.person_id IS NULL
-  AND EXISTS (SELECT 1 FROM capabilities c
-               WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)
-  -- Role. A slot with no role takes anyone; a leader slot takes leaders and people who do both. Added here
-  -- rather than in each caller so the board, the claim guard, the planner's candidates and auto-roster all
-  -- inherit it — the same reason the double-booking rule lives here, and the reason two people cannot end up
-  -- in the leader and follower slot of the same session by accident (they share a date and time).
-  AND (a.role IS NULL
-       OR (SELECT preferred_role FROM people WHERE id = ${person}) = 'b'
-       OR (SELECT preferred_role FROM people WHERE id = ${person}) = a.role)
-  AND COALESCE(
+// The gates, named individually — because two things need them: the rule, and the EXPLANATION of the rule.
+//
+// An empty shift exchange used to say only "there are no open slots you can take right now". True, and
+// useless: it cannot tell "nothing is open" from "eleven slots are open and you are ineligible for all of them
+// because you never said which role you teach", which a volunteer could fix in twenty seconds if anyone told
+// them. Diagnosing that means relaxing the gates one at a time, and doing THAT without a second copy of the
+// rule means naming them here and composing both from the same pieces.
+export const GATE = {
+  open: `a.person_id IS NULL`,
+
+  capable: (person) => `EXISTS (SELECT 1 FROM capabilities c
+                                 WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)`,
+
+  // A slot with no role takes anyone; a leader slot takes leaders and people who do both. Here rather than in
+  // each caller so the board, the claim guard, the planner's candidates and auto-roster all inherit it.
+  role: (person) => `(a.role IS NULL
+                      OR (SELECT preferred_role FROM people WHERE id = ${person}) = 'b'
+                      OR (SELECT preferred_role FROM people WHERE id = ${person}) = a.role)`,
+
+  // An hour-level row wins over the day-level row for that hour; neither means NOT available. Deliberate —
+  // silence is not consent. Assigning someone who never answered is what the nudge exists to prevent.
+  available: (person) => `COALESCE(
         (SELECT ah.available FROM availability_hour ah
           WHERE ah.person_id = ${person} AND ah.date = s.date AND ah.hour = t.hour),
         (SELECT ad.available FROM availability_day ad
           WHERE ad.person_id = ${person} AND ad.date = s.date),
-        0) = 1
-  -- Nobody can be in two places at once. Found while writing auto-roster, but the gap was real in the
-  -- vagtbørs too: config puts more than one activity in the same timeslot, so without this a volunteer could
-  -- claim both and nothing would notice until the evening itself.
-  AND NOT EXISTS (
+        0) = 1`,
+
+  // Nobody can be in two places at once. Found while writing auto-roster, but the gap was real in the
+  // vagtbørs too: config puts more than one activity in the same timeslot, so without this a volunteer could
+  // claim both and nothing would notice until the evening itself.
+  free: (person) => `NOT EXISTS (
         SELECT 1 FROM assignments a2
           JOIN sessions  s2 ON s2.id = a2.session_id
           JOIN timeslots t2 ON t2.id = s2.timeslot_id
          WHERE a2.person_id = ${person}
            AND a2.id <> a.id
-           AND s2.date = s.date AND t2.hour = t.hour AND t2.minute = t.minute)
-`;
+           AND s2.date = s.date AND t2.hour = t.hour AND t2.minute = t.minute)`,
+};
+
+// The gates in the order a volunteer can act on them: what an admin controls, then what they control
+// themselves, then the mechanical one. boardEmptyReason walks this list and reports the first that empties.
+const GATE_ORDER = ["capable", "role", "available", "free"];
+
+// The predicate itself, parameterised by how the PERSON is named. The board asks "which slots suit this
+// person" (:pid) and the planner asks "which people suit this slot" (p.id) — opposite directions, one rule.
+// Writing it twice is how a volunteer ends up able to claim something the board never offered, or a planner
+// sees a suggestion the system would then refuse.
+//
+// `person` is always a fragment this module controls (":pid" or "p.id"), never anything user-supplied.
+const eligiblePredicate = (person) =>
+  [GATE.open, ...GATE_ORDER.map((g) => GATE[g](person))].join("\n  AND ");
 
 const ELIGIBLE_OPEN_IDS = `
   SELECT a.id
@@ -104,6 +128,65 @@ export function openSlotsFor(db, personId, seasonId, fromDate = "0000-00-00") {
        AND s.date >= :from
      ORDER BY s.date, t.hour, t.minute
   `).all({ pid: personId, sid: seasonId, from: fromDate });
+}
+
+// WHY the shift exchange is empty, when it is.
+//
+// Written because "there are no open slots you can take right now" is true in every case and actionable in
+// none. A volunteer invited into a partner-dance department, given a capability, who has not yet said whether
+// they teach as leader or follower, is ineligible for every slot on every class — correctly — and the page told
+// them nothing. They would conclude the app was broken, or that nobody needed them. Both wrong, both fixable by
+// one sentence.
+//
+// Relaxes the gates one at a time, in the order a volunteer can act on them, and reports the FIRST one that
+// takes the count to zero. Built from the same GATE fragments as the rule itself, so a change to eligibility
+// cannot make the explanation lie.
+export function boardEmptyReason(db, personId, seasonId, fromDate = "0000-00-00") {
+  const countWith = (gates) => {
+    const sql = `
+      SELECT COUNT(*) n
+        FROM assignments a
+        JOIN sessions  s ON s.id = a.session_id
+        JOIN timeslots t ON t.id = s.timeslot_id
+       WHERE ${[GATE.open, ...gates.map((g) => GATE[g](":pid"))].join(" AND ")}
+         AND s.season_id = :sid AND s.date >= :from`;
+    // Bind :pid only when the statement actually mentions it. With no gates relaxed in yet, it does not — and
+    // node:sqlite REJECTS a named parameter the statement does not use, so passing it unconditionally turned
+    // the whole board into a 500. Same family as its refusal to mix ? with :named.
+    const params = { sid: seasonId, from: fromDate };
+    if (sql.includes(":pid")) params.pid = personId;
+    return db.prepare(sql).get(params).n;
+  };
+
+  // Nothing open at all: not about this volunteer, so say that and nothing else.
+  if (countWith([]) === 0) return { reason: "none_open" };
+
+  let passed = [];
+  for (const gate of GATE_ORDER) {
+    const next = [...passed, gate];
+    if (countWith(next) > 0) { passed = next; continue; }
+
+    // This gate is the one that empties it. Some have two distinct causes with two different remedies, and
+    // conflating them would recreate the uselessness this function exists to remove.
+    if (gate === "capable") {
+      const mine = db.prepare("SELECT COUNT(*) n FROM capabilities WHERE person_id=?").get(personId).n;
+      return { reason: mine === 0 ? "no_capabilities" : "nothing_in_your_activities" };
+    }
+    if (gate === "role") {
+      const prefers = db.prepare("SELECT preferred_role FROM people WHERE id=?").get(personId)?.preferred_role;
+      // No stated role is the volunteer's to fix in seconds; the other case is genuinely somebody else's shift.
+      return { reason: prefers ? "only_the_other_role" : "no_role_stated" };
+    }
+    if (gate === "available") {
+      const answered = db.prepare(`SELECT (SELECT COUNT(*) FROM availability_day WHERE person_id=:p)
+                                        + (SELECT COUNT(*) FROM availability_hour WHERE person_id=:p) AS n`)
+        .get({ p: personId }).n;
+      return { reason: answered === 0 ? "no_availability" : "not_free_then" };
+    }
+    return { reason: "already_busy_then" };            // the double-booking gate
+  }
+  // Every gate passes and the board is still empty — only possible if the caller filtered further.
+  return { reason: "none_open" };
 }
 
 // Claiming. The guard IS the race protection: `person_id IS NULL` inside the UPDATE means two volunteers

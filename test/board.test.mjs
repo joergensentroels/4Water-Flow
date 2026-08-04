@@ -280,3 +280,72 @@ test("no notifier configured at all: the board still works", async () => {
     assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n, 0);
   } finally { w.close(); }
 });
+
+// ---- WHY the shift exchange is empty ---------------------------------------------------------------------
+// "There are no open slots you can take right now" is true in every case and actionable in none. The case that
+// prompted this: a volunteer invited into a partner-dance department, given a capability, who has not yet said
+// whether they teach as leader or follower, is ineligible for every slot on every class — correctly — and the
+// page told them nothing at all. They would reasonably conclude the app was broken, or that nobody needed them.
+//
+// What matters is that the reasons are DISTINGUISHABLE. A diagnostic that says "no_availability" for every
+// cause is the same uselessness with more words, so each case is pinned separately.
+test("an empty board explains itself, and the reasons are distinguishable", withWorld({ volunteers: 2 }, async (w) => {
+  const { boardEmptyReason } = await import("../src/queries.mjs");
+  const me = w.people[0];
+  const reason = () => boardEmptyReason(w.db, me, w.seasonId, w.today).reason;
+
+  // makeWorld gives every volunteer a capability for the first activity, so start by removing it.
+  w.db.prepare("DELETE FROM capabilities WHERE person_id=?").run(me);
+  assert.equal(reason(), "no_capabilities", "nobody has said what they can run — an admin has to act");
+
+  // Capable, but nothing said about when they can help.
+  const act = w.db.prepare("SELECT id FROM activities WHERE key=?").get(w.pattern.activities[0].key).id;
+  w.db.prepare("INSERT OR IGNORE INTO capabilities (person_id, activity_id) VALUES (?,?)").run(me, act);
+  const roled = w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
+                               WHERE s.activity_id=? AND a.role IS NOT NULL`).get(act).n;
+  if (roled > 0) {
+    // Every slot on this activity carries a role, so an unstated role empties the board before availability
+    // is even consulted — which is exactly the case that went unexplained.
+    w.db.prepare("UPDATE people SET preferred_role=NULL WHERE id=?").run(me);
+    assert.equal(reason(), "no_role_stated", "an unstated dance role must be named, not left as silence");
+
+    // Stating only one role is a different situation with a different remedy: those slots are genuinely
+    // somebody else's, and telling them to go and set a role they already set would be nonsense.
+    w.db.prepare("UPDATE assignments SET role='f' WHERE role IS NOT NULL").run();
+    w.db.prepare("UPDATE people SET preferred_role='l' WHERE id=?").run(me);
+    assert.equal(reason(), "only_the_other_role");
+    w.db.prepare("UPDATE people SET preferred_role='b' WHERE id=?").run(me);
+  }
+
+  // Now the role gate passes and availability is the binding one.
+  assert.equal(reason(), "no_availability", "never answered is different from answered no");
+
+  // Answering "cannot" everywhere is a DIFFERENT reason: the remedy is to correct a stale answer, not to
+  // enter one for the first time.
+  for (const { date } of w.db.prepare("SELECT DISTINCT date FROM sessions").all()) {
+    setAvailabilityDay(w.db, me, date, false);
+  }
+  assert.equal(reason(), "not_free_then");
+
+  // Available everywhere and slots open: no longer empty, so there is nothing to explain.
+  makeAvailable(w, me);
+  const { openSlotsFor } = await import("../src/queries.mjs");
+  assert.ok(openSlotsFor(w.db, me, w.seasonId, w.today).length > 0, "the fixture must now offer something");
+
+  // And with nothing open at all, the reason is about the plan rather than about them.
+  w.db.prepare("UPDATE assignments SET person_id=? WHERE person_id IS NULL").run(w.people[1]);
+  assert.equal(reason(), "none_open");
+}));
+
+test("the explanation reaches the page, with a way to act on it", withWorld({ volunteers: 2 }, async (w) => {
+  const me = w.people[0];
+  // Capable, no dance role, nothing answered: on a partner-dance config this is the unstated-role case, and
+  // otherwise the no-availability one. Either way the page must say something and offer a link.
+  w.db.prepare("UPDATE people SET preferred_role=NULL WHERE id=?").run(me);
+  const body = await (await w.get("/board", await w.signIn(me))).text();
+
+  assert.ok(!/board\.why\./.test(body), "an untranslated reason key must never render at a volunteer");
+  assert.match(body, /There are openings|Nobody has recorded|Nothing is open/,
+    `the empty board must explain itself:\n${body.slice(body.indexOf("Shift exchange"), body.indexOf("Shift exchange") + 700)}`);
+  assert.match(body, /href="\/me"|href="\/availability"/, "and offer the screen that fixes it");
+}));

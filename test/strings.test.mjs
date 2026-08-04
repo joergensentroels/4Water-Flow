@@ -61,6 +61,11 @@ test("every dynamically-built key family is complete in both locales", () => {
     // server.mjs without a string here, the outbox would render "outbox.kind.whatever" at a planner.
     "outbox.kind": ["availability_nudge", "slot_open"],
     "outbox.status": ["queued", "failed", "sent"],
+    // Every reason the shift exchange can be empty. A missing one renders "board.why.no_role_stated" at a
+    // volunteer, which is worse than the bare "nothing you can take" this replaced — so the list is pinned
+    // against the same codes boardEmptyReason can return.
+    "board.why": ["none_open", "no_capabilities", "nothing_in_your_activities", "no_role_stated",
+                  "only_the_other_role", "no_availability", "not_free_then", "already_busy_then"],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 
