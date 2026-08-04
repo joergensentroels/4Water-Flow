@@ -228,6 +228,65 @@ test("the Node floor is declared once and every copy of it agrees", () => {
     `CI does not test ${tag[1]}.${tag[2]}, which is the version the image ships`);
 });
 
+// The test above compares four DECLARATIONS of the floor to each other. All four can agree and all four be
+// wrong, because none of them looks at what the app actually calls.
+//
+// That gap is not theoretical here. Every test run in this project has been on Node 24 — the version the
+// container ships, 22.14, has never executed the suite, and will not until the repo has a remote and CI runs.
+// So the one runtime that matters in production is the least exercised, and `node:sqlite` is a release candidate
+// whose surface is explicitly permitted to grow. Reach for one member added after the declared floor and the
+// suite stays green on a newer local Node while the container dies at boot.
+//
+// Measured, so the allow-list is a record rather than a guess: the app uses only `exec`, `prepare` and `close`
+// on the database, and `run`/`get`/`all` on a statement — the whole original 22.5-era surface, nothing since.
+// The SQL is the same story: the only construct newer than 2018 anywhere in it is `ON CONFLICT … DO UPDATE`
+// (SQLite 3.24), against 3.53.1 bundled on the Node this was written on and roughly 3.47 on 22.14. There is no
+// version risk in the code as it stands; this exists so that stays true without anyone having to remember it.
+test("nothing in the app reaches for a node:sqlite member newer than the floor it declares", () => {
+  const ALLOWED_ON_DB = new Set(["exec", "prepare", "close"]);
+  // Members that exist now but arrived after the declared floor, or that pull in a wider surface. Reaching for
+  // any of these means the real floor has moved and MIN_NODE has to move with it — deliberately, not silently.
+  const LATER_ADDITIONS = [
+    "iterate", "columns", "setAllowBareNamedParameters", "setReadBigInts", "function", "aggregate",
+    "backup", "loadExtension", "enableLoadExtension", "location", "isTransaction", "createSession",
+    "applyChangeset",
+  ];
+
+  const files = [];
+  for (const dir of ["src", "tools"]) {
+    const walk = (d) => {
+      for (const e of readdirSync(path.join(ROOT, d), { withFileTypes: true })) {
+        if (e.isDirectory()) walk(path.join(d, e.name));
+        else if (e.name.endsWith(".mjs")) files.push(path.join(d, e.name));
+      }
+    };
+    walk(dir);
+  }
+  assert.ok(files.length >= 10, `only found ${files.length} source files — this is not looking properly`);
+
+  const problems = [];
+  for (const rel of files) {
+    const text = readFileSync(path.join(ROOT, rel), "utf8");
+    // Strip line comments before matching: the codebase discusses SQLite in prose, and a scanner that reads
+    // comments as code is the mistake the seams extractor already made once.
+    const code = text.replace(/^\s*\/\/.*$/gm, "");
+    for (const m of code.matchAll(/\bdb\.(\w+)\s*\(/g)) {
+      if (!ALLOWED_ON_DB.has(m[1])) {
+        problems.push(`${rel}: calls db.${m[1]}() — not in the surface available at Node ${MIN_NODE.join(".")}`);
+      }
+    }
+    for (const name of LATER_ADDITIONS) {
+      if (new RegExp(`\\.${name}\\s*\\(`).test(code)) {
+        problems.push(`${rel}: uses .${name}() — added to node:sqlite after ${MIN_NODE.join(".")}`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [],
+    `the app's real Node floor is above the one it declares, and the container pins the declared one:\n  ` +
+    `${problems.join("\n  ")}\n  Either use something older, or raise MIN_NODE in src/db.mjs and the ` +
+    `Dockerfile tag together.`);
+});
+
 test("the files the Dockerfile copies are enough to run the app", async () => {
   const df = readDockerfile();
   assert.ok(df.copies.length >= 5, `expected several COPY lines, parsed ${df.copies.length}`);

@@ -229,19 +229,38 @@ What that means in practice:
   message naming the version it found, rather than failing at an import nobody can interpret.
 - **The Dockerfile pins an exact Node minor** (currently 22.14) so a host rebuild cannot move the runtime under
   the app. Do not relax that pin to `node:22`.
+- **⚠ The version the container ships has never run the suite.** Every test run in this project has been on
+  Node 24; the image pins 22.14. So the one runtime that matters in production is the least exercised, which is
+  exactly the shape of defect this project keeps finding. Two things narrow it, both measured rather than
+  assumed. The app touches only `exec`, `prepare` and `close` on the database and `run`/`get`/`all` on a
+  statement — the original 22.5-era surface, nothing added since — and the only SQL construct in it newer than
+  2018 is `ON CONFLICT … DO UPDATE` (SQLite 3.24, against roughly 3.47 bundled on 22.14). A test now enforces
+  that rather than trusting it: reach for `iterate`, `db.function` or any other later member and the suite fails
+  telling you the real floor has moved above the declared one. **That is a good argument, not a green build. The
+  first CI run on 22.14 is the actual evidence.**
 - **CI is set up to run the suite on both the pinned LTS and current Node, and has never actually run**, because
   this repository has no remote yet. The workflow is correct and the intent stands — a breaking change in
   `node:sqlite` should show up as a red build rather than as a broken deployment mid-season — but it is a plan,
   not a thing that has happened, and the difference mattered: three tests read a file `.gitignore` excludes, so
   the first CI run would have been red for a reason having nothing to do with Node. That is fixed, and the suite
   is verified against an actual `git clone` rather than against this working copy. **Push the repo and confirm
-  the first run is green before relying on this line.** What is and is not already checked, so a red first build
-  is quick to triage: the first two steps (`node --version`, `node --test`) have been run against a real clone
-  and pass. The last two are Linux shell wrappers — `/tmp` paths and a backgrounded server — around properties
-  the cross-platform suite already asserts anyway (`test/image.test.mjs` boots the entry point and checks it
-  seeded slots; `test/backup.test.mjs` covers `verifyBackup`). Those wrappers could not be validated from the
-  Windows machine this was written on, because `/tmp/ci.db` resolves to `C:\tmp\ci.db` there. So if the first
-  build is red on one of those two steps, suspect the shell rather than the app.
+  the first run is green before relying on this line.**
+
+  All four steps have now been exercised, so a red first build should be triaged as a real finding rather than
+  as untested scaffolding. The first two (`node --version`, `node --test`) ran against a real clone. The last
+  two are Linux shell wrappers — a backgrounded server, a polling `curl`, and two `node -e` snippets — and their
+  logic has been run end to end under `bash`, with only the literal `/tmp` prefix substituted, because a Node
+  binary on Windows resolves `/tmp/ci.db` to `C:\tmp\ci.db`. That exercised the parts that could plausibly be
+  wrong: the `head -c 32 /dev/urandom | od | tr` secret really is one the app accepts, the three-variable
+  continuation line parses, the health poll returns `ok`, `require('node:sqlite')` works inside `node -e` in a
+  project that is otherwise ESM, and step 4's `FOURWATER_BACKUP_DIR` and `--no-upload` are both real. Step 3
+  reported 102 seeded sessions and step 4 a sound integrity check, both exit 0. What is still unverified is
+  only the runner itself and the `/tmp` literal.
+
+  Worth knowing if you ever run those two steps by hand: the first attempt reported both as failing, and the app
+  had nothing to do with it — `bash.exe` had been launched without MSYS's own `bin` on `PATH`, so `mkdir`, `head`
+  and `seq` were all missing and the database was never created. A confident failure of the harness. Read the
+  top of the output, not the exit code.
 - **If it ever does break:** stay on the pinned Node version — nothing forces an upgrade — and raise it as an
   issue. The database file is ordinary SQLite, readable by any `sqlite3` binary, so the data is never trapped
   by this choice. That property is what makes the risk acceptable rather than reckless.
