@@ -22,9 +22,11 @@ Zero dependencies. Nothing to install; there is no `node_modules`.
 `src/db.mjs` checks the version and says so, rather than dying at `No such built-in module: node:sqlite`.
 
 `node:sqlite` is **Stability 1.2, "Release candidate"** — not stable. It is what makes zero dependencies
-possible and it is the one part of this stack that could change under a Node upgrade. CI runs the suite on
-both the pinned LTS and current Node so that shows up as a red build rather than a broken deployment; see
-RUNBOOK for what to do if it ever does.
+possible and it is the one part of this stack that could change under a Node upgrade. The CI workflow is written
+to run the suite on both the pinned LTS and current Node, so a breaking change shows up as a red build rather
+than a broken deployment mid-season — but **it has never run: this repository has no remote yet.** Push it and
+confirm the first build is green before relying on that. RUNBOOK says what to do if `node:sqlite` ever does move
+under the app.
 
 ## The four decisions that shape everything else
 
@@ -72,16 +74,34 @@ Comment-scanning would also forbid writing a weekday name next to the column tha
 code worse for no safety gain. The extractor is a hand-written scanner rather than a regex — the first
 version was a regex and reported three offences that were all prose inside comments.
 
-## What is NOT here yet
+## What is NOT here
 
-Auto-roster, notifications (Mattermost webhook), OIDC, invite redemption, the planner grid, the importer.
-`invitations` and `auth_provider` exist in the schema because retrofitting an identity column later is far
-more expensive than carrying it now — but nothing consumes them.
+**One thing: an importer for the old workbooks, and that is deliberate.** The cutover plan (spec §7) switches at
+a season boundary, and Score is per-season — so nothing needs importing except the ~40 people and the capability
+matrix. Building a reader for 22 sheets and 86 MB of XML to avoid typing forty names in would be the expensive
+way round.
 
-## Confirm before building slice 2
+Everything else is built: availability at two granularities, the shift exchange, the read-only plan, the planner
+grid, auto-roster with proposals a planner locks or discards, leader/follower roles per session, notifications
+with a Mattermost webhook and an outbox fallback, shift reminders, NextCloud OIDC with discovery plus invite
+links, a subscribable calendar feed, GDPR retention/erasure/export, season rollover, and an operational status
+page. `PLAN.md` lists all thirty-four increments.
 
-- Clock times in `config/pattern.json` are **placeholders**. The Wed/Sun rhythm is from the real export; the
-  times were never stated.
-- `board.cutoffDays` is spec question Q18 and unanswered. `2` is a guess.
-- Whether "active volunteer" is judged on the current season only or a longer window. If longer, a slim
-  per-person-per-season history import is needed at cutover.
+> This section used to say auto-roster, notifications, OIDC, invite redemption and the planner grid were all
+> missing, and that nothing consumed `invitations` or `auth_provider`. Every word of that was false by the time
+> anybody would have read it. It survived because **no mechanical check covers a negative claim**: the suite
+> verifies that everything these documents *name* exists, which cannot notice a sentence asserting something
+> does not. If you land a feature, re-read this section — that is the only thing that catches it.
+
+## Still to confirm with 4water
+
+Three values in `config/pattern.json` are invented, and only 4water can settle them. They are marked as
+placeholders in the file itself.
+
+- **Clock times.** The Wednesday/Sunday rhythm is from the real export; the times were never stated anywhere.
+- **`board.cutoffDays`** — how late a shift may be handed back. Spec question Q18, unanswered; `2` is a guess.
+  Without a sensible value the shift exchange becomes the no-show channel.
+- **`calendar.eventMinutes`** — how long a shift runs. 90 is invented.
+
+And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
+current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.

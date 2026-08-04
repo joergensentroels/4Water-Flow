@@ -132,3 +132,9 @@ fails 1.4.3, so `--accent` is a darker relative of it. Do not "correct" it back 
   code, add its message to both locales — a test checks that too.
 - If you changed something a runbook step depends on, update `RUNBOOK.md`. It is the succession plan, and it is
   wrong the moment it stops matching.
+- **If you landed a feature, re-read README's "What is NOT here" section.** `test/docs.test.mjs` verifies that
+  everything these documents *name* exists — a path, a route, an environment variable, a config key, a function.
+  It cannot notice a sentence asserting something **does not** exist, because there is nothing to look up. That
+  section once listed auto-roster, notifications, OIDC, invite redemption and the planner grid as missing, long
+  after all five shipped, and claimed nothing consumed `invitations` — in the file a reader opens first. No check
+  will catch the next one; reading it will.
