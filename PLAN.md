@@ -1,11 +1,11 @@
 # Execution plan — 4water scheduling
 
-Planned as ten increments; it ran to twenty-four. **Each one ends with `npm test` green and is independently
+Planned as ten increments; it ran to twenty-six. **Each one ends with `npm test` green and is independently
 shippable**; the app is usable by volunteers from D onward even while planners are still on the spreadsheet.
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–X complete, 296 tests green** (`npm test` — no network, no database, no setup).
+Status: **✅ A–Z complete, 307 tests green** (`npm test` — no network, no database, no setup).
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
 deployment that could not have worked, and why is written down there rather than left for somebody to rediscover.
@@ -43,6 +43,8 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **V** | 4water's visual identity | black-and-white frame from their site, a water blue chosen because theirs measures 3.3:1 on white, droplet drawn inline because the CSP forbids remote images |
 | **W** | subscribable calendar feed | UTC instants resolved through `Intl` rather than a hand-written VTIMEZONE; the link is a revocable credential stored only as a hash |
 | **X** | what a green suite could not see | a fresh deployment opened **no slots at all**; the notifier and nudge timer were never wired in production; three UI strings asserted causes that were false; invitations were never deleted; the admin screen was 953 KB |
+| **Y** | OIDC end to end, and the image's filesystem | `auth.mjs` said the callback "CANNOT be exercised without a provider", which was untrue and was itself the obstacle: a conforming provider in 90 lines proved PKCE, discovery, and three refusals. Then the same shape one layer down — `deploy.test.mjs` checked the Dockerfile's *inputs*, which cannot fail the way a build fails |
+| **Z** | the distribution nobody could see | `workloadSpread` was computed for the tests and shown to no one, while a planner locked in 178 proposals blind. Measuring the roster from zero found it evens COUNTS as well as availability permits — and concentrates three of four broad volunteers onto one weekday. Reported, not silently "fixed": which of those is capture and which is continuity is 4water's judgement, not mine |
 
 ## A definition of done I amended rather than met — deliberately, and here is why
 
@@ -125,11 +127,15 @@ up, add it there too.**
 
 ### Still unproven
 
-- **The Docker image has never been built.** Docker is not installed on the machine this was written on, and
-  installing it was out of scope. Said plainly at the top of `RUNBOOK.md`. What *is* verified is everything
-  checkable without a daemon: every path the Dockerfile copies exists, the compose file keeps its properties,
-  secrets and the database are excluded from image and git, and the app boots and answers its healthcheck under
-  the image's exact environment including `NODE_ENV=production`.
+- **The Docker image has never been built.** No Docker, no Podman, and no WSL distribution on this machine —
+  checked, not assumed. Said plainly at the top of `RUNBOOK.md`. What *is* verified went up a level once I
+  noticed `deploy.test.mjs` was checking the Dockerfile's **inputs**: "every `COPY` path exists in the repo"
+  cannot fail for the reason a real build fails, because the repo has every file. So `test/image.test.mjs`
+  now materialises exactly the `COPY` set into an empty directory and runs `src/server.mjs` from there under
+  the image's own `ENV` — proven able to fail by omitting each path in turn. It still cannot see a broken base
+  tag (it runs the host's Node), so the base tag is checked statically against the floor `db.mjs` enforces.
+  What remains genuinely unproven is the build itself: layer caching, the `apk` layer, and file ownership
+  under `USER node`.
 - **OIDC has never talked to a real NextCloud** — but it is no longer unexecuted, and the distinction matters.
   I repeated "never verified end to end" often enough that it started sounding like a fact about the world
   rather than about the tooling I had reached for. A conforming provider is a few hundred lines, so
@@ -145,6 +151,14 @@ up, add it there too.**
   no well-known document, the app logs the failure, degrades to NextCloud's layout, and keeps working.
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
+- **Whether the auto-roster's weekday concentration is a problem is not a technical question.** Measured on a
+  full season from zero it evens out shift *counts* about as well as availability permits, and puts three of
+  the four broadly-available volunteers on one weekday 78–91% of the time. Both facts are in `RUNBOOK.md` under
+  "Is the auto-roster fair?", and the planning screen reports the concentration rather than acting on it —
+  "I always get stuck with Sundays" and "the same teachers every Sunday" describe the same number. Ask 4water
+  which one they want before changing the algorithm. Five apparent cases of the same effect turned out to be an
+  artefact of my own test seeding, which is why the flag now only fires for volunteers who offered more than
+  one weekday.
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
 - **Three placeholders remain in `config/pattern.json`:** the clock times (the Wed/Sun rhythm is from the real

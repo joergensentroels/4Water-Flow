@@ -55,6 +55,53 @@ function readDockerfile() {
 // the base tag: change `FROM node:22.14-alpine` to `node:20-alpine` and the simulation still passes, while the
 // real container crash-loops on db.mjs's own version guard. The floor is declared in six files and only one of
 // them executes, so check the machine-readable ones against it.
+// Found by running the app, not by reading it: `.listen()` is asynchronous, and the success line used to sit on
+// the next statement rather than in its callback. So a port collision printed "4water listening on ..." and THEN
+// died — an operator tailing the log sees a clean start, and a stale copy of the app on the same port gets
+// measured instead of the new one. It cost a round of debugging in exactly that way.
+test("a failed bind does not report success", async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "4water-bind-"));
+  const env = {
+    PATH: process.env.PATH, NODE_ENV: "production",
+    FOURWATER_SECRET: "b".repeat(48), HOST: "127.0.0.1", PORT: String(PORT + 1),
+  };
+  const start = (dbName) => spawn(process.execPath, ["src/server.mjs"],
+    { cwd: ROOT, env: { ...env, FOURWATER_DB: path.join(tmp, dbName) }, stdio: ["ignore", "pipe", "pipe"] });
+  const collect = (child) => {
+    let out = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { out += d; });
+    return () => out;
+  };
+
+  const first = start("a.db");
+  const firstOut = collect(first);
+  try {
+    for (let i = 0; i < 80; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { if ((await fetch(`http://127.0.0.1:${PORT + 1}/healthz`)).ok) break; } catch {}
+    }
+    assert.match(firstOut(), /listening on http:\/\/127\.0\.0\.1:/, "the one that DID bind must say so");
+
+    // Now the same port again.
+    const second = start("b.db");
+    const secondOut = collect(second);
+    const code = await new Promise((r) => second.once("exit", r));
+
+    assert.notEqual(code, 0, "a process that could not bind must exit non-zero");
+    assert.doesNotMatch(secondOut(), /listening on/,
+      "and must NOT claim to be listening — that claim is what sent a measurement at the wrong process");
+    assert.match(secondOut(), /already in use/, "it should say what is wrong");
+    assert.doesNotMatch(secondOut(), /Unhandled 'error' event/, "and not as a raw Node stack trace");
+  } finally {
+    if (first.exitCode === null && first.signalCode === null) {
+      first.kill();
+      await new Promise((r) => first.once("exit", r));
+    }
+    try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
+});
+
 test("the Node floor is declared once and every copy of it agrees", () => {
   const dockerfile = readFileSync(path.join(ROOT, "Dockerfile"), "utf8");
   const tag = dockerfile.match(/^FROM node:(\d+)\.(\d+)(?:\.(\d+))?-/m);

@@ -105,7 +105,11 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
         return send(res, status, renderError(status));
       }
     },
-    listen: (port, host = "127.0.0.1") => createServer(app.handler).listen(port, host),
+    // Forwards a ready callback and returns the http.Server, so the caller can announce the bind only once it
+    // has actually succeeded and attach an 'error' handler for when it has not. Without the callback the only
+    // place to log success was the statement after this one — which runs before the bind resolves, so a port
+    // collision printed "listening" and then crashed.
+    listen: (port, host = "127.0.0.1", onReady) => createServer(app.handler).listen(port, host, onReady),
     // Introspection, so a test can walk every route the app actually registers rather than a hand-kept list
     // that drifts. A CSRF audit against a list somebody has to remember to update is not an audit.
     routes: () => routes.map((r) => ({ method: r.method, pattern: r.pattern })),

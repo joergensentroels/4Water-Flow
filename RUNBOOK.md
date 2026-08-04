@@ -151,6 +151,33 @@ deleting sessions would destroy assignments volunteers have already agreed to.
 | `4water Flow needs Node 22.13.0 or newer` | Exactly what it says. See **The one dependency risk** below. |
 | `No such built-in module: node:sqlite` | Node older than 22.13. Upgrade Node; nothing else will fix it. |
 | `/status` says sign-in is "guessing NextCloud's usual addresses" | Endpoint discovery is failing. See `docs/OIDC.md` §2 — sign-in still works, but you are one NextCloud upgrade away from an outage. |
+| `127.0.0.1:8080 is already in use` | Another copy is still running. Stop it, or start this one on another port. Until recently the app printed `4water listening on …` *before* the bind failed, so a collision read as a clean start followed by an unrelated crash — if you are looking at older logs, do not trust that line. |
+| The plan looks lopsided after auto-roster | Open **How the season is spread** on the planning screen. It lists everyone busiest-first, flags anyone whose shifts nearly all fall on one weekday, and names the volunteers who have been given nothing. See **Is the auto-roster fair?** below. |
+
+## Is the auto-roster fair?
+
+Measured, on a full 26-week season seeded from nothing: 178 slots, twelve volunteers with deliberately uneven
+capabilities and availability. Two answers, and they are different answers.
+
+**On how much work each person gets, it is as even as availability allows.** The four volunteers who offered
+most availability came out on 21, 22, 22 and 23 shifts. Everyone below that was limited by what they had
+offered, not by the algorithm — the volunteer who marked three evenings free got three shifts. There is no
+setting to tune here and no known way to do better without asking people for more availability.
+
+**On *which* shifts, it concentrates.** Three of those four offered two weekdays roughly equally and were
+given 78%, 82% and 91% of their shifts on a single one. That is not a bug in the balancing; it is what a
+stable tie-break does against a weekly rhythm — the rotation settles into a period that divides the week, so
+the same people keep landing on the same evening.
+
+**Whether that is a problem is 4water's call, and the app deliberately does not decide it.** "I always get
+stuck with Sundays" is a real reason volunteers stop showing up. Having the same two teachers every Sunday is
+also real continuity for a class. So the planning screen *reports* it — **How the season is spread**, flagging
+anyone at 75% or more on one weekday — and leaves the judgement to a person. It only flags volunteers who
+offered more than one weekday: someone who only ever marked Sundays was not put there by a machine.
+
+If you decide the concentration is wrong, the fix is not a setting. Unassign the affected shifts and reassign
+them by hand, or lock in a partial plan and re-run: auto-roster never touches locked work, so you can pin the
+rotation you want and let it fill the rest around you.
 
 ## The one dependency risk
 

@@ -14,7 +14,7 @@ import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailabilit
 import { renderHome, renderPlan } from "./pages/plan.mjs";
 import { renderBoard, flashFor } from "./pages/board.mjs";
 import { renderPlanner, plannerFlash } from "./pages/planner.mjs";
-import { autoRoster, lockInProposals, discardProposals, countProposals } from "./roster.mjs";
+import { autoRoster, lockInProposals, discardProposals, countProposals, rosterReview } from "./roster.mjs";
 import { renderAdmin, adminFlash } from "./pages/admin.mjs";
 import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapability, setPersonStatus,
          savePattern, patternFromForm, addActivityToForm, proposeNextSeason,
@@ -321,6 +321,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     send(res, 200, renderPlanner({
       t, session: c.session, roles: c.roles, who: c.who, rows, eligibleByAssignment, emptyReasons, gapsOnly, weeks,
       pendingProposals: sid ? countProposals(db, sid, today()) : 0,
+      // Whole-season and independent of the `weeks` horizon on purpose: the fairness question is "how much has
+      // this person got this season", which a 4-week window cannot answer.
+      review: sid ? rosterReview(db, sid) : null,
       // Counts ride in the query string so the message can say what happened rather than just "done".
       flash: plannerFlash(t, query.get("r"), {
         filled: query.get("filled") ?? 0, gaps: query.get("gaps_n") ?? 0, n: query.get("n") ?? 0,
@@ -768,9 +771,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`notifications: ${notifyCfg.describe()}`);   // describe() never reveals the URL — its path is the secret
 
   const port = Number(process.env.PORT) || 8080;
+  const host = process.env.HOST || "127.0.0.1";
   const server = buildApp({ db, pattern: boot, patternFile: configFile, notifier })
-    .listen(port, process.env.HOST || "127.0.0.1");
-  console.log(`4water listening on http://127.0.0.1:${port}`);
+    .listen(port, host, () => console.log(`4water listening on http://${host}:${port}`));
+
+  // listen() is ASYNCHRONOUS, so the success line has to be its callback. Printed on the next statement — which
+  // it was — the app announces "4water listening on ..." and then dies of EADDRINUSE, and the log reads as a
+  // clean start followed by an unrelated crash. That is exactly how a stale copy of this app on the same port
+  // cost a round of debugging: the output said it was up, so the wrong process got measured.
+  //
+  // The address is also the real one now. The old line hardcoded 127.0.0.1 while the container binds 0.0.0.0,
+  // so it described something other than what happened.
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\n✖ ${host}:${port} is already in use — another copy is probably still running.`);
+      console.error(`  Stop that one, or choose another port:  PORT=${port + 1} node src/server.mjs\n`);
+    } else if (err.code === "EACCES") {
+      console.error(`\n✖ Not allowed to bind ${host}:${port}. Ports below 1024 need privileges; use a proxy instead.\n`);
+    } else {
+      console.error(`\n✖ Could not start: ${err.message}\n`);
+    }
+    process.exit(1);
+  });
 
   // Run the nudge check once shortly after boot as well as on the interval. Six hours is a long time to wait to
   // find out the job is misconfigured, and runNudge is idempotent per (kind, person, period) so an extra call

@@ -43,7 +43,7 @@ function byDate(rows) {
 // `emptyReasons` maps assignmentId -> reason code, only for slots with no candidates. Defaults to an empty Map
 // so a caller that does not compute it still renders — falling back to the one honest generic reason.
 export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignment, flash, gapsOnly, weeks = 4,
-                                pendingProposals = 0, emptyReasons = new Map() }) {
+                                pendingProposals = 0, emptyReasons = new Map(), review = null }) {
   const days = byDate(rows);
 
   // Auto-roster controls. Lock-in and discard only appear when there is something to decide about, because a
@@ -63,6 +63,31 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
           ${csrfField(session)}<button type="submit" class="secondary">${t("planner.discard")}</button>
         </form>`}
     </div>`;
+
+  // The distribution, which until now the app computed for its own tests and showed nobody. Collapsed by
+  // default with the headline range in the summary: a planner on a phone gets the one number that matters
+  // without another screenful, and can open it when it looks wrong.
+  //
+  // Deliberately reports rather than decides. It does not say "this is unfair" — a volunteer who always takes
+  // the same evening may be capture or may be continuity for a class, and that is 4water's judgement.
+  const reviewCard = !review || review.people.length === 0 ? "" : html`
+    <details class="card">
+      <summary>${t("planner.reviewTitle", { min: review.min, max: review.max })}</summary>
+      <p class="hint">${t("planner.reviewHint")}</p>
+      <ul class="dist">
+        ${review.people.map((p) => html`
+          <li class="${p.total === 0 ? "idle" : ""}">
+            <span class="who">${p.name}</span>
+            <span class="count">${p.total}</span>
+            <small>${
+              p.total === 0 ? t("planner.reviewNothing")
+              : p.topDay && p.topDay.share >= 0.75
+                ? t("planner.reviewSameDay", { n: p.topDay.n, total: p.total, day: t.weekday(p.topDay.dow) })
+                : p.proposed > 0 ? t("planner.reviewProposed", { n: p.proposed })
+                : ""}</small>
+          </li>`)}
+      </ul>
+    </details>`;
 
   const filled = (r) => html`
     <span class="when">
@@ -109,6 +134,7 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
     : html`
       <h2>${t("planner.title")}</h2>
       ${rosterControls}
+      ${reviewCard}
       <p class="hint">
         <a href="/planner?weeks=${weeks ?? "all"}${gapsOnly ? "" : "&gaps=1"}">${gapsOnly ? t("planner.showAll") : t("planner.showGaps")}</a>
       </p>
