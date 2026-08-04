@@ -75,4 +75,16 @@ services:
     command: ["node", "tools/backup.mjs"]
 
 volumes:
+  # `name:` is pinned rather than left to Compose, and it is not cosmetic. Without it Compose prefixes the volume
+  # with the project name — the checkout's directory — so the real volume would be `4water-cph_4water-data` at
+  # /srv/4water-cph and something else in a clone named anything else. Two consequences, both bad in the same
+  # hour: `docker volume ls` does not show the name the runbook uses, and a `docker compose run -v 4water-data:…`
+  # silently CREATES a new empty volume and mounts it over /data. The restore procedure used to pass exactly that
+  # flag, so it would have copied a backup into a volume the app never reads, reported success, and left the
+  # operator with the unrestored database — during the one procedure nobody runs calmly.
+  #
+  # Pin it NOW, while no deployment exists. Adding `name:` to a live deployment repoints Compose at a DIFFERENT
+  # volume, and every volunteer's data appears to vanish. If this ever needs changing after go-live, migrate the
+  # contents deliberately; do not just edit this line.
   4water-data:
+    name: 4water-data

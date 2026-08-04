@@ -12,10 +12,11 @@ under the image's exact environment, the healthcheck command exits 0, a restored
 the whole suite passes on a clean `git clone`. Expect the first build to need small fixes; nothing else here
 depends on it.
 
-**No test count appears in this file on purpose.** `PLAN.md` holds the number, in one place, and a test asserts
-that no other document states one — three documents used to and all three were wrong at once (129, 330, 330,
-against an actual 338). A count that must be updated in several files is a count that will be stale in most of
-them.
+**The size of the test suite is not stated here on purpose.** `PLAN.md` holds that number, in one place, and a
+test asserts no other document states one. Three did, and at one point they claimed a hundred-and-something,
+three-hundred-and-something, and the same three-hundred-and-something again, while the suite was a fourth number
+— all three wrong simultaneously, which is what a count kept in several places does. Say "the whole suite" and
+look the number up if you need it.
 
 ---
 
@@ -93,9 +94,16 @@ Backups are nightly `.sqlite` files in the `4water-data` volume under `/data/bac
 
 ```bash
 docker compose stop app
-docker compose run --rm -v 4water-data:/data --entrypoint sh app -c "cp /data/backups/4water-<STAMP>.sqlite /data/4water.db"
+docker compose run --rm --entrypoint sh app -c "cp /data/backups/4water-<STAMP>.sqlite /data/4water.db"
 docker compose start app
 ```
+
+There is deliberately **no `-v 4water-data:/data`** on that line. The `app` service already mounts the volume, so
+the flag was redundant — and worse than redundant: `-v` takes a raw Docker volume name, not a Compose one, and
+Compose prefixes volumes with the project name unless told otherwise. It would have created a brand-new empty
+volume called `4water-data`, mounted it over `/data`, copied nothing, and started the app on the database you were
+trying to replace. `compose.yml` now pins `name: 4water-data` so the two names agree, but the flag is still not
+needed here.
 
 Then confirm before telling anyone it worked:
 

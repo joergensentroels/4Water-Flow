@@ -91,8 +91,23 @@ test("every service, volume and port the documents tell an operator to use actua
   const compose = read("compose.yml");
   // Service keys are two-space indented under `services:`; volumes are declared in their own top-level block.
   const services = new Set([...compose.matchAll(/^ {2}([a-z][\w-]*):/gm)].map((m) => m[1]));
-  const volumes = new Set([...compose.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1]));
   assert.ok(services.has("app"), "compose.yml must define the app service this test reasons about");
+
+  // Volumes come from the top-level `volumes:` block, NOT from "any two-space key with nothing after the colon" —
+  // which is what this used to do, and which quietly swept up the service keys as well. `volumes` therefore
+  // contained `app` and `backup`, so the `-v` check below was asserting membership in a set that was wrong; it
+  // passed because the one real volume happened to be in there too. A set that is a superset of the truth makes an
+  // "exists" check into a formality, and this one went unnoticed until a stricter check downstream tripped on it.
+  const volumeBlock = compose.split(/^volumes:\s*$/m)[1] ?? "";
+  const declarations = [...volumeBlock.matchAll(/^ {2}([\w-]+):[ \t]*\n((?:(?: {4,}| *#).*\n|[ \t]*\n)*)/gm)];
+  const volumes = new Set(declarations.map((m) => m[1]));
+  assert.ok(volumes.size >= 1 && !volumes.has("app"),
+    `the volumes block yielded ${[...volumes].join(", ") || "nothing"} — that is services, or nothing, not volumes`);
+
+  // Which of them have their RUNTIME name pinned. A volume's real name is not its compose key: Compose prefixes it
+  // with the project name — the checkout's directory — unless the declaration says `name:` or `external: true`.
+  const pinned = new Set(
+    declarations.filter((m) => /^ {4}(?:name:|external:[ \t]*true)/m.test(m[2])).map((m) => m[1]));
 
   const problems = [];
   let checked = 0;
@@ -114,6 +129,22 @@ test("every service, volume and port the documents tell an operator to use actua
     for (const m of text.matchAll(/-v ([\w-]+):\//g)) {
       checked++;
       if (!volumes.has(m[1])) problems.push(`${doc}: uses volume "${m[1]}", which compose.yml does not declare`);
+    }
+
+    // And the name has to be the name. The check above verifies the key EXISTS in compose.yml; it cannot notice
+    // that Compose will serve a differently-named volume at runtime, which is a distinction with an operator-
+    // visible difference. The restore procedure passed `-v 4water-data:/data`, and `-v` takes a raw Docker name,
+    // not a Compose one — so with an unpinned declaration it would have created a new empty volume, mounted it
+    // over /data, copied a backup into nothing, and started the app on the database being replaced. `docker
+    // volume ls` would also not have shown the name this runbook uses. Both failures land in the same hour.
+    for (const v of volumes) {
+      if (!new RegExp(`\\b${v}\\b`).test(text)) continue;
+      checked++;
+      if (!pinned.has(v)) {
+        problems.push(`${doc}: names the volume "${v}", but compose.yml leaves its runtime name to Compose, ` +
+          `which prefixes it with the project name — so the volume an operator can see is not the one documented. ` +
+          `Add "name: ${v}" to the declaration, or stop naming it here.`);
+      }
     }
 
     // The port an operator curls has to be the one the image publishes, or the health check they are told to run
