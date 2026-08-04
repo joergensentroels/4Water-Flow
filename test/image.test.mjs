@@ -51,6 +51,88 @@ function readDockerfile() {
   return { copies, env, cmd, healthcheck: hc ? hc[1].trim() : null, workdir, user };
 }
 
+// `.dockerignore`, applied. Without this the simulation below copied each COPY path WHOLESALE and was therefore a
+// SUPERSET of the real image: `tools/testkit.mjs` is excluded from the build but was present in the replica, so a
+// runtime import of a test-only file would pass here and fail in the container. That is the harness supplying
+// what production lacks, one level up, in the very test written to catch that shape.
+//
+// Only the pattern forms this file actually uses are implemented, and anything else THROWS rather than being
+// quietly ignored — a matcher that silently under-applies would restore the superset without saying so.
+function dockerIgnoreMatcher(text) {
+  const rules = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const negated = line.startsWith("!");
+    const pat = negated ? line.slice(1) : line;
+    if (pat.includes("**") || pat.includes("?") || pat.includes("[")) {
+      throw new Error(`.dockerignore uses a pattern this test cannot evaluate: ${pat}`);
+    }
+    const dirOnly = pat.endsWith("/");
+    const body = dirOnly ? pat.slice(0, -1) : pat;
+    // `*` stops at a separator, as Docker's matcher does. A pattern with no separator matches at any depth;
+    // one with a separator is anchored at the context root.
+    const esc = body.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, "[^/]*");
+    const rx = body.includes("/")
+      ? new RegExp(`^${esc}${dirOnly ? "(/.*)?" : ""}$`)
+      : new RegExp(`(^|.*/)${esc}${dirOnly ? "(/.*)?" : ""}$`);
+    rules.push({ rx, negated });
+  }
+  // Docker semantics: the LAST matching rule wins, so `*.md` then `!README.md` keeps the readme.
+  return (rel) => {
+    let ignored = false;
+    for (const r of rules) if (r.rx.test(rel)) ignored = !r.negated;
+    return ignored;
+  };
+}
+
+// Which files a package.json script can actually reach. This is the mechanical form of a rule .dockerignore
+// stated once, by hand, for tools/testkit.mjs: a test-only file has no business in a deployment artefact. Stated
+// by hand it does not generalise — I added tools/season-fixture.mjs and it went straight into the image, which is
+// how this test came to exist.
+function reachableFromScripts() {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const entries = Object.values(pkg.scripts ?? {})
+    .map((cmd) => cmd.match(/\b((?:src|tools)\/[\w.-]+\.mjs)\b/)?.[1])
+    .filter(Boolean);
+  const seen = new Set();
+  const walk = (rel) => {
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    const file = path.join(ROOT, rel);
+    if (!existsSync(file)) return;
+    for (const m of readFileSync(file, "utf8").matchAll(/from\s+"(\.[^"]+)"/g)) {
+      const next = path.relative(ROOT, path.resolve(path.dirname(file), m[1])).replace(/\\/g, "/");
+      walk(next);
+    }
+  };
+  entries.forEach(walk);
+  return { entries, seen };
+}
+
+test("nothing only the tests use is baked into the image", () => {
+  const ignored = dockerIgnoreMatcher(readFileSync(path.join(ROOT, ".dockerignore"), "utf8"));
+  const { entries, seen } = reachableFromScripts();
+  assert.ok(entries.length >= 3, `expected package.json scripts to name entry points, found ${entries.length}`);
+  assert.ok(seen.has("src/server.mjs"), "the server must be reachable from a script");
+
+  const shipped = [];
+  for (const f of readdirSync(path.join(ROOT, "tools"))) {
+    const rel = `tools/${f}`;
+    if (!f.endsWith(".mjs")) continue;
+    if (seen.has(rel)) continue;                       // reachable from a script: it belongs in the image
+    if (!ignored(rel)) shipped.push(rel);
+  }
+  assert.deepEqual(shipped, [],
+    `no package.json script reaches these, so they are test-only and must be in .dockerignore:\n${shipped.join("\n")}`);
+
+  // And the converse, which matters just as much: nothing the app NEEDS may be excluded. Getting this backwards
+  // produces an image that builds and cannot boot.
+  for (const rel of seen) {
+    assert.ok(!ignored(rel), `${rel} is reachable from a package.json script but .dockerignore excludes it`);
+  }
+});
+
 // The generalisation of a defect found by accident: test/journey.test.mjs read `demo-pattern.json` from the
 // repository root, and `.gitignore` excludes that file. So the acceptance gate — the one test written because a
 // green suite twice reported success over a deployment that could not work — was the one test nobody with a
@@ -159,14 +241,29 @@ test("the files the Dockerfile copies are enough to run the app", async () => {
   mkdirSync(appRoot, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
 
-  // Replicate the COPY lines, and NOTHING else. This directory is the image's /app.
+  // Replicate the COPY lines, and NOTHING else — through .dockerignore, so this is the build's filesystem
+  // rather than a superset of it. Copying the directories wholesale left tools/testkit.mjs in the replica when
+  // the real image has never contained it.
+  const ignored = dockerIgnoreMatcher(readFileSync(path.join(ROOT, ".dockerignore"), "utf8"));
+  const excluded = [];
   for (const { from, to } of df.copies) {
     const src = path.join(ROOT, from);
     assert.ok(existsSync(src), `Dockerfile copies "${from}", which does not exist`);
     // "./" means into WORKDIR under the same name; anything else is the given name.
     const destName = to === "./" || to === "." ? from : to.replace(/^\.\//, "");
-    cpSync(src, path.join(appRoot, destName), { recursive: true });
+    cpSync(src, path.join(appRoot, destName), {
+      recursive: true,
+      filter: (srcPath) => {
+        const rel = path.relative(ROOT, srcPath).replace(/\\/g, "/");
+        if (!rel || !ignored(rel)) return true;
+        excluded.push(rel);
+        return false;
+      },
+    });
   }
+  // Prove the filter did something, or a broken matcher would silently restore the superset this fixes.
+  assert.ok(excluded.includes("tools/testkit.mjs"),
+    `.dockerignore excludes tools/testkit.mjs from the build; the replica must exclude it too. Excluded: ${excluded.join(", ")}`);
 
   // Measured, by omitting each copied path in turn: dropping src, tools, config or strings stops the boot
   // outright, and dropping static leaves the app serving pages with a 404 stylesheet (caught below). Dropping

@@ -21,8 +21,14 @@ demo-pattern.json
 config/*.tmp
 
 # Not needed at runtime. The suite is deliberately absent: tests are not a deployment artefact.
+#
+# The rule for tools/ is mechanical and test/image.test.mjs enforces it: anything reachable from a package.json
+# script ships, anything else does not. season-fixture.mjs was added here after that test caught it — it is a
+# fixture three tests use to write a pattern file, and it had gone straight into the image unnoticed, which is
+# what the testkit line below has always been about.
 test/
 tools/testkit.mjs
+tools/season-fixture.mjs
 node_modules/
 .git/
 .gitignore
