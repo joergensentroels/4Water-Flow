@@ -194,6 +194,8 @@
   "status.seasonMissing": "Season {key} is in the configuration but not in the database.",
   "status.gaps": "{n} of {of} slots in the next month are unfilled.",
   "status.silent": "{n} of {of} active volunteers have not answered about availability yet.",
+  "status.silentWho": "Waiting on: {names}.",
+  "status.silentMore": "And {n} more.",
   "status.failed": "{n} messages could not be sent.",
   "status.queued": "{n} messages are waiting to be read, because no chat webhook is configured. That is normal — read them under Messages.",
   "status.queuedInterrupted": "{n} messages were written but never confirmed as sent. A webhook IS configured, so this usually means the app was interrupted mid-send — check Messages and re-send by hand if it matters.",

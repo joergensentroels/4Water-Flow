@@ -194,6 +194,8 @@
   "status.seasonMissing": "Sæson {key} står i konfigurationen, men findes ikke i databasen.",
   "status.gaps": "{n} af {of} vagter i den næste måned er ubesatte.",
   "status.silent": "{n} af {of} aktive frivillige har ikke svaret på tilgængelighed endnu.",
+  "status.silentWho": "Vi mangler svar fra: {names}.",
+  "status.silentMore": "Og {n} flere.",
   "status.failed": "{n} beskeder kunne ikke sendes.",
   "status.queued": "{n} beskeder venter på at blive læst, fordi der ikke er sat en chat-webhook op. Det er normalt — læs dem under Beskeder.",
   "status.queuedInterrupted": "{n} beskeder blev skrevet, men aldrig bekræftet sendt. Der ER sat en webhook op, så det betyder oftest, at appen blev afbrudt midt i afsendelsen — se under Beskeder, og send dem manuelt, hvis det er vigtigt.",

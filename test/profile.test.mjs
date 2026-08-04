@@ -232,6 +232,54 @@ test("the job records that it ran even when there was nothing to do", withWorld(
   } finally { none.stop(); }
 }));
 
+// "2 of 3 active volunteers have not answered" is a number a planner can do nothing with. Chasing cover is one of
+// the two pains this app exists for, and chasing needs names. The nudge says it in the chat channel; this is for
+// the planner already looking at the status page.
+test("the volunteers who have not answered are named, capped, and escaped", withWorld({ volunteers: 3 }, async (w) => {
+  const base = { pattern: w.pattern, today: w.pattern.season.from, backupDir: null };
+  const t = makeT("en");
+  const render = (status) => renderStatus({ t, session: { csrf: "x" }, roles: ["planner"], who: "P", status }).__raw;
+
+  // Nobody has answered: all three named.
+  const all = factFor(collectStatus(w.db, base), "silent");
+  assert.equal(all.value, 3);
+  assert.deepEqual(all.names, ["Volunteer 1", "Volunteer 2", "Volunteer 3"], "sorted by name, so the list is stable");
+  assert.equal(all.more, 0);
+  assert.match(render(collectStatus(w.db, base)), /Waiting on: Volunteer 1, Volunteer 2, Volunteer 3\./);
+
+  // One answers and drops off the list — the names must track the data, not just the count.
+  makeAvailableEverywhere(w.db, w.people[0], w.pattern.season.from);
+  const after = factFor(collectStatus(w.db, base), "silent");
+  assert.equal(after.value, 2);
+  assert.ok(!after.names.includes("Volunteer 1"), "somebody who answered must not still be chased");
+
+  // Everyone answered: back to the bare sentence, with no dangling "Waiting on:".
+  for (const p of w.people) makeAvailableEverywhere(w.db, p, w.pattern.season.from);
+  const none = collectStatus(w.db, base);
+  assert.equal(factFor(none, "silent").value, 0);
+  assert.ok(!/Waiting on/.test(render(none)), "no names when there is nobody to name");
+}));
+
+test("a big roster does not turn the status page into a roll call", withWorld({ volunteers: 14 }, async (w) => {
+  const f = factFor(collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null }), "silent");
+  assert.equal(f.value, 14, "all fourteen are silent at the start of a season");
+  assert.equal(f.names.length, 8, "but only the first few are named");
+  assert.equal(f.more, 6, "and the rest are counted, so the page does not quietly under-report");
+  const page = renderStatus({ t: makeT("en"), session: { csrf: "x" }, roles: ["planner"], who: "P",
+    status: collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null }) }).__raw;
+  assert.match(page, /And 6 more\./);
+}));
+
+// Names come from an invite or from NextCloud's userinfo, so they are user input on a planner-visible page.
+test("a volunteer's name cannot inject markup into the status page", withWorld({}, async (w) => {
+  w.db.prepare("UPDATE people SET name=? WHERE id=?").run('<img src=x onerror="alert(1)">', w.people[0]);
+  const page = renderStatus({ t: makeT("en"), session: { csrf: "x" }, roles: ["planner"], who: "P",
+    status: collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null }) }).__raw;
+  assert.ok(!page.includes("<img src=x"), "the tag must not reach the page as markup");
+  assert.match(page, /&lt;img src=x/, "it must appear escaped, so a planner still sees who it is");
+  assert.ok(!page.includes('onerror="alert'), "and no attribute survives either");
+}));
+
 test("backup age is judged, and no backups at all is a fault", withWorld({}, async (w) => {
   const none = collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null });
   assert.equal(factFor(none, "backup").level, "bad");

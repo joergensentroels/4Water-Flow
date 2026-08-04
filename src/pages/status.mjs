@@ -9,6 +9,9 @@ import { html } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
 
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
+// How many unanswered volunteers to name before falling back to a count. Enough to act on, few enough that the
+// page stays a status page at the start of a season when the answer is "everybody".
+const SILENT_NAMES = 8;
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 export function collectStatus(db, { pattern, today, backupDir, oidc = null, notify = null, jobs = null,
@@ -45,14 +48,26 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null, noti
   });
 
   // ---- who has not answered ----
-  const silent = seasonRow ? db.prepare(`
-    SELECT COUNT(*) n FROM people p
+  //
+  // NAMES, not just a count. "2 of 3 active volunteers have not answered" told a planner a number they could do
+  // nothing with: chasing cover is one of the two pains this app was built for, and chasing requires knowing
+  // who. The nudge job says it in the chat channel, which covers the case where a webhook is configured — this
+  // covers the planner sitting on the status page wondering what to do next.
+  const silentPeople = seasonRow ? db.prepare(`
+    SELECT p.id, p.name FROM people p
      WHERE p.status='active'
        AND NOT EXISTS (SELECT 1 FROM availability_day ad WHERE ad.person_id=p.id AND ad.date >= :from)
-       AND NOT EXISTS (SELECT 1 FROM availability_hour ah WHERE ah.person_id=p.id AND ah.date >= :from)`)
-    .get({ from: today }).n : 0;
+       AND NOT EXISTS (SELECT 1 FROM availability_hour ah WHERE ah.person_id=p.id AND ah.date >= :from)
+     ORDER BY p.name`).all({ from: today }) : [];
   const active = db.prepare("SELECT COUNT(*) n FROM people WHERE status='active'").get().n;
-  facts.push({ key: "silent", value: silent, detail: active, level: silent === 0 ? "ok" : silent > active / 2 ? "warn" : "ok" });
+  facts.push({
+    key: "silent", value: silentPeople.length, detail: active,
+    // Capped in the fact itself rather than in the template. On a big roster at the start of a season this is
+    // everybody, and a status page that turns into a hundred-name list stops being a status page.
+    names: silentPeople.slice(0, SILENT_NAMES).map((p) => p.name),
+    more: Math.max(0, silentPeople.length - SILENT_NAMES),
+    level: silentPeople.length === 0 ? "ok" : silentPeople.length > active / 2 ? "warn" : "ok",
+  });
 
   // ---- notifications ----
   const failed = db.prepare("SELECT COUNT(*) n FROM notifications WHERE status='failed'").get().n;
@@ -137,7 +152,13 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
                   : f.note === "future" ? t("status.seasonFuture", { key: f.value, starts: f.detail })
                   : t("status.seasonMissing", { key: f.value }),
       gaps: () => t("status.gaps", { n: f.value, of: f.detail }),
-      silent: () => t("status.silent", { n: f.value, of: f.detail }),
+      // The names are the actionable part, so they go in the same sentence rather than a separate line a
+      // planner has to notice. `more` keeps it honest when the list is capped.
+      silent: () => f.value === 0
+        ? t("status.silent", { n: f.value, of: f.detail })
+        : `${t("status.silent", { n: f.value, of: f.detail })} ${
+            t("status.silentWho", { names: f.names.join(", ") })}${
+            f.more ? ` ${t("status.silentMore", { n: f.more })}` : ""}`,
       failed: () => t("status.failed", { n: f.value }),
       queued: () => t(f.note === "interrupted" ? "status.queuedInterrupted" : "status.queued", { n: f.value }),
       backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { hours: f.value, kept: f.detail }),
