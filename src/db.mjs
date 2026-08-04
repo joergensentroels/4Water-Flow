@@ -99,14 +99,26 @@ export function migrate(db) {
       PRIMARY KEY (person_id, role_id)
     );
 
+    -- FOUR OF THESE COLUMNS ARE WRITTEN AND READ BY NOTHING: parent, subtype, booth_label, consolidation.
+    -- They carry values from 4water's real workbook export (consolidation codes S/B/D/W/H, and the activity
+    -- hierarchy) and the seeder stores them faithfully, but no query selects them and no screen shows them.
+    --
+    -- Kept rather than dropped, on purpose. They are cheap, and re-deriving that mapping means going back to the
+    -- source spreadsheets — a one-way loss against a few nullable TEXT columns. A consolidation view is a
+    -- plausible next feature and this is the data it would need.
+    --
+    -- Said out loud because a handover artefact must not leave the reader guessing which fields do something.
+    -- If you are about to rely on one of these, grep for it under src/ first: as of this line, nothing reads it.
+    -- (No backticks in here. This whole schema is a JS template literal, so one would end the string and take
+    --  every module that imports this file down with it — which is exactly how it was written the first time.)
     CREATE TABLE IF NOT EXISTS activities (
       id            INTEGER PRIMARY KEY,
       key           TEXT NOT NULL UNIQUE,     -- matches config/pattern.json; the join key for everything
-      parent        TEXT,
-      subtype       TEXT,
+      parent        TEXT,                     -- stored, unread
+      subtype       TEXT,                     -- stored, unread
       label         TEXT NOT NULL,            -- display text, sourced from config, never from code
-      booth_label   TEXT,
-      consolidation TEXT
+      booth_label   TEXT,                     -- stored, unread
+      consolidation TEXT                      -- stored, unread
     );
 
     CREATE TABLE IF NOT EXISTS capabilities (
