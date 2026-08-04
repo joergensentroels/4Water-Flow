@@ -423,6 +423,67 @@ test("an unknown SSO identity is NOT auto-registered, but a pre-registered conta
   assert.equal(linkIdentity(db, "oidc", "nc-1", {}).personId, linked.personId);
 });
 
+// The sibling of the test above, and the one that was missing. Refusing to CREATE a person stops a stranger
+// appearing as a new name; it says nothing about a stranger arriving as an existing one. Adoption matches on an
+// address the provider sent, so if that address is something a user can type into their own profile, anyone in
+// the instance could claim any pre-registered record — with whatever roles it already carries. That is not a
+// hypothetical about a distant system: `completeOidc` did not read `email_verified` at all, so every address
+// arrived implicitly vouched for.
+test("a pre-registered volunteer is not adopted on an address the provider says is unverified", () => {
+  const db = db0();
+  const { seasonId } = seedStructure(db, loadPattern());
+  seedPeople(db, seasonId, [{ name: "Volunteer 1", contact: "v1@example.org" }]);
+  db.prepare("UPDATE people SET auth_subject = NULL WHERE contact = ?").run("v1@example.org");
+  const stillFree = () =>
+    db.prepare("SELECT auth_subject FROM people WHERE contact = ?").get("v1@example.org").auth_subject === null;
+
+  assert.equal(linkIdentity(db, "oidc", "impostor", { email: "v1@example.org", emailVerified: false }), null,
+    "an explicitly unverified address must not take over a pre-registered record");
+  assert.ok(stillFree(), "and it must not have half-claimed the row on the way out");
+
+  // Absent is NOT false. A provider that omits the claim would otherwise lock out every pre-registered
+  // volunteer, and no NextCloud has been asked yet what it sends — so this adopts, and warns.
+  assert.ok(linkIdentity(db, "oidc", "nc-1", { email: "v1@example.org" }),
+    "a missing claim must not become a refusal, or an instance that omits it locks everyone out");
+
+  // The real one is still refused too, now that the row is taken — belt and braces on the ordering above.
+  assert.equal(linkIdentity(db, "oidc", "impostor-2", { email: "v1@example.org", emailVerified: true }), null,
+    "an adopted record is no longer adoptable, verified address or not");
+});
+
+// Reading the claim is only half of it: the value has to survive the trip from userinfo to linkIdentity. Twice
+// in this project a guard existed and was never reached, so this drives the real completeOidc against a
+// provider that says "unverified" and checks the flag arrives.
+test("email_verified survives the trip from userinfo, including as a string", async () => {
+  const cfg = { issuer: "https://idp.example", clientId: "c", clientSecret: "s", redirectUri: "https://app/cb",
+                scope: "openid", enabled: true };
+  const provider = (emailVerified) => async (url) => {
+    const u = String(url);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      return { ok: true, json: async () => ({
+        issuer: "https://idp.example",
+        authorization_endpoint: "https://idp.example/a",
+        token_endpoint: "https://idp.example/t",
+        userinfo_endpoint: "https://idp.example/u",
+      }) };
+    }
+    if (u === "https://idp.example/t") return { ok: true, json: async () => ({ access_token: "at" }) };
+    return { ok: true, json: async () => ({ sub: "x", email: "v1@example.org", email_verified: emailVerified }) };
+  };
+
+  clearDiscoveryCache();
+  assert.equal((await completeOidc(cfg, { code: "C", verifier: "V" }, provider(false))).emailVerified, false);
+  clearDiscoveryCache();
+  assert.equal((await completeOidc(cfg, { code: "C", verifier: "V" }, provider(true))).emailVerified, true);
+  // The string form is a real quirk of real providers, and reading it as an object would fail OPEN.
+  clearDiscoveryCache();
+  assert.equal((await completeOidc(cfg, { code: "C", verifier: "V" }, provider("false"))).emailVerified, false,
+    'a provider sending the string "false" must not be read as verified');
+  clearDiscoveryCache();
+  assert.equal((await completeOidc(cfg, { code: "C", verifier: "V" }, provider(undefined))).emailVerified, undefined,
+    "and absent must stay absent rather than collapsing to either answer");
+});
+
 // ---- invitations --------------------------------------------------------------------------------------
 test("an invite is single-use, expiring, and stored only as a hash", () => {
   const db = db0();

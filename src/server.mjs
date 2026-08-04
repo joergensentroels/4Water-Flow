@@ -151,7 +151,11 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       return send(res, 400, renderErrorPage(t, 400));
     }
     const id = await completeOidc(oidc, { code: query.get("code") ?? "", verifier: session.oidcVerifier });
-    const person = linkIdentity(db, "oidc", id.subject, { name: id.name, email: id.email });
+    // emailVerified is forwarded, not dropped. linkIdentity refuses to adopt a pre-registered record on an
+    // address the provider marks unverified, and a guard that exists but is never reached is the defect this
+    // project keeps finding — twice a whole feature was dead in production with a green suite over it.
+    const person = linkIdentity(db, "oidc", id.subject,
+                                { name: id.name, email: id.email, emailVerified: id.emailVerified });
     if (!person) return redirect(res, "/signin?unknown=1", { "Set-Cookie": clearCookieHeader({ secure }) });
     redirect(res, "/", { "Set-Cookie": setSession({ personId: person.personId }) });
   });

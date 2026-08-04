@@ -176,20 +176,67 @@ export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch, {
   if (!info.ok) throw Object.assign(new Error(`userinfo returned ${info.status}`), { status: 502 });
   const claims = await info.json();
   if (!claims.sub) throw Object.assign(new Error("userinfo carried no sub"), { status: 502 });
-  return { subject: String(claims.sub), name: String(claims.name || claims.preferred_username || ""), email: String(claims.email || "") };
+  return {
+    subject: String(claims.sub),
+    name: String(claims.name || claims.preferred_username || ""),
+    email: String(claims.email || ""),
+    // TRI-STATE, and the third state is the point: true, false, and "the provider did not say". Collapsing
+    // absent to true is what this function used to do by not reading the claim at all; collapsing it to false
+    // would lock out every pre-registered volunteer on a provider that omits it, and no NextCloud has been
+    // asked yet. linkIdentity decides what each state means. Some providers send the claim as the STRING
+    // "true"/"false" rather than a boolean — a known quirk, and reading it wrong would fail open.
+    emailVerified: typeof claims.email_verified === "boolean" ? claims.email_verified
+      : claims.email_verified === "true" ? true
+      : claims.email_verified === "false" ? false
+      : undefined,
+  };
 }
 
 // Map an external identity onto a person. Deliberately does NOT create people: a volunteer roster is
 // curated, and self-registration from an SSO domain would let anyone in the NextCloud instance appear on
 // the plan. Unknown subjects are told to ask for an invite.
-export function linkIdentity(db, provider, subject, { name, email } = {}) {
+//
+// THE ADOPTION PATH IS THE SIBLING OF THAT REFUSAL, AND IT USED TO BE UNGUARDED. Refusing to create a person
+// stops a stranger appearing as a new name. It does nothing about a stranger arriving as an EXISTING one: the
+// second branch below matches on an email address that came from the provider's userinfo response, and if that
+// address is something the user can type into their own profile, then anybody in the instance could claim any
+// pre-registered record — with whatever roles it already carries. A planner or administrator added by an admin
+// but not yet signed in is precisely the highest-value window, and the app would have handed the record over
+// and called it a successful first sign-in.
+//
+// So the address has to be one the provider vouches for. `emailVerified` is tri-state and each state means
+// something different:
+//
+//   false      — the provider explicitly says this address is unverified. Never adopt. A compliant provider
+//                saying "no" cannot be talked round, and there is nothing to break by refusing.
+//   undefined  — the provider did not send the claim. Adopt, because refusing here would lock out every
+//                pre-registered volunteer on an instance that simply omits it, and nobody has yet asked
+//                4water's NextCloud what it sends. But say so, because a trust assumption nobody is told about
+//                is the same failure as the discovery fallback that used to be silent.
+//   true       — vouched for. Adopt.
+//
+// Not branched on `provider`: "an unverified address must not adopt a record" is a property of the address, not
+// of which identity system produced it, and this file's own rule is that auth_provider is a column and never a
+// branch. The invite path never reaches here — it creates its own person, from an address an admin typed.
+export function linkIdentity(db, provider, subject, { name, email, emailVerified } = {}) {
   const existing = db.prepare("SELECT id, name FROM people WHERE auth_provider = ? AND auth_subject = ?").get(provider, subject);
   if (existing) return { personId: existing.id, name: existing.name, provider };
 
   // Second chance: an admin pre-registered them by contact address but they have not signed in yet.
   if (email) {
+    if (emailVerified === false) {
+      // No address in the log line: this is an unauthenticated stranger's claim about somebody else's contact
+      // details, and writing it down would put a volunteer's address in the journal on a failed sign-in.
+      console.warn("[oidc] refusing to adopt a pre-registered volunteer: the provider marked the address unverified");
+      return null;
+    }
     const byEmail = db.prepare("SELECT id, name FROM people WHERE contact = ? AND auth_subject IS NULL").get(email);
     if (byEmail) {
+      if (emailVerified === undefined) {
+        console.warn("[oidc] adopting a pre-registered volunteer on an address the provider did not mark verified " +
+                     "— see docs/OIDC.md §3. If the provider lets people set their own address without " +
+                     "confirming it, anyone in the instance can claim a pre-registered record.");
+      }
       db.prepare("UPDATE people SET auth_provider = ?, auth_subject = ? WHERE id = ?").run(provider, subject, byEmail.id);
       return { personId: byEmail.id, name: byEmail.name || name || "", provider };
     }

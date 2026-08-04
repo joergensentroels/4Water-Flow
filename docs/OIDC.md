@@ -86,10 +86,25 @@ finding worth reporting, not a constant to change.
 | A replayed callback fails | Reuse the same callback URL twice | Second attempt refused |
 | Unknown users are refused | Sign in as someone not on the roster | Redirected to `/signin?unknown=1`, no account created |
 | A pre-registered person is adopted | Add them in Admin with their NextCloud email first, then sign in | Signed in, linked to that existing record |
+| **Does NextCloud send `email_verified`, and can a user edit their own address?** | Read the `userinfo` response during the sign-in above; then check whether a normal user can change their email in NextCloud's own settings | Ideally the claim is present. If it is absent **and** users can set their own address, see below — this is the one row that can turn the refusal above into nothing |
 
 **"Unknown users are refused" is a deliberate security property, not an oversight:** anyone in 4water's
 NextCloud instance could otherwise appear on the schedule. An admin adds the person's email first; their first
 sign-in claims that record — the last row above.
+
+**And that adoption step is where the refusal can be undone, which is why the `email_verified` row is on the
+list.** Refusing to *create* a person stops a stranger appearing as a new name. It says nothing about a stranger
+arriving as an *existing* one: adoption matches on the address NextCloud sends, so if a user can type any address
+into their own profile and NextCloud passes it on unqualified, anyone in the instance can claim any
+pre-registered record — and inherit whatever roles it already carries. A planner or administrator who has been
+added but has not signed in yet is the highest-value window.
+
+`linkIdentity` now refuses outright when NextCloud says `email_verified: false`. When the claim is **absent** it
+still adopts, deliberately: refusing would lock out every pre-registered volunteer on an instance that simply
+omits it, and nobody has asked 4water's NextCloud yet. It logs a warning each time, so the assumption is at
+least visible. **Answer that checklist row and this stops being an open question.** If the claim is absent and
+users can edit their own addresses, invite links are the safe way to onboard — they carry a secret an admin
+issued rather than an address a stranger can assert.
 
 (This paragraph used to open "That seventh row", which pointed at the tampered-state check two rows above the
 one it describes. An ordinal into a table is a reference that breaks the next time somebody inserts a row, and
