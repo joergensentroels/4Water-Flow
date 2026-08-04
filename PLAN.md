@@ -5,7 +5,7 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AD complete, 325 tests green** — and, as of the AB increment, green on an actual `git clone`
+Status: **✅ A–AF complete, 327 tests green** — and, as of the AB increment, green on an actual `git clone`
 rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
@@ -45,6 +45,8 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **W** | subscribable calendar feed | UTC instants resolved through `Intl` rather than a hand-written VTIMEZONE; the link is a revocable credential stored only as a hash |
 | **X** | what a green suite could not see | a fresh deployment opened **no slots at all**; the notifier and nudge timer were never wired in production; three UI strings asserted causes that were false; invitations were never deleted; the admin screen was 953 KB |
 | **Y** | OIDC end to end, and the image's filesystem | `auth.mjs` said the callback "CANNOT be exercised without a provider", which was untrue and was itself the obstacle: a conforming provider in 90 lines proved PKCE, discovery, and three refusals. Then the same shape one layer down — `deploy.test.mjs` checked the Dockerfile's *inputs*, which cannot fail the way a build fails |
+| **AF** | lists that cannot notice their own gaps | Three hand-kept lists existed for tests to check against — notification kinds, board reasons, planner reasons — each with a comment promising that a missing entry would fail. None could: a list of what to check cannot notice something absent from itself. Now derived from the source, and a gate with no reason code refuses to load rather than telling a planner `undefined` |
+| **AE** | the documents, and the strings, checked both ways | Every mechanically checkable claim in six documents (84 of them) now verified by a test; translations checked in the unread direction too, which turned up seven strings nothing was showing |
 | **AD** | the shift reminder | `src/calendar.mjs` opens by saying missed shifts are the failure this app exists to prevent, and the answer so far reached only volunteers who went and subscribed to a feed. Confirmed shifts only — telling somebody to show up for a proposal is worse than silence. Keyed on the assignment id, so the existing UNIQUE constraint means one reminder per person per shift, ever |
 | **AC** | the export was unreadable for the people it is for | No BOM, so every Danish name arrived as mojibake in the one artefact the board opens; and a comma delimiter puts every row in one cell on a Danish locale. The first is a fix, the second is configuration — comma is RFC 4180, and which one is right depends on who opens the file |
 | **AB** | the suite only ran where it was written | Three of the four tests that boot the real server — including the acceptance gate — read a file `.gitignore` excludes, so they failed with ENOENT on any clone. Invisible because there is no remote: CI has never executed once, so nobody had ever cloned it. Found by a negative control failing on its CONTROL case, which meant my harness was wrong rather than the code |
