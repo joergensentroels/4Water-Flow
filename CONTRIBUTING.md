@@ -57,6 +57,12 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 
 ## Things that will trip you up
 
+- **A string that explains WHY something is the case must be justified in `test/claims.test.mjs`.** Three such
+  strings shipped confidently wrong — `/status` told operators no webhook was configured when one was, the
+  outbox banner said nothing was delivered above rows marked Sent, and the planner blamed availability when
+  nobody was even capable. None could fail a test, because a false explanation renders exactly as well as a
+  true one. So any new one has to be listed with a note saying what makes it true. If you cannot write the
+  note, reword the string to describe the state rather than its cause.
 - **`test/journey.test.mjs` is the acceptance gate, and it deliberately does not use `tools/testkit.mjs`.**
   Everything else builds its world with that harness, and twice the harness supplied something production did
   not — open slots, and a notifier — so a green suite reported success over a deployment that could not work.
