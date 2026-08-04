@@ -23,8 +23,13 @@ import assert from "node:assert/strict";
 import { loadStrings } from "../src/config.mjs";
 
 // Constructions that EXPLAIN a state, as opposed to naming one. "No answer yet" is a state; ", so there is
-// nothing to offer you" is a claim about why. Deliberately narrow: ten hits out of 249 strings is a gate
-// somebody reads, and sixty would be noise that gets rubber-stamped.
+// nothing to offer you" is a claim about why.
+//
+// Deliberately NARROW, and that is the whole design: a gate that catches a dozen strings is one somebody reads
+// before adding to it, and a gate that catches sixty is one that gets rubber-stamped. The count is asserted below
+// rather than written here as prose — this comment used to say "ten hits out of 249 strings" and the second number
+// was 262 by the time anybody looked, which is exactly the rot this file exists to prevent, in this file.
+const MAX_EXPLAINING = 20;
 const EXPLAINS = [
   /\bbecause\b/i, /,\s*so\b/i, /—\s*so\b/i, /\bmeans\b/i,
   /\busually\b/i, /\bprobably\b/i, /\bis configured\b/i, /\bnobody has\b/i,
@@ -85,6 +90,21 @@ test("every string that explains a cause is justified, and no new one slips in u
   const stale = Object.keys(JUSTIFIED).filter((k) => !explaining.includes(k));
   assert.deepEqual(stale, [],
     `justified but no longer explanatory — reword the note or drop it:\n  ${stale.join("\n  ")}`);
+
+  // There was very nearly a third check here — "justified but the key has been deleted entirely" — which reads
+  // like a distinct failure and is not one. `explaining` is derived FROM `en`, so a key that no longer exists in
+  // `en` cannot be in `explaining`, and `stale` above has already caught it. Adding a bogus JUSTIFIED entry
+  // proved it: `stale` fired, the orphan check was never reached. An assertion that cannot fail is worse than no
+  // assertion, because it reads as coverage. If you want the message to distinguish the two cases, widen
+  // `stale`'s message rather than adding a branch that cannot run.
+
+  // The gate's own design constraint, enforced rather than described. Its value comes from being small enough
+  // that a person actually reads the list before adding to it; past a couple of dozen it becomes a formality and
+  // the next false explanation walks straight through. If this fails, the answer is probably to reword some
+  // strings to describe a state instead of its cause — not to raise the ceiling.
+  assert.ok(explaining.length <= MAX_EXPLAINING,
+    `${explaining.length} strings now explain a cause, past the ${MAX_EXPLAINING} this gate stays useful below. ` +
+    `A list this long gets rubber-stamped, which is the failure it was built to prevent.`);
 });
 
 test("each justification names a condition rather than restating the string", () => {
