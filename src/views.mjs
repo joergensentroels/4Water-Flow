@@ -2,6 +2,16 @@
 // weekday and no activity — test/seams.test.mjs enforces that.
 import { html, raw } from "./http.mjs";
 
+// A water droplet, drawn here rather than fetched. Two reasons, both hard requirements: the Content-Security-
+// Policy is `img-src 'self'`, so nothing loads from 4water.org even if we wanted it to — and their actual logo
+// file is their asset, not ours to copy into an unrelated repository. This is a nod to the identity, not a
+// reproduction of the mark. aria-hidden because the <h1> beside it already says the name; a screen reader
+// announcing "image" here would add a word and no information.
+const DROPLET = raw(`<svg class="drop" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <path d="M12 2.2S5.2 9.9 5.2 14.3a6.8 6.8 0 0 0 13.6 0C18.8 9.9 12 2.2 12 2.2z" fill="currentColor"/>
+  <path d="M9.4 14.6a2.6 2.6 0 0 0 2.2 2.5" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="1.4" stroke-linecap="round"/>
+</svg>`);
+
 export function layout({ t, title, who, nav = [], flash, body }) {
   return html`<!doctype html>
 <html lang="${t("html.lang")}">
@@ -13,6 +23,7 @@ export function layout({ t, title, who, nav = [], flash, body }) {
 </head>
 <body>
 <header class="bar">
+  ${DROPLET}
   <h1>${t("app.title")}</h1>
   ${who ? html`<span class="who">${who}</span>` : ""}
 </header>
@@ -35,6 +46,10 @@ export function formatDate(t, iso) {
 }
 
 export const formatTime = (hour, minute = 0) => `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+// How a role reads on a slot. Empty string when the slot has no role, so a workshop does not acquire a
+// meaningless "(any)" — the absence of a role requirement is information, not a value to print.
+export const formatRole = (t, role) => (role ? ` · ${t(`role.dance.${role}`)}` : "");
 
 export const csrfField = (session) => html`<input type="hidden" name="csrf" value="${session.csrf}">`;
 

@@ -2,7 +2,7 @@
 // slot and a handed-back slot are the same thing: a slot with no person that I am eligible for. So the page
 // is "slots you could take" above "slots you have", and there is no separate swap flow.
 import { html } from "../http.mjs";
-import { layout, formatDate, formatTime, csrfField, navFor } from "../views.mjs";
+import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 // Outcome codes from claimSlot/handBackSlot mapped to what the volunteer should read. Kept as a table
 // rather than inline strings so an unmapped reason is a visible gap instead of a blank flash.
@@ -26,7 +26,7 @@ export function renderBoard({ t, session, roles, who, open, mine, flash }) {
     <li><div class="daterow">
       <span class="when">
         <b>${formatDate(t, r.date)}</b>
-        <small>${formatTime(r.hour, r.minute)} · ${r.activityLabel}${extra}</small>
+        <small>${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}${extra}</small>
       </span>
       <form method="post" action="${action}">
         ${csrfField(session)}

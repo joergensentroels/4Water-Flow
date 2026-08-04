@@ -23,6 +23,22 @@ export function validatePattern(p) {
     if (keys.has(a.key)) err(`duplicate activity key "${a.key}"`);
     if (!a.label) err(`activity "${a.key}" has no label`);
     keys.add(a.key);
+
+    // What the activity needs staffing-wise. Most partner-dance classes need a leader AND a follower;
+    // a workshop can be run by one person whose role is irrelevant. Absent means {any: 1}, so an older
+    // config keeps working and reads as "one person, role does not matter".
+    if (a.needs !== undefined) {
+      const n = a.needs;
+      if (!n || typeof n !== "object" || Array.isArray(n)) err(`activity "${a.key}": needs must be an object like {"l":1,"f":1} or {"any":1}`);
+      for (const [role, count] of Object.entries(n)) {
+        if (!["l", "f", "any"].includes(role)) err(`activity "${a.key}": unknown role "${role}" — use l, f or any`);
+        if (!Number.isInteger(count) || count < 0 || count > 10) err(`activity "${a.key}": needs.${role} must be a whole number 0..10`);
+      }
+      if (Object.values(n).reduce((s, c) => s + c, 0) < 1) err(`activity "${a.key}": needs at least one person`);
+      // Mixing "any" with a specific role is ambiguous: would a leader satisfy the any-slot or the l-slot?
+      // Refusing is better than picking a rule nobody can predict.
+      if (n.any && (n.l || n.f)) err(`activity "${a.key}": use either {"any":n} or {"l":..,"f":..}, not both`);
+    }
   }
   // A weekly entry naming an activity that does not exist would otherwise surface months later as "why is
   // there no yoga slot" — far harder to trace than a startup error.
@@ -34,6 +50,17 @@ export function validatePattern(p) {
   }
   if (!Array.isArray(p.roles) || !p.roles.includes("volunteer")) err("roles must include volunteer");
   return p;
+}
+
+// Absent needs means one person, role irrelevant. Returned as a flat list of role slots, because that is what
+// both the seeder and every screen actually want: one entry per person the session requires.
+export function roleSlotsFor(activity) {
+  const needs = activity?.needs ?? { any: 1 };
+  const out = [];
+  for (const role of ["l", "f", "any"]) {
+    for (let i = 0; i < (needs[role] ?? 0); i++) out.push(role === "any" ? null : role);
+  }
+  return out;
 }
 
 export const PATTERN_FILE = path.join(ROOT, "config", "pattern.json");

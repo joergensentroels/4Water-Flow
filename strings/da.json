@@ -192,5 +192,14 @@
   "planner.horizon": "Vis:",
   "planner.horizonWeeks": "{n} uger",
   "planner.horizonAll": "hele sæsonen",
-  "planner.eligibleFairest": "{n} kan tage den — de mest ledige først"
+  "planner.eligibleFairest": "{n} kan tage den — de mest ledige først",
+  "role.dance.l": "fører",
+  "role.dance.f": "følger",
+  "planner.wrongRole": "Personen underviser ikke i den rolle, denne vagt kræver.",
+  "planner.alreadyBooked": "Personen er allerede booket på samme tidspunkt.",
+  "profile.danceRole": "Du underviser som",
+  "profile.danceRoleL": "Fører",
+  "profile.danceRoleF": "Følger",
+  "profile.danceRoleB": "Begge",
+  "admin.needs": "Kræver"
 }

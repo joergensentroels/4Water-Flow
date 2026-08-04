@@ -192,5 +192,14 @@
   "planner.horizon": "Show:",
   "planner.horizonWeeks": "{n} weeks",
   "planner.horizonAll": "the whole season",
-  "planner.eligibleFairest": "{n} can take it — those with fewest activities first"
+  "planner.eligibleFairest": "{n} can take it — those with fewest activities first",
+  "role.dance.l": "leader",
+  "role.dance.f": "follower",
+  "planner.wrongRole": "That person does not teach the role this slot needs.",
+  "planner.alreadyBooked": "That person is already booked at the same time.",
+  "profile.danceRole": "You teach as",
+  "profile.danceRoleL": "Leader",
+  "profile.danceRoleF": "Follower",
+  "profile.danceRoleB": "Both",
+  "admin.needs": "Needs"
 }

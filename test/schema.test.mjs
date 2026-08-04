@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "../src/db.mjs";
-import { loadPattern } from "../src/config.mjs";
+import { loadPattern, roleSlotsFor } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { score } from "../src/queries.mjs";
 
@@ -65,8 +65,15 @@ test("DoD 2 — seeding creates a season, activities, timeslots, sessions, 10 pe
   assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, 10);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM capabilities").get().n, 10);
 
-  const opened = openEverySession(db, seasonId);
-  assert.equal(opened, sessions, "every session should start as one open slot");
+  // A session now opens one row PER ROLE its activity needs: a partner-dance class two, a workshop one. So
+  // this is no longer one-per-session, and the expected total comes from the config rather than a guess.
+  const opened = openEverySession(db, seasonId, pattern);
+  const byKey = new Map(pattern.activities.map((a) => [a.key, a]));
+  const expected = db.prepare(`SELECT act.key FROM sessions s JOIN activities act ON act.id=s.activity_id
+                                WHERE s.season_id=?`).all(seasonId)
+    .reduce((n, r) => n + roleSlotsFor(byKey.get(r.key)).length, 0);
+  assert.equal(opened, expected, "every session should open one slot per role it needs");
+  assert.ok(opened > sessions, "classes need two people, so there are more slots than sessions");
 });
 
 test("DoD 3 — Score is derived: it moves when an assignment is confirmed and back when it is released", () => {

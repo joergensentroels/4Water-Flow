@@ -35,7 +35,14 @@ export function saveProfile(db, personId, form) {
   const clash = db.prepare("SELECT id FROM people WHERE contact = ? AND id <> ?").get(contact || null, personId);
   if (contact && clash) return { ok: false, reason: "contact_taken" };
 
-  db.prepare("UPDATE people SET name=?, contact=? WHERE id=?").run(name, contact || null, personId);
+  // Which role they teach. A fact about themselves, so they own it — unlike capabilities, which are somebody
+  // else's judgement and stay with an admin. An unrecognised value leaves the stored one alone rather than
+  // nulling it, so a malformed post cannot quietly make somebody ineligible for every class.
+  const role = String(form.preferredRole ?? "").trim();
+  const nextRole = ["l", "f", "b"].includes(role) ? role : null;
+
+  db.prepare(`UPDATE people SET name=?, contact=?, preferred_role=COALESCE(?, preferred_role) WHERE id=?`)
+    .run(name, contact || null, nextRole, personId);
   return { ok: true };
 }
 
@@ -62,6 +69,12 @@ export function renderProfile({ t, session, roles, who, me, score, flash }) {
       <label>${t("profile.contact")}
         <input type="email" name="contact" value="${me.person.contact ?? ""}" maxlength="200">
       </label>
+      <p class="hint">${t("profile.danceRole")}</p>
+      ${[["l", "profile.danceRoleL"], ["f", "profile.danceRoleF"], ["b", "profile.danceRoleB"]].map(([v, k]) => html`
+        <label class="inline">
+          <input type="radio" name="preferredRole" value="${v}"${me.person.preferredRole === v ? html` checked` : ""}>
+          ${t(k)}
+        </label>`)}
       <button type="submit">${t("admin.save")}</button>
     </form>
 

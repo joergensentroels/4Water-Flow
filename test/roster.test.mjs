@@ -72,10 +72,21 @@ test("balancing measurably evens out the workload", withPlanner({}, async (w) =>
   // Start lopsided: person 1 already has a pile of confirmed work. Restricted to the activity they are
   // actually capable of — the first version of this test grabbed any six open slots, three of which were
   // rightly refused (wrong activity, or an overlapping timeslot), so the "lopsided" start never happened.
-  const open = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+  //
+  // ONE SLOT PER TIMESLOT, and only roles this person can teach. A partner-dance class now has two slots at
+  // the same date and time, so "the first six by date" asked one person to be both halves of the same class —
+  // which assignSlot rightly refuses. The setup was wrong, not the rule.
+  const prefers = w.db.prepare("SELECT preferred_role FROM people WHERE id=?").get(w.people[1]).preferred_role;
+  const open = w.db.prepare(`SELECT MIN(a.id) AS id FROM assignments a
+                             JOIN sessions   s ON s.id = a.session_id
+                             JOIN timeslots  t ON t.id = s.timeslot_id
                              JOIN activities act ON act.id = s.activity_id
                              WHERE a.person_id IS NULL AND s.date >= ? AND act.key = ?
-                             ORDER BY s.date LIMIT 6`).all(w.today, w.pattern.activities[0].key);
+                               AND (a.role IS NULL OR ? = 'b' OR a.role = ?)
+                             GROUP BY s.date, t.hour, t.minute
+                             ORDER BY s.date LIMIT 6`)
+    .all(w.today, w.pattern.activities[0].key, prefers, prefers);
+  assert.equal(open.length, 6, "the fixture needs six distinct timeslots to make a lopsided start");
   for (const { id } of open) {
     const r = assignSlot(w.db, id, w.people[1], { expectPersonId: null });
     assert.equal(r.ok, true, `setup assignment refused: ${r.reason}`);

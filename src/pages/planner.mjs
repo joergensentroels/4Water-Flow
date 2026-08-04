@@ -4,7 +4,7 @@
 // It is a list of days, not a table: a real grid of 6 activities x 26 weeks cannot be read on a 375px screen,
 // and a horizontally scrolling table is the exact thing being replaced.
 import { html } from "../http.mjs";
-import { layout, formatDate, formatTime, csrfField, navFor } from "../views.mjs";
+import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 const OUTCOME = {
   roster_done: { key: "planner.rosterDone" },
@@ -17,6 +17,8 @@ const OUTCOME = {
   changed: { key: "planner.changed", bad: true },
   said_no: { key: "planner.saidNo", bad: true },
   not_capable: { key: "planner.notCapable", bad: true },
+  wrong_role: { key: "planner.wrongRole", bad: true },
+  already_booked: { key: "planner.alreadyBooked", bad: true },
   no_such_slot: { key: "board.noSuchSlot", bad: true },
   no_such_person: { key: "planner.noSuchPerson", bad: true },
 };
@@ -61,7 +63,7 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
 
   const filled = (r) => html`
     <span class="when">
-      ${formatTime(r.hour, r.minute)} · ${r.activityLabel}
+      ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}
       <small>${r.personName}${r.state === "proposed" ? ` · ${t("plan.proposed")}` : ""}</small>
     </span>
     <form method="post" action="/planner/unassign">
@@ -77,7 +79,7 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
     const people = eligibleByAssignment.get(r.assignmentId) ?? [];
     return html`
       <span class="when">
-        ${formatTime(r.hour, r.minute)} · ${r.activityLabel}
+        ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}
         <small>${people.length === 0 ? t("planner.noneEligible") : t("planner.eligibleFairest", { n: people.length })}</small>
       </span>
       ${people.length === 0 ? "" : html`

@@ -1,7 +1,7 @@
 // Read-only views: the volunteer's own slots, and the whole season. Both are one query each — a per-row
 // lookup would be invisible at 40 volunteers and painful at 200, and the fix is much cheaper written now.
 import { html } from "../http.mjs";
-import { layout, formatDate, formatTime, csrfField, navFor } from "../views.mjs";
+import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 // Group a flat result set by date so the markup can be a list of days rather than a table nobody can read
 // on a phone. Rows arrive already ordered, so this preserves order without sorting again.
@@ -15,7 +15,7 @@ function byDate(rows) {
   return out;
 }
 
-const slotLine = (t, r) => html`${formatTime(r.hour, r.minute)} · ${r.activityLabel}`;
+const slotLine = (t, r) => html`${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}`;
 
 export function renderHome({ t, session, roles, who, mine, score, flash }) {
   const body = html`

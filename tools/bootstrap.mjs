@@ -7,14 +7,16 @@
 // Idempotent. Safe to run twice, and safe to run on a live system — it never removes anything.
 import { openDb, migrate } from "../src/db.mjs";
 import { loadPattern } from "../src/config.mjs";
-import { seedStructure } from "../src/seed.mjs";
+import { seedRoles } from "../src/seed.mjs";
 import { createInvite } from "../src/auth.mjs";
 
-export function bootstrapAdmin(db, { email, name, baseUrl = "" }) {
+// `roles` lets a caller that already has a pattern in hand pass its role list, instead of this reaching for
+// whatever config/pattern.json contains. Creating an administrator must not decide what season exists.
+export function bootstrapAdmin(db, { email, name, baseUrl = "", roles = null }) {
   if (!email || !/.+@.+/.test(email)) return { ok: false, reason: "bad_email" };
 
-  const pattern = loadPattern();
-  seedStructure(db, pattern);   // guarantees the roles exist before we grant one
+  migrate(db);                                  // still safe to point at a database that has never been migrated
+  seedRoles(db, roles ?? loadPattern().roles);  // the roles table, and deliberately nothing else
 
   const adminRole = db.prepare("SELECT id FROM roles WHERE name='admin'").get();
   if (!adminRole) return { ok: false, reason: "no_admin_role" };

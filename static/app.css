@@ -7,23 +7,46 @@
      controls stay stubbornly light, which no unit test can see and every user immediately does. */
   color-scheme: light dark;
 
-  --bg: #fbfaf8;
-  --fg: #1c1b19;
-  --muted: #6b6862;
-  --line: #ddd8d0;
-  --card: #ffffff;
-  --accent: #1b5e4b;
+  /* --- Palette, taken from 4water.org where one actually exists -----------------------------------------
+     What is genuinely theirs: BLACK with WHITE type. Their site is black-dominant and the logo files are
+     literally named "..._white.png". A water droplet sits in the wordmark.
+     What is NOT theirs: a brand blue. Every colour variable in their CSS is a WordPress default
+     (--wp--preset--color--*, --wp-admin-theme-color), so the cyans on their pages are stock Gutenberg rather
+     than a chosen palette. The blue below is therefore MY choice — informed by the water theme and by what a
+     visitor actually sees, but darkened, because measured against this page their blues do not carry text:
+       #0693E3 (the cyan all over their site)  3.34:1 on white, 3.16:1 on a card — fails AA outright
+       #097BAA (the one non-WordPress blue)    4.75:1 on white, 4.49:1 on a card — fails AA on cards
+       #0a6690 (below)                         6.33:1 on white, 5.99:1 on a card — passes with margin
+     If 4water ever codifies a real palette, this block is the only place that needs to change. */
+  --bg: #ffffff;
+  --fg: #111315;
+  --muted: #585f65;
+  --line: #d9dee2;         /* decorative hairlines: list separators, card edges. Not a control boundary. */
+  /* Control boundaries — inputs, the availability yes/no/unknown targets, secondary buttons, nav pills.
+     WCAG 2.2 SC 1.4.11 wants 3:1 for the visual boundary of a user-interface component, and --line is 1.36:1
+     against the page, so it never qualified. That is a PRE-EXISTING gap this palette work only made me measure:
+     the old warm hairline (#ddd8d0 on #fbfaf8) was also 1.36:1. Separate token so the hairlines can stay quiet
+     while the things you actually operate are properly outlined. #79838a is 3.87:1 on the page, 3.66:1 on a card. */
+  --edge: #79838a;
+  --card: #f6f9fb;
+  --accent: #0a6690;      /* water blue, dark enough to carry white text at AA */
   --accent-fg: #ffffff;
-  --yes: #1b5e4b;
-  --no: #8a2d2d;
+  --yes: #0a6690;
+  --no: #b32020;          /* their red, darkened from #e51919 for the same reason */
   --tap: 48px;            /* every interactive target is at least this tall — thumbs, not cursors */
 }
 
+/* Dark mode is TRUE BLACK rather than dark grey, because that is what 4water.org actually is. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17181a; --fg: #ececea; --muted: #9a9792; --line: #33352f;
-    --card: #1f2124; --accent: #4fbf9a; --accent-fg: #10221c;
-    --yes: #4fbf9a; --no: #e08585;
+    --bg: #000000; --fg: #f4f7f9; --muted: #9aa4ac;
+    /* Both lifted off pure black on purpose. A card at #0c1013 with a #24292e hairline measured 1.1:1 and
+       1.43:1 against the page — technically compliant, since a card is a container and not a control, and
+       visually absent. These are still quiet; they are simply present. */
+    --line: #2f373e; --card: #10171b;
+    --edge: #5b6a73;   /* 3.75:1 on the black page, 3.42:1 on a card */
+    --accent: #5cc8f5; --accent-fg: #00212e;
+    --yes: #5cc8f5; --no: #ff9a8f;
   }
 }
 
@@ -38,22 +61,29 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The bar is BLACK IN BOTH SCHEMES. That is deliberate and it is the one thing about 4water's identity that is
+   unmistakably theirs: a white wordmark on black. So these three colours are hard-coded rather than tokenised —
+   the point is that the bar does NOT follow the page, it stays the brand frame the way it does on their site. */
 header.bar {
   position: sticky; top: 0; z-index: 5;
-  display: flex; align-items: center; gap: .75rem;
+  display: flex; align-items: center; gap: .55rem;
   padding: .75rem 1rem;
-  background: var(--card);
-  border-bottom: 1px solid var(--line);
+  background: #000;
+  color: #ffffff;
+  /* Not pure black: in dark mode the page behind is also black, and a sticky bar with no edge lets content
+     scroll underneath it invisibly. This keeps a faint seam there without showing up in light mode. */
+  border-bottom: 1px solid #1d2226;
 }
-header.bar h1 { margin: 0; font-size: 1.05rem; font-weight: 650; }
-header.bar .who { margin-left: auto; color: var(--muted); font-size: .85rem; }
+header.bar h1 { margin: 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -.01em; }
+header.bar .who { margin-left: auto; color: #c3cbd1; font-size: .85rem; }   /* 11.4:1 on black — checked, not guessed */
+header.bar .drop { flex: 0 0 auto; color: #5cc8f5; }
 
 main { max-width: 40rem; margin: 0 auto; padding: 1rem; }
 
 nav.tabs { display: flex; gap: .5rem; overflow-x: auto; padding: .5rem 1rem 0; }
 nav.tabs a {
   flex: 0 0 auto; padding: .55rem .9rem; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--card);
+  border: 1px solid var(--edge); background: var(--card);
   color: var(--fg); text-decoration: none; font-size: .9rem;
 }
 nav.tabs a[aria-current="page"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
@@ -81,7 +111,7 @@ ul.dates > li:last-child { border-bottom: 0; }
 .choice label {
   display: grid; place-items: center;
   min-width: var(--tap); min-height: var(--tap);
-  border: 1px solid var(--line); border-radius: .5rem;
+  border: 1px solid var(--edge); border-radius: .5rem;
   background: var(--bg); cursor: pointer; font-size: 1.1rem; user-select: none;
 }
 .choice input:checked + label { border-width: 2px; font-weight: 700; }
@@ -98,7 +128,7 @@ button, .btn {
   background: var(--accent); color: var(--accent-fg);
   font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
 }
-button.secondary, .btn.secondary { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
+button.secondary, .btn.secondary { background: var(--card); color: var(--fg); border: 1px solid var(--edge); }
 button:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 .flash { border-left: 4px solid var(--accent); background: var(--card); padding: .7rem .9rem; border-radius: .3rem; margin: 0 0 1rem; }
@@ -137,7 +167,7 @@ li.status.bad > b { color: var(--no); }
 label { display: block; margin: .6rem 0; font-size: .9rem; color: var(--muted); }
 label input, label select { display: block; width: 100%; margin-top: .25rem; min-height: var(--tap);
   padding: 0 .6rem; font: inherit; color: var(--fg); background: var(--bg);
-  border: 1px solid var(--line); border-radius: .5rem; }
+  border: 1px solid var(--edge); border-radius: .5rem; }
 label input:focus-visible, label select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 
 /* Checkbox lists (activities in a timeslot) read as a row of choices, not a stack of full-width fields. */

@@ -55,6 +55,8 @@ test("every dynamically-built key family is complete in both locales", () => {
     weekday: [0, 1, 2, 3, 4, 5, 6].map(String),
     role: loadPattern().roles,
     nav: ["home", "availability", "board", "plan", "planner", "admin"],
+    // Dance roles, distinct from the app's permission roles: a slot needs a leader or a follower.
+    "role.dance": ["l", "f"],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 

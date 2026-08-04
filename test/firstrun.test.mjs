@@ -136,6 +136,59 @@ test("bootstrap is idempotent and never duplicates a person", () => {
   } finally { cleanup(dir); }
 });
 
+// Creating an administrator is an identity operation. It must not decide what season exists.
+//
+// It used to call seedStructure "to guarantee the roles exist", which also seeded a whole season — activities,
+// timeslots and every session in it — from whatever config/pattern.json happened to hold. tools/demo.mjs calls
+// bootstrapAdmin, so demo.db ended up with 4water's real 2026-Q1Q2 season sitting beside the demo one, and 99
+// of its sessions had no slots because openEverySession is scoped to a single season. On a live system the same
+// line would have written a phantom season into production.
+test("creating the first administrator does not invent a season", () => {
+  const dir = freshDir();
+  try {
+    const db = new DatabaseSync(path.join(dir, "app.db"));
+    migrate(db);
+    const r = bootstrapAdmin(db, { email: "chair@4water.org", name: "The Chair" });
+    assert.equal(r.ok, true);
+
+    const n = (t) => db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n;
+    assert.equal(n("roles"), loadPattern().roles.length, "the roles it needs must exist");
+    for (const t of ["seasons", "activities", "timeslots", "sessions", "assignments"]) {
+      assert.equal(n(t), 0, `bootstrap must not create ${t} — it is an identity operation, not a seeding one`);
+    }
+    db.close();
+  } finally { cleanup(dir); }
+});
+
+// The same property from the other end: whatever the demo builds, it must be ONE season. This is the assertion
+// that would have caught it, because the symptom was visible only as a count nobody was checking.
+test("the demo database contains exactly one season, and every one of its sessions has slots", async () => {
+  const dir = freshDir();
+  try {
+    const { buildDemo, demoPattern } = await import("../tools/demo.mjs");
+    const db = new DatabaseSync(path.join(dir, "demo.db"));
+    const pattern = demoPattern();
+    const r = buildDemo(db, { pattern });
+
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM seasons").get().n, 1,
+      "a second season here means something seeded a pattern the demo did not choose");
+    const orphans = db.prepare(`SELECT COUNT(*) n FROM sessions s
+                                 WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.session_id = s.id)`).get().n;
+    assert.equal(orphans, 0, "every session must have at least one slot, or it can never be staffed");
+
+    // And the slot count matches what the pattern asks for, per session — not merely "at least one".
+    const { roleSlotsFor } = await import("../src/config.mjs");
+    const byKey = new Map(pattern.activities.map((a) => [a.key, a]));
+    const wrong = db.prepare(`SELECT act.key, s.id, s.date,
+                                     (SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id) AS slots
+                                FROM sessions s JOIN activities act ON act.id=s.activity_id
+                               WHERE s.season_id=?`).all(r.seasonId)
+      .filter((row) => row.slots !== roleSlotsFor(byKey.get(row.key)).length);
+    assert.deepEqual(wrong, [], "a session with the wrong number of slots is half-staffed with nothing to show why");
+    db.close();
+  } finally { cleanup(dir); }
+});
+
 test("bootstrap refuses a value that is not an email", () => {
   const dir = freshDir();
   try {

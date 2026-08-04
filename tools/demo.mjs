@@ -72,7 +72,7 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
     preferredRole: ["l", "f", "b"][i % 3],
     can: [keys[i % keys.length], keys[(i + 1) % keys.length]],
   })));
-  const opened = openEverySession(db, seasonId);
+  const opened = openEverySession(db, seasonId, pattern);
 
   const dates = db.prepare("SELECT DISTINCT date FROM sessions WHERE season_id=? ORDER BY date").all(seasonId).map((r) => r.date);
   // Three deliberate shapes, because they are the states the screens must handle:
@@ -102,7 +102,9 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
   }
 
   // An admin who can actually sign in, plus a planner who is not an admin — the distinction the screens make.
-  const admin = bootstrapAdmin(db, { email: "demo1@example.invalid", name: NAMES[0] });
+  // Its own roles, not config/pattern.json's — otherwise creating the admin dragged 4water's real season into
+  // the demo database, sessions and all.
+  const admin = bootstrapAdmin(db, { email: "demo1@example.invalid", name: NAMES[0], roles: pattern.roles });
   const plannerRole = db.prepare("SELECT id FROM roles WHERE name='planner'").get().id;
   const volunteerRole = db.prepare("SELECT id FROM roles WHERE name='volunteer'").get().id;
   db.prepare("INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?,?)").run(ids[1], plannerRole);
@@ -124,16 +126,25 @@ if (process.argv[1] && (await import("node:url")).pathToFileURL(process.argv[1])
 
   const db = openDb(dbFile);
   const r = buildDemo(db, { pattern });
-  const counts = (t) => db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n;
   const today = new Date().toISOString().slice(0, 10);
-  const ahead = db.prepare("SELECT COUNT(*) n FROM sessions WHERE date >= ?").get(today).n;
+
+  // Every count below is scoped to the demo season. Counting the whole table is what hid a second season
+  // getting seeded in here: "216 sessions" looked like a healthy demo and was really 117 real ones plus 99
+  // belonging to a season the demo knows nothing about.
+  const one = (sql, ...a) => db.prepare(sql).get(...a).n;
+  const people = one("SELECT COUNT(*) n FROM people");
+  const sessions = one("SELECT COUNT(*) n FROM sessions WHERE season_id=?", r.seasonId);
+  const ahead = one("SELECT COUNT(*) n FROM sessions WHERE season_id=? AND date >= ?", r.seasonId, today);
+  const inSeason = "session_id IN (SELECT id FROM sessions WHERE season_id=?)";
 
   // Counted from the data, not from how many rows an insert happened to create. Deriving "open" from the
   // insert delta printed "-38 open" on a second run, which is the sort of number that makes a reader distrust
   // everything else on the line.
-  const openNow = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id IS NULL").get().n;
-  const filledNow = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id IS NOT NULL").get().n;
-  console.log(`demo database ready: ${counts("people")} people, ${counts("sessions")} sessions, ${filledNow} filled, ${openNow} open`);
+  const openNow = one(`SELECT COUNT(*) n FROM assignments WHERE person_id IS NULL AND ${inSeason}`, r.seasonId);
+  const filledNow = one(`SELECT COUNT(*) n FROM assignments WHERE person_id IS NOT NULL AND ${inSeason}`, r.seasonId);
+  const seasons = one("SELECT COUNT(*) n FROM seasons");
+  console.log(`demo database ready: ${people} people, ${sessions} sessions, ${filledNow} filled, ${openNow} open`);
+  if (seasons !== 1) console.log(`WARNING: ${seasons} seasons in this database — a demo should have exactly one`);
   console.log(`season ${pattern.season.key}: ${pattern.season.from} to ${pattern.season.to} — ${ahead} sessions from today onward`);
   console.log(`admin + planner: ${NAMES[0]} · planner only: ${NAMES[1]} · answered nothing: ${NAMES[11]}`);
   console.log(`\nStart it with the developer sign-in enabled:`);

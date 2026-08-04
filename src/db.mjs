@@ -8,8 +8,32 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
   return db;
 }
 
-// Idempotent: every statement is CREATE ... IF NOT EXISTS, so running this against an existing database is a
-// no-op. That is what makes it safe to call unconditionally on every boot instead of tracking a version.
+// Columns added to tables that ALREADY EXIST. CREATE TABLE IF NOT EXISTS does nothing to an existing table,
+// so without this the schema can never evolve: adding `assignments.role` worked on a fresh database and threw
+// "no such column: role" on every deployment that had one. Idempotent-on-a-fresh-database is NOT the same
+// property as can-upgrade-an-old-one, and only the first was ever tested.
+//
+// SQLite's ALTER TABLE ADD COLUMN cannot add a NOT NULL column without a default, and cannot add a CHECK
+// constraint — which is exactly why `role` is nullable with the constraint declared only in CREATE TABLE.
+// New columns must be nullable or carry a default. Nothing here ever drops or renames: a migration that can
+// lose data has no business running unattended at boot.
+const ADDED_COLUMNS = [
+  { table: "assignments", column: "role", ddl: "ALTER TABLE assignments ADD COLUMN role TEXT" },
+];
+
+function applyColumnAdditions(db) {
+  const applied = [];
+  for (const { table, column, ddl } of ADDED_COLUMNS) {
+    const exists = db.prepare(`SELECT COUNT(*) n FROM pragma_table_info(?) WHERE name = ?`).get(table, column).n;
+    if (exists) continue;
+    db.exec(ddl);
+    applied.push(`${table}.${column}`);
+  }
+  return applied;
+}
+
+// Idempotent in both directions that matter: safe to run against a fresh database, and able to bring an
+// older one up to date. Returns what it changed, so a boot can say so rather than migrating silently.
 export function migrate(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS seasons (
@@ -103,6 +127,10 @@ export function migrate(db) {
       id         INTEGER PRIMARY KEY,
       session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       person_id  INTEGER REFERENCES people(id) ON DELETE SET NULL,
+      -- Which role this slot is for: 'l' leader, 'f' follower, or NULL meaning the role does not matter.
+      -- A partner-dance class needs one of each, so it gets TWO rows; a workshop gets one NULL-role row.
+      -- Nullable on purpose, so rows written before roles existed remain valid and read as "anyone".
+      role       TEXT CHECK (role IN ('l','f')),
       state      TEXT NOT NULL DEFAULT 'confirmed' CHECK (state IN ('proposed','confirmed'))
     );
 
@@ -140,6 +168,9 @@ export function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_sessions_date  ON sessions(date);
     CREATE INDEX IF NOT EXISTS idx_avail_hour     ON availability_hour(person_id, date);
   `);
+  // AFTER the creates, so a fresh database already has everything and this finds nothing to do.
+  const added = applyColumnAdditions(db);
+  if (added.length) console.log(`[migrate] added column(s): ${added.join(", ")}`);
   return db;
 }
 

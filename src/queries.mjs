@@ -17,6 +17,13 @@ const eligiblePredicate = (person) => `
   a.person_id IS NULL
   AND EXISTS (SELECT 1 FROM capabilities c
                WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)
+  -- Role. A slot with no role takes anyone; a leader slot takes leaders and people who do both. Added here
+  -- rather than in each caller so the board, the claim guard, the planner's candidates and auto-roster all
+  -- inherit it — the same reason the double-booking rule lives here, and the reason two people cannot end up
+  -- in the leader and follower slot of the same session by accident (they share a date and time).
+  AND (a.role IS NULL
+       OR (SELECT preferred_role FROM people WHERE id = ${person}) = 'b'
+       OR (SELECT preferred_role FROM people WHERE id = ${person}) = a.role)
   AND COALESCE(
         (SELECT ah.available FROM availability_hour ah
           WHERE ah.person_id = ${person} AND ah.date = s.date AND ah.hour = t.hour),
@@ -85,7 +92,7 @@ export const isActive = (db, personId, seasonId, threshold = 1) => score(db, per
 // today, because offering a volunteer a slot that already happened is noise they have to read past.
 export function openSlotsFor(db, personId, seasonId, fromDate = "0000-00-00") {
   return db.prepare(`
-    SELECT a.id AS assignmentId, s.id AS sessionId, s.date,
+    SELECT a.id AS assignmentId, s.id AS sessionId, s.date, a.role,
            t.day_of_week AS dayOfWeek, t.hour, t.minute,
            act.key AS activityKey, act.label AS activityLabel
       FROM assignments a
@@ -149,7 +156,7 @@ export function planForSeason(db, seasonId) {
   return db.prepare(`
     SELECT s.id AS sessionId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,
            act.key AS activityKey, act.label AS activityLabel,
-           a.id AS assignmentId, a.state, a.person_id AS personId, p.name AS personName
+           a.id AS assignmentId, a.role, a.state, a.person_id AS personId, p.name AS personName
       FROM sessions s
       JOIN timeslots  t ON t.id = s.timeslot_id
       JOIN activities act ON act.id = s.activity_id
@@ -171,7 +178,7 @@ export function planForSeason(db, seasonId) {
 // else changed it meanwhile, this refuses instead of silently discarding their work.
 export function assignSlot(db, assignmentId, personId, { expectPersonId = null } = {}) {
   const row = db.prepare(`
-    SELECT a.person_id, s.date, s.activity_id, t.hour
+    SELECT a.person_id, a.role, s.date, s.activity_id, t.hour, t.minute
       FROM assignments a JOIN sessions s ON s.id = a.session_id JOIN timeslots t ON t.id = s.timeslot_id
      WHERE a.id = :aid
   `).get({ aid: assignmentId });
@@ -185,6 +192,28 @@ export function assignSlot(db, assignmentId, personId, { expectPersonId = null }
 
   const capable = db.prepare("SELECT 1 FROM capabilities WHERE person_id=? AND activity_id=?").get(personId, row.activity_id);
   if (!capable) return { ok: false, reason: "not_capable" };
+
+  // A leader slot needs a leader or someone who does both. Checked here as well as in the shared predicate,
+  // because a planner assigns directly rather than through the board.
+  const prefers = db.prepare("SELECT preferred_role FROM people WHERE id=?").get(personId)?.preferred_role;
+  if (row.role && prefers !== "b" && prefers !== row.role) return { ok: false, reason: "wrong_role" };
+
+  // Nobody can be in two places at one time. The shared predicate has always said so, but it only gated the
+  // CANDIDATE LIST — so the board and the auto-roster were safe while a direct planner assignment was not, and
+  // tools/demo.mjs (which calls straight into here) produced nine of them, including one person listed as both
+  // the leader AND the follower of the same class. Same reasoning as the role check above: a planner assigns
+  // directly rather than through the board, so the rule has to hold at the write.
+  const clash = db.prepare(`
+    SELECT act.label AS label
+      FROM assignments a2
+      JOIN sessions   s2 ON s2.id = a2.session_id
+      JOIN timeslots  t2 ON t2.id = s2.timeslot_id
+      JOIN activities act ON act.id = s2.activity_id
+     WHERE a2.person_id = :pid AND a2.id <> :aid
+       AND s2.date = :d AND t2.hour = :h AND t2.minute = :m
+     LIMIT 1
+  `).get({ pid: personId, aid: assignmentId, d: row.date, h: row.hour, m: row.minute });
+  if (clash) return { ok: false, reason: "already_booked", clashesWith: clash.label };
 
   const answer = db.prepare(`
     SELECT COALESCE(
@@ -210,7 +239,7 @@ export function unassignSlot(db, assignmentId, { expectPersonId = null } = {}) {
 // a volunteer wants to see and it must not require reading the whole season to find it.
 export function myUpcoming(db, personId, seasonId, fromDate, limit = 20) {
   return db.prepare(`
-    SELECT a.id AS assignmentId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,
+    SELECT a.id AS assignmentId, s.date, a.role, t.day_of_week AS dayOfWeek, t.hour, t.minute,
            act.key AS activityKey, act.label AS activityLabel, a.state
       FROM assignments a
       JOIN sessions   s ON s.id = a.session_id

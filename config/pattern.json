@@ -27,7 +27,11 @@
       "subtype": "salsa",
       "label": "Salsa",
       "boothLabel": "SA",
-      "consolidation": "S"
+      "consolidation": "S",
+      "needs": {
+        "l": 1,
+        "f": 1
+      }
     },
     {
       "key": "bachata",
@@ -35,7 +39,11 @@
       "subtype": "bachata",
       "label": "Bachata",
       "boothLabel": "BA",
-      "consolidation": "B"
+      "consolidation": "B",
+      "needs": {
+        "l": 1,
+        "f": 1
+      }
     },
     {
       "key": "dj",
@@ -43,7 +51,10 @@
       "subtype": "dj",
       "label": "DJ",
       "boothLabel": "DJ",
-      "consolidation": "D"
+      "consolidation": "D",
+      "needs": {
+        "any": 1
+      }
     },
     {
       "key": "workshop_yoga",
@@ -51,7 +62,10 @@
       "subtype": "yoga",
       "label": "Workshop: Yoga",
       "boothLabel": "WY",
-      "consolidation": "W"
+      "consolidation": "W",
+      "needs": {
+        "any": 1
+      }
     },
     {
       "key": "workshop_other",
@@ -59,7 +73,10 @@
       "subtype": "other",
       "label": "Workshop: Other",
       "boothLabel": "WO",
-      "consolidation": "W"
+      "consolidation": "W",
+      "needs": {
+        "any": 1
+      }
     },
     {
       "key": "sh",
@@ -67,7 +84,10 @@
       "subtype": "sh",
       "label": "SH (Steel House)",
       "boothLabel": "SH",
-      "consolidation": "H"
+      "consolidation": "H",
+      "needs": {
+        "any": 1
+      }
     }
   ],
   "weekly": [

@@ -70,7 +70,8 @@ test("different times on one day do not collide; two activities in one slot stil
       JOIN activities act ON act.id=s.activity_id WHERE s.date=? ORDER BY t.hour, act.key`).all(date);
     const at13 = slots.find((s) => s.hour === 13);
     const at15 = slots.filter((s) => s.hour === 15);
-    assert.equal(at15.length, 2);
+    // Four rows now, not two: salsa and bachata each need a leader AND a follower.
+    assert.equal(at15.length, 4, "two classes at one time, each needing both roles");
 
     db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(me, at13.id);
     for (const s of at15) {
