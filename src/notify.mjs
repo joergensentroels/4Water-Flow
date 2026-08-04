@@ -6,6 +6,7 @@
 // TLS+auth SMTP client is a project of its own and the wrong thing to hand a volunteer-run nonprofit. Queued
 // rows are durable, so wiring them to whatever mail the host already has is a small adapter, and nothing is
 // lost in the meantime.
+import { fetchBounded, OUTBOUND_TIMEOUT_MS } from "./outbound.mjs";
 
 export function notifyConfig(env = process.env) {
   const webhook = String(env.MATTERMOST_WEBHOOK || "").trim();
@@ -24,40 +25,12 @@ function safeHost(url) {
 }
 
 // A webhook that never answers is worse than one that refuses, and it was the only outcome this file could not
-// see. Node's fetch has no request timeout — undici's headers timeout is 300s — so one unresponsive Mattermost
-// stalled each send for five minutes, and runNudge awaits send once per volunteer in a loop. Thirty volunteers
-// is two and a half hours in which nobody after the first gets nudged, nothing is logged, and no row says
-// anything is wrong. This file's whole argument is that a broken webhook should be visible in the data; a hang
-// was invisible in the data AND the log.
-//
-// Ten seconds, because the thing being sent is a chat message: one that takes longer has failed in every sense
-// a volunteer cares about, and failing it turns the stall into a 'failed' row with a reason.
-const WEBHOOK_TIMEOUT_MS = 10_000;
-
-// Raced rather than relying on the signal alone. Real fetch honours AbortSignal, but the transport here is
-// injectable, and a transport that ignores the signal would leave send() permanently unsettled — the exact
-// failure this exists to remove. The signal is still passed so the socket is actually released.
-async function withTimeout(start, ms, label) {
-  const controller = new AbortController();
-  let timer;
-  try {
-    return await Promise.race([
-      start(controller.signal),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error(`${label} did not answer within ${ms / 1000}s`));
-        }, ms);
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
+// see: 'sent' requires res.ok and 'failed' records the reason, but a hang produces neither. runNudge awaits one
+// send per volunteer, so one silent Mattermost meant nobody after the first got nudged — invisible in the data
+// AND the log, in a file whose whole argument is that a broken webhook should be visible in the data.
+// src/outbound.mjs carries the bound and the reasoning; see also the OIDC callers, which had the same hole.
 export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, log = console, now = () => new Date(),
-                               timeoutMs = WEBHOOK_TIMEOUT_MS }) {
+                               timeoutMs = OUTBOUND_TIMEOUT_MS }) {
   const record = db.prepare(`INSERT INTO notifications (kind, person_id, period, channel, body, status, error, created_at)
                              VALUES (:kind, :pid, :period, :channel, :body, :status, :error, :at)`);
 
@@ -82,12 +55,11 @@ export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, l
     }
 
     try {
-      const res = await withTimeout((signal) => fetchImpl(config.webhook, {
+      const res = await fetchBounded(fetchImpl, config.webhook, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: base.body }),
-        signal,
-      }), timeoutMs, "the webhook");
+      }, { timeoutMs, label: "the webhook" });
       if (!res.ok) throw new Error(`webhook returned ${res.status}`);
       db.prepare("UPDATE notifications SET status='sent' WHERE id=?").run(rowId);
       return { ok: true, channel: "mattermost", id: rowId };

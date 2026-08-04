@@ -12,6 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readdirSync, mkdirSync, statSync, rmSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
+import { fetchBounded } from "../src/outbound.mjs";
 
 const PREFIX = "4water-";
 const SUFFIX = ".sqlite";
@@ -91,17 +92,25 @@ export function prune(dir, keep) {
   return { kept: files.slice(Math.max(0, files.length - keep)), removed };
 }
 
-export async function upload(cfg, file, fetchImpl = fetch) {
+// Two minutes, not the eight seconds src/outbound.mjs uses by default: this PUTs a whole database file, so the
+// transfer legitimately takes time, and cutting off a slow-but-working upload would turn "offsite backups are
+// slow" into "offsite backups do not happen". Bounded all the same, because this runs from cron — an upload
+// that hangs forever is a cron job that never exits, and the next scheduled run starts another one on top of it.
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
+export async function upload(cfg, file, fetchImpl = fetch, { timeoutMs = UPLOAD_TIMEOUT_MS } = {}) {
   if (!uploadEnabled(cfg)) return { ok: false, skipped: true, reason: "not_configured" };
   const body = readFileSync(file);
   const url = `${cfg.webdavUrl.replace(/\/+$/, "")}/${path.basename(file)}`;
   const auth = Buffer.from(`${cfg.webdavUser}:${cfg.webdavPass}`).toString("base64");
   try {
-    const res = await fetchImpl(url, {
+    // The label, not the URL: it lands in the returned message and from there in a log. The URL carries the
+    // path, and the credentials are in the header.
+    const res = await fetchBounded(fetchImpl, url, {
       method: "PUT",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/octet-stream" },
       body,
-    });
+    }, { timeoutMs, label: "the backup destination" });
     if (!res.ok) return { ok: false, status: res.status, reason: "http" };
     return { ok: true, status: res.status };
   } catch (e) {

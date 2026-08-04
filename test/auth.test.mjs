@@ -2,8 +2,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { migrate } from "../src/db.mjs";
-import { loadPattern } from "../src/config.mjs";
+import { loadPattern, ROOT } from "../src/config.mjs";
 import { seedStructure, seedPeople } from "../src/seed.mjs";
 import { sign, verify, parseCookies, cookieHeader, newCsrf, checkCsrf, sessionSecret, SESSION_MAX_AGE_S } from "../src/session.mjs";
 import { assertDevAllowed, devSignIn, oidcConfig, beginOidc, checkState, completeOidc, linkIdentity,
@@ -185,6 +187,84 @@ test("discovery is cached, so it is not fetched on every sign-in", async () => {
   // And the TTL is honoured, so rotating an IdP's endpoints does not need a restart.
   await discoverOidc(CFG(), fetchImpl, { now: Date.now() + DISCOVERY_TTL_MS + 1 });
   assert.equal(calls.filter((u) => u.includes(".well-known")).length, 2, "an expired entry must be refetched");
+});
+
+// The fallback above is a `catch`, and a hang is not a rejection. Against a NextCloud that accepts the
+// connection and then goes quiet, this degradation — the whole point of which is not to lock every volunteer
+// out — was unreachable: the volunteer waited on undici's 300-second headers timeout instead. The transport
+// here IGNORES the abort signal on purpose, because a timeout that needs the transport's cooperation is one a
+// future adapter can silently remove.
+test("an identity provider that goes quiet falls back instead of hanging the sign-in", async () => {
+  clearDiscoveryCache();
+  let aborted = false;
+  const silent = (url, opts) => {
+    opts?.signal?.addEventListener?.("abort", () => { aborted = true; });
+    return new Promise(() => {});
+  };
+  const warned = [];
+  const realWarn = console.warn;
+  console.warn = (m) => warned.push(String(m));
+  try {
+    const started = process.hrtime.bigint();
+    const got = await discoverOidc(CFG(), silent, { now: Date.now(), timeoutMs: 50 });
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+
+    assert.ok(ms < 2000, `discovery must not hang the sign-in: took ${ms.toFixed(0)}ms`);
+    assert.equal(got.source, "fallback", "and it must reach the fallback it was written for");
+    assert.match(got.error, /did not answer within/, "with a reason /status can show");
+    assert.ok(got.authorize.startsWith(ISSUER), "pointing at the issuer, not nowhere");
+    assert.ok(warned.some((w) => /did not answer/.test(w)), "and say so in the log");
+    assert.equal(aborted, true, "the socket must be released, not left waiting on a silent server");
+  } finally {
+    console.warn = realWarn;
+  }
+});
+
+test("a token exchange against a silent provider fails with which endpoint went quiet", async () => {
+  clearDiscoveryCache();
+  // Discovery succeeds; the TOKEN endpoint is the one that stops answering. Naming it matters, because
+  // "sign-in is broken" and "the token endpoint is slow" get fixed differently.
+  const half = (url, opts) => {
+    if (url.includes(".well-known")) return Promise.resolve({ ok: true, json: async () => goodDoc() });
+    return new Promise(() => {});
+  };
+  await assert.rejects(
+    () => completeOidc(CFG(), { code: "c", verifier: "v" }, half, { timeoutMs: 50 }),
+    (e) => /token endpoint did not answer/.test(e.message),
+    "the error must name the endpoint that went quiet");
+});
+
+// The reason to write this rather than trust the three tests above: every recurring defect in this project has
+// been care applied to one path and not its sibling. Four outbound calls existed and I found the hang in one of
+// them; the other three were the same bug waiting. So assert the ENUMERATION, not the instances — a fifth
+// outbound call added later must go through the bound or fail here.
+//
+// A grep, deliberately, rather than a runtime check: there is no seam every outbound request passes through at
+// runtime, and inventing one to make this testable would be a worse design than reading the source.
+test("every outbound request in the app goes through the bounded helper", () => {
+  const files = ["src/auth.mjs", "src/notify.mjs", "tools/backup.mjs", "src/outbound.mjs"];
+  const offenders = [];
+  for (const rel of files) {
+    const text = readFileSync(path.join(ROOT, rel), "utf8");
+    text.split("\n").forEach((line, i) => {
+      if (/^\s*(\/\/|\*)/.test(line)) return;                       // a comment is allowed to say the word
+      // `fetchImpl = fetch` is the default-parameter seam, not a call. `fetchImpl(` inside outbound.mjs IS the
+      // one place the raw call belongs.
+      if (/\bfetchImpl\s*=\s*fetch\b/.test(line)) return;
+      if (rel === "src/outbound.mjs") return;
+      if (/\b(await\s+)?fetchImpl\s*\(|\bawait\s+fetch\s*\(/.test(line)) {
+        offenders.push(`${rel}:${i + 1}  ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `these call a transport directly instead of fetchBounded, so they cannot time out:\n${offenders.join("\n")}`);
+
+  // And the helper is actually reached from each of them, rather than merely imported.
+  for (const rel of ["src/auth.mjs", "src/notify.mjs", "tools/backup.mjs"]) {
+    const text = readFileSync(path.join(ROOT, rel), "utf8");
+    assert.match(text, /fetchBounded\(/, `${rel} imports the bound but never calls it`);
+  }
 });
 
 test("state is compared safely and a mismatch fails", () => {

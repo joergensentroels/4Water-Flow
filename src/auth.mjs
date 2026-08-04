@@ -1,6 +1,7 @@
 // Identity. One seam, three providers, so that adding a fourth (or a second department's NextCloud) is a
 // config change rather than a rewrite. `auth_provider` on `people` is a COLUMN, never a branch in app logic.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { fetchBounded } from "./outbound.mjs";
 
 export const PROVIDERS = ["dev", "oidc", "invite"];
 
@@ -75,7 +76,9 @@ const discoveryCache = new Map();
 export const DISCOVERY_TTL_MS = 10 * 60 * 1000;
 export const clearDiscoveryCache = () => discoveryCache.clear();
 
-export async function discoverOidc(cfg, fetchImpl = fetch, { now = Date.now() } = {}) {
+// `timeoutMs` is injectable for the same reason `fetchImpl` is: a test that proves the timeout works must not
+// take the production timeout to do it.
+export async function discoverOidc(cfg, fetchImpl = fetch, { now = Date.now(), timeoutMs } = {}) {
   const key = trimEnd(cfg.issuer);
   const hit = discoveryCache.get(key);
   if (hit && hit.expires > now) return hit.value;
@@ -83,7 +86,11 @@ export async function discoverOidc(cfg, fetchImpl = fetch, { now = Date.now() } 
   const url = `${key}/.well-known/openid-configuration`;
   let value;
   try {
-    const res = await fetchImpl(url, { headers: { Accept: "application/json" } });
+    // Bounded, because the fallback below is a `catch` and a hang is not a rejection. Against a NextCloud that
+    // accepts the connection and goes quiet, this whole carefully-written degradation was unreachable — the
+    // volunteer waited on undici's 300-second headers timeout instead, which is the case it exists for.
+    const res = await fetchBounded(fetchImpl, url, { headers: { Accept: "application/json" } },
+                                   { timeoutMs, label: "the identity provider" });
     if (!res.ok) throw new Error(`discovery: ${url} returned ${res.status}`);
     const doc = await res.json();
     // The spec requires issuer to match; a mismatch means we are reading someone else's metadata.
@@ -117,10 +124,14 @@ export async function beginOidc(cfg, {
   state = randomBytes(16).toString("base64url"),
   verifier = randomBytes(32).toString("base64url"),
   fetchImpl = fetch,
+  timeoutMs,
 } = {}) {
   if (!cfg.enabled) throw Object.assign(new Error("OIDC is not configured"), { status: 503 });
   const challenge = createHash("sha256").update(verifier).digest("base64url");
-  const endpoints = await discoverOidc(cfg, fetchImpl);
+  // Forwarded, not just defaulted. This is the volunteer clicking "Sign in with NextCloud", so it is the most
+  // exposed of the three calls — and an option that only ONE of three call sites threads through is the shape
+  // of every sibling defect in this project.
+  const endpoints = await discoverOidc(cfg, fetchImpl, { timeoutMs });
   const u = new URL(endpoints.authorize);
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", cfg.clientId);
@@ -140,9 +151,12 @@ export function checkState(issued, returned) {
 }
 
 // The token exchange is injected so this is testable without a network. Production passes fetch.
-export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch) {
-  const endpoints = await discoverOidc(cfg, fetchImpl);
-  const res = await fetchImpl(endpoints.token, {
+export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch, { timeoutMs } = {}) {
+  const endpoints = await discoverOidc(cfg, fetchImpl, { timeoutMs });
+  // Both bounded. A volunteer is watching a redirect while these run, so an IdP that stops answering must
+  // produce an error page they can act on rather than a spinner that lasts five minutes. The thrown message
+  // names which endpoint went quiet, because "sign-in is broken" and "userinfo is slow" get fixed differently.
+  const res = await fetchBounded(fetchImpl, endpoints.token, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -153,12 +167,12 @@ export async function completeOidc(cfg, { code, verifier }, fetchImpl = fetch) {
       client_secret: cfg.clientSecret,
       code_verifier: verifier,
     }),
-  });
+  }, { timeoutMs, label: "the token endpoint" });
   if (!res.ok) throw Object.assign(new Error(`token endpoint returned ${res.status}`), { status: 502 });
   const tok = await res.json();
-  const info = await fetchImpl(endpoints.userinfo, {
+  const info = await fetchBounded(fetchImpl, endpoints.userinfo, {
     headers: { Authorization: `Bearer ${tok.access_token}` },
-  });
+  }, { timeoutMs, label: "the userinfo endpoint" });
   if (!info.ok) throw Object.assign(new Error(`userinfo returned ${info.status}`), { status: 502 });
   const claims = await info.json();
   if (!claims.sub) throw Object.assign(new Error("userinfo carried no sub"), { status: 502 });
