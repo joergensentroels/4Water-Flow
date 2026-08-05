@@ -111,3 +111,13 @@ because the count went stale the moment a fourth was added: three documents said
 
 And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
 current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.
+
+Two more, which are places the software knowingly differs from what the spec says — the reasoning is in `PLAN.md`
+under "Three places this app knowingly differs from the spec":
+
+- **Notifications have no email fallback.** The spec says email covers people who are not in Mattermost; the app
+  writes an **outbox** page instead, because a zero-dependency SMTP client is a project of its own. Somebody has to
+  read that page. **Do not promise email to a volunteer who is not in Mattermost** — it is real work, not a setting.
+- **"Active volunteer" is a flag an admin sets, not a number derived from Score.** Deriving it would make a brand
+  new volunteer inactive, so ineligible, so never given a first shift. Confirm that "active" in 4water's reports
+  means *"not stood down"* rather than *"has done something this season"*; for a newcomer those disagree.

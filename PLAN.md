@@ -65,16 +65,40 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **AG** | name the volunteers who have not answered | A count is not actionable, and chasing cover is half of why this exists. Capped at eight with the rest counted; escaped, because this is the first user-supplied name on that screen. Written after four load-bearing correctness properties — ICS folding, DST, the hour-over-day availability override, the claim race — were checked and all found already right |
 | **AH** | the upgrade path, the recovery drill, and one home per fact | `applyColumnAdditions` had never executed anywhere: on a fresh database the columns already exist, so every test ran it as a no-op while the branch that alters a table — the upgrade path for a live deployment — had never run. Coverage then found four more never-executed branches. Also: the app now boots against a *restored* backup rather than merely opening one, and three documents stating the test count (129, 330, 330, against 338) are down to one |
 
-## A definition of done I amended rather than met — deliberately, and here is why
+## Three places this app knowingly differs from the spec — deliberately, and here is why
 
-Increment D's criterion said *"an ineligible claim is a 403 with the right message."* It is a **303 redirect
-with a flash message on the board** instead. That was originally an unflagged drift; naming it properly:
+Every one of the tests verifies the implementation against itself. The spec is outside that loop, so a requirement
+quietly dropped is invisible to all of them. Read back against `../4water-scheduling-spec.md` §2, three sentences
+in the spec are not true of the software. All three were reasoned about at the time and two of them only in a code
+comment, which is not where somebody holding the spec will look.
 
-A 403 hands the volunteer an error page and loses the board they were looking at. The redirect puts
-*"You cannot take this slot"* on the page they are already on, next to the slot in question. That is better for
-the person, and the guard is identical either way — `claimSlot` refuses before anything is written, tested
-directly. **The criterion was wrong, not the code.** Recorded here rather than left as a mismatch someone else
-has to rediscover.
+**1. An ineligible claim.** Increment D's criterion said *"an ineligible claim is a 403 with the right message."*
+It is a **303 redirect with a flash message on the board** instead. A 403 hands the volunteer an error page and
+loses the board they were looking at; the redirect puts *"You cannot take this slot"* on the page they are already
+on, next to the slot in question. The guard is identical either way — `claimSlot` refuses before anything is
+written, tested directly. **The criterion was wrong, not the code.**
+
+**2. "Email stays the fallback for people who are not in Mattermost."** It does not. The fallback is an **outbox**
+— a page listing what would have been sent, with a copy of each message. `src/notify.mjs` gives the reason and it
+is a good one: a zero-dependency TLS-and-auth SMTP client is a project of its own, and the wrong thing to hand a
+volunteer-run nonprofit to operate. What the outbox costs is that somebody has to look at it; `/status` reports the
+backlog so it is not silent. **If 4water wants email, that is a real piece of work and not a setting** — say so
+before promising it to a volunteer who is not in Mattermost.
+
+**3. "Score … determines whether a volunteer counts as *active*."** In the spreadsheet it does — that is what
+`Imported ActiveCph Names` reflects. In the app, `people.status` is an **authored** column an admin sets, and
+nothing derives it from Score. That is not laziness: deriving "active" from Score would mean a volunteer with no
+assignments yet is inactive, therefore excluded from eligibility, therefore never assigned a first shift. A
+bootstrapping paradox that would make the app unusable for exactly the people it most needs to reach. Score is
+still derived and never stored, as the spec requires, and it still drives fairness and the planner's overview —
+only the *active* flag is separate. Worth confirming with 4water that "active volunteer" in their reports means
+"not stood down" rather than "has done something this season", because those diverge for a newcomer.
+
+Checked and **held** in the same pass, so the list above is exhaustive rather than the part I happened to notice:
+Score is derived and never a stored column; locked assignments are immune to later auto-roster runs
+(`autoRoster` only claims rows with `person_id IS NULL`, and `discardProposals` only clears `state='proposed'`);
+auto-roster reads Score *after* børs activity, because `confirmedTally` runs inside it against the live table; the
+three roles are named as the spec names them; and the scale figures are measured at the size the spec states.
 
 ## Measured, not assumed — at the size the spec actually describes
 
