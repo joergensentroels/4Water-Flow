@@ -20,6 +20,9 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
+// codeDirs() rather than a literal list of directories — see tools/sourcewalk.mjs for why a list that enumerates
+// categories is still a hand-kept list, and for the three audits that each kept their own copy of this one.
+import { codeDirs } from "../tools/sourcewalk.mjs";
 
 // The documents checked here, FOUND rather than listed. This was a hand-written array of six paths, and it did
 // happen to name all six — but a seventh document added later would have been unchecked and nothing would have
@@ -78,7 +81,7 @@ function sourceFacts() {
       else files.push(`${rel}/${f.name}`);
     }
   };
-  for (const d of ["src", "tools", "test"]) walk(d);
+  for (const d of codeDirs()) walk(d);
   const all = files.filter((f) => f.endsWith(".mjs")).map(read).join("\n");
   return {
     all,
@@ -308,7 +311,7 @@ test("no source comment states a test count either, however it is wrapped", () =
       else if (f.name.endsWith(".mjs")) files.push(`${rel}/${f.name}`);
     }
   };
-  for (const d of ["src", "test", "tools"]) walk(d);
+  for (const d of codeDirs()) walk(d);
   assert.ok(files.length >= 20, `only ${files.length} source files — this is not looking properly`);
 
   const offenders = [];

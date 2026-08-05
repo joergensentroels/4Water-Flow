@@ -27,6 +27,35 @@ import { ROOT } from "../src/config.mjs";
 // true. Deliberately low so that deleting a file is never a test failure.
 export const MIN_MODULES = 20;
 
+// WHICH TOP-LEVEL DIRECTORIES HOLD CODE, read off the disk rather than listed.
+//
+// Three audits kept this as a literal: SCAN_DIRS in test/seams.test.mjs and two `["src", "tools", "test"]` walks in
+// test/docs.test.mjs. All three happen to be complete today. That is the problem — a fourth directory of modules
+// would be skipped by the department-vocabulary gate, the invisible-character scan, the raw() audit and the
+// translation-key check simultaneously, and every one of them would still pass.
+//
+// It is the same trap as the environment collector's prefix families, the plural collector keyed to {n}, and the
+// document file-checker matching seven directory names: a list that enumerates CATEGORIES feels derived because it
+// iterates and has no hardcoded answers, and it is still a hand-kept list. The tell is a constant naming kinds
+// rather than describing structure. So this describes the structure: a top-level directory is code if it contains
+// a module.
+export function codeDirs() {
+  const out = readdirSync(ROOT, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+    .map((e) => e.name)
+    .filter((name) => {
+      const holds = (dir) => readdirSync(path.join(ROOT, dir), { withFileTypes: true })
+        .some((f) => (f.isDirectory() ? holds(path.join(dir, f.name)) : f.name.endsWith(".mjs")));
+      return holds(name);
+    })
+    .sort();
+  if (out.length < 2) {
+    throw new Error(`codeDirs() found ${out.length} directory/ies holding modules, expected at least 2 — ` +
+                    `every derived audit walks this, so a short answer narrows all of them at once.`);
+  }
+  return out;
+}
+
 export function sourceFiles({ dirs = ["src", "tools"], exempt = [], min = MIN_MODULES } = {}) {
   const out = [];
   const walk = (dir) => {

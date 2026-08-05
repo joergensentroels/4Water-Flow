@@ -7,16 +7,19 @@
 // the column that means exactly that, which makes the code worse to read for no safety gain.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
 import { ROOT, loadPattern, loadStrings } from "../src/config.mjs";
 // The walk lives in one place and refuses to return an implausibly short list. Blinding the two local copies of
 // this function left all but three tests in the suite green, including the two "and the gate genuinely fires"
 // controls below —
 // they exercise the detector on a planted string and never the file list. tools/sourcewalk.mjs carries the detail.
-import { sourceFiles as walkSource } from "../tools/sourcewalk.mjs";
+import { sourceFiles as walkSource, codeDirs } from "../tools/sourcewalk.mjs";
 
-const SCAN_DIRS = ["src", "test", "tools"];   // tools/ holds real code too, so it is not exempt from the rule
+// DERIVED, not listed. tools/ holds real code and is not exempt from the rule; neither would a fourth directory
+// be, and that is the point — this was a literal, and a literal enumerating directories cannot fail for one
+// nobody added to it. See tools/sourcewalk.mjs: a top-level directory is code if it contains a module.
+const SCAN_DIRS = codeDirs();
 const EXEMPT = ["config", "strings"];      // the seams themselves are where these names belong
 
 const sourceFiles = () => walkSource({ dirs: SCAN_DIRS, exempt: EXEMPT });
@@ -292,4 +295,30 @@ test("no environment variable is read from two modules without a recorded reason
   const stale = Object.keys(SHARED_ENV_JUSTIFIED).filter((name) => (readers.get(name)?.size ?? 0) < 2);
   assert.deepEqual(stale, [],
     `SHARED_ENV_JUSTIFIED exempts these and they no longer have two readers. Delete the entries:\n  ${stale.join("\n  ")}`);
+});
+
+// The derivation itself, because SCAN_DIRS is now its output and a wrong answer narrows four gates at once.
+//
+// Measured before the change: a module planted in a directory no list named was INVISIBLE to the
+// department-vocabulary gate, and the sibling test called "the gate genuinely fails when a name IS planted" passed
+// anyway — it plants a string in memory and runs the detector, so it says nothing about which files were read. That
+// is the same half-a-machine control as the shared file-walk, one level up.
+test("the code-directory derivation excludes what it should and still finds the real ones", () => {
+  const dirs = codeDirs();
+  assert.ok(dirs.includes("src"), "the app's own source must be in scope");
+  assert.ok(dirs.includes("test"), "and the tests, since this project's rules apply to them too");
+  assert.ok(dirs.length >= 2, `only ${dirs.length} code directory/ies — every derived audit walks this`);
+
+  // Directories that hold no module are not code, so the seam files are out by construction rather than by an
+  // exemption somebody has to maintain.
+  for (const notCode of ["config", "strings", "static"]) {
+    if (existsSync(path.join(ROOT, notCode))) {
+      assert.ok(!dirs.includes(notCode), `${notCode} holds no module and must not be walked as code`);
+    }
+  }
+  // And nothing hidden or vendored.
+  assert.ok(!dirs.some((d) => d.startsWith(".")), `a dot-directory is in scope: ${dirs}`);
+  assert.ok(!dirs.includes("node_modules"), "node_modules must never be walked");
+  // The answer must be sorted and unique, so a diff of two runs is stable.
+  assert.deepEqual(dirs, [...new Set(dirs)].sort(), "the derivation must be deterministic");
 });
