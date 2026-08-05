@@ -110,6 +110,39 @@ test("the documents checked here are found on disk, and none of the known ones w
   for (const d of DOCS) assert.ok(read(d).length > 0, `${d} is empty`);
 });
 
+// config/pattern.json carries a long `_comment` that an operator is told to read before hand-editing, and it is
+// prose like any other — but it is not markdown, so nothing above reaches it.
+//
+// It announced "TWO THINGS BELOW ARE PLACEHOLDERS", listed three, and closed with "Both are editable". A count in
+// prose that went stale when a third item was added, in the one file the RUNBOOK sends somebody to edit by hand —
+// the same failure as the throttle comment that said "two endpoints" for a whole increment after the third arrived.
+//
+// Announcing a count is allowed here, and has to be TRUE, which is stronger than banning it: the numbers must run
+// 1..n with nothing skipped, and any "N things" or "N items" claim must equal n.
+test("the config comment's own count of its placeholders is true", () => {
+  const comment = JSON.parse(read("config/pattern.json"))._comment;
+  assert.ok(Array.isArray(comment) && comment.length > 5, "the config comment is missing or has shrunk to nothing");
+
+  const numbered = comment.map((l) => /^\s*(\d+)\./.exec(l)).filter(Boolean).map((m) => Number(m[1]));
+  assert.ok(numbered.length >= 2, `expected a numbered list of placeholders, found ${numbered.length} items`);
+  assert.deepEqual(numbered, numbered.map((_, i) => i + 1),
+    `the numbered placeholders skip or repeat a number: ${numbered.join(", ")}`);
+
+  const text = comment.join("\n");
+  const WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  for (const m of text.matchAll(/\b(one|two|three|four|five|six|\d+)\s+(?:things?|items?|placeholders?)\b/gi)) {
+    const claimed = WORD[m[1].toLowerCase()] ?? Number(m[1]);
+    assert.equal(claimed, numbered.length,
+      `the comment says "${m[0]}" while listing ${numbered.length}. Either correct it or describe the list ` +
+      `without counting it — a count in prose is what went stale here before.`);
+  }
+  // "Both" is a count of two wearing a different hat, and it is how the stale version survived a reading.
+  if (numbered.length !== 2) {
+    assert.ok(!/\bboth\b/i.test(text),
+      `the comment says "both" while listing ${numbered.length} placeholders — that is a count of two in disguise`);
+  }
+});
+
 test("only PLAN.md states a test count, so there is one number to keep true", () => {
   const COUNTISH = /\b\d{2,4}\+?\s+(?:automated\s+)?(?:tests?|checks?)\b/gi;
   const offenders = [];

@@ -7,7 +7,7 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 393 tests green** — and, as of the AB increment, green on an actual `git clone`
+Status: **✅ A–AH complete plus the commits since, 394 tests green** — and, as of the AB increment, green on an actual `git clone`
 rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
@@ -167,6 +167,12 @@ up, add it there too.**
   available without a remote. **Push, and confirm the first run is green, before trusting that line.**
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
+- **Whether volunteers should read Danish or English is a decision nobody has made out loud.** `locale` is `"en"`
+  in `config/pattern.json`, and `strings/da.json` is complete — so one word in that file switches every
+  volunteer-facing string and the `<html lang>` with it. What makes this worth asking rather than assuming is the
+  tension a few lines apart in the same file: `export.csvDelimiter` is `";"` **because** the people opening the
+  spreadsheet are on a Danish Windows, while the interface they read is English. Either can be right; the mismatch
+  should be somebody's choice. Recorded in the config's own comment too.
 - **No first-language Danish speaker has read the Danish.** `test/strings.test.mjs` checks that both locales carry
   the same keys and the same placeholders, and `test/claims.test.mjs` now checks that no string names a screen the
   app does not show — but nothing has an opinion about whether a sentence reads naturally, and no test can stand in
