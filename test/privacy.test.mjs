@@ -55,6 +55,61 @@ const disclosed = () => {
   return named;
 };
 
+// EVERY COLUMN ON A PERSONAL TABLE, pinned. Adding one is a decision about the privacy notice, and this list is
+// where the decision gets recorded.
+//
+// The test below it works at TABLE granularity, and that is the wrong granularity for the defect this whole file was
+// written about. `assignments.attended` was a new COLUMN on a table the notice already described, so the table-level
+// check could never have fired on it — and did not: adding `planner_remark TEXT` to `assignments` and running
+// everything leaves the suite green. The audit written because a column went undisclosed could not catch a column
+// going undisclosed. `schema()` even computes the column map, and nothing used it.
+//
+// A per-column exemption list with a written reason each would be 43 entries, nearly all of them ids, foreign keys
+// and timestamps, and the noise would bury the four or five that matter. So this is a pinned baseline instead: the
+// schema side is derived, the comparison runs both ways, and a column cannot hide from it. The list has no gaps
+// relative to the schema by construction, which is what separates it from the hand-kept lists this project deletes —
+// those decide WHAT to check and can omit a case; this one records what was decided about a fully derived set.
+//
+// When this fails, the question to answer is not "add it to the list". It is: does the notice's "What is stored"
+// table need a row, or a phrase, saying the app now records this about somebody?
+const PERSONAL_COLUMNS = {
+  people: ["id", "name", "contact", "preferred_role", "status", "auth_provider", "auth_subject",
+           "calendar_token_hash"],
+  person_roles: ["person_id", "role_id"],
+  capabilities: ["person_id", "activity_id"],
+  availability_day: ["person_id", "date", "available"],
+  availability_hour: ["person_id", "date", "hour", "available"],
+  assignments: ["id", "session_id", "person_id", "role", "state", "attended"],
+  invitations: ["id", "email", "token", "role_id", "created_at", "accepted_at", "person_id"],
+  notifications: ["id", "kind", "person_id", "period", "channel", "body", "status", "error", "created_at"],
+  audit: ["id", "at", "actor_id", "actor_name", "action", "subject", "detail"],
+  notes: ["id", "session_id", "person_id", "author_name", "body", "at"],
+};
+
+test("no column has been added to a personal table without a decision about the notice", () => {
+  const { tables, columns } = schema();
+  const personal = tables.filter((t) => !(t in NOT_PERSONAL));
+  assert.deepEqual(personal.slice().sort(), Object.keys(PERSONAL_COLUMNS).sort(),
+    "the set of personal tables has changed — reconcile PERSONAL_COLUMNS with the schema before reading the rest");
+
+  const added = [], gone = [];
+  for (const t of personal) {
+    const actual = columns.get(t) ?? [];
+    const pinned = PERSONAL_COLUMNS[t];
+    for (const c of actual) if (!pinned.includes(c)) added.push(`${t}.${c}`);
+    for (const c of pinned) if (!actual.includes(c)) gone.push(`${t}.${c}`);
+  }
+  // Class-J guard: a comparison of two empty sets agrees perfectly.
+  const total = personal.reduce((n, t) => n + (columns.get(t) ?? []).length, 0);
+  assert.ok(total >= 40, `only ${total} columns read from the schema — this check is not looking at it`);
+
+  assert.deepEqual(added, [],
+    "these columns exist on tables the privacy notice describes, and nobody has said what they mean for it:\n  " +
+    added.join("\n  ") +
+    "\nDecide first — does docs/PRIVACY.md need to say the app records this about somebody? — then pin it here.");
+  assert.deepEqual(gone, [], `pinned but no longer in the schema — remove: ${gone.join(", ")}`);
+});
+
 test("every table holding personal data is described in the notice", () => {
   const { tables } = schema();
   const named = disclosed();
