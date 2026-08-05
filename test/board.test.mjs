@@ -25,10 +25,28 @@ test("the board requires a session", withWorld({}, async ({ get }) => {
     "carrying the destination: every slot-open notification links here, and it is read on a phone with no session");
 }));
 
-test("with no availability entered, the board is empty and says so", withWorld({}, async ({ people, signIn, get }) => {
+// THIS ASSERTION WAS VACUOUS, and only a performance fix exposed it.
+//
+// It looked for "no open slots you can take" — the GENERIC empty line — and passed. The page does not say that
+// here: with no availability entered, `emptyReason` is set and the specific card is rendered instead, which is the
+// whole point of that feature. What satisfied the match was the COMMENT in src/pages/board.mjs, which quotes the
+// generic phrase as an example of the contradiction it exists to avoid. HTML comments were being served, so the
+// string was on the wire; stripping them for page weight turned this red.
+//
+// A comment DISABLING a check has happened here before — a config key named in prose counted as documented. This is
+// the other direction: prose SATISFYING one, about a sentence a volunteer is supposed to read. And the comment that
+// did it is the one explaining that the generic line is only a fallback.
+test("with no availability entered, the board explains THAT rather than saying nothing",
+  withWorld({}, async ({ people, signIn, get }) => {
   const body = await (await get("/board", await signIn(people[0]))).text();
-  assert.match(body, /no open slots you can take|ingen ledige vagter/i,
-    "silence about availability must produce an explained empty board, not a blank one");
+  // The specific reason, which is what this state actually renders, plus the action it offers.
+  assert.match(body, /have not told us when you can help|ikke fortalt os/i,
+    "the board must name the reason it is empty, not print the generic line");
+  assert.match(body, /href="\/availability"/, "and offer the one thing that fixes it");
+  // And NOT the generic fallback, because printing both reads as a contradiction — which is exactly what the
+  // comment in src/pages/board.mjs says, and what nothing was checking.
+  assert.doesNotMatch(body, /no open slots you can take/i,
+    "the generic line is the fallback for having no season at all, and showing both contradicts itself");
 }));
 
 test("an available volunteer sees open slots and can claim one", withWorld({}, async (w) => {

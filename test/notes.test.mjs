@@ -126,6 +126,64 @@ test("the delete button is offered only on your own notes", async () => {
   } finally { w.close(); }
 });
 
+// The three remaining render branches on this page, closed so the coverage number means something. Left alone they
+// would sit next to a genuine defect — a flag with one reachable arm — and the next reader could not tell which
+// kind of gap they were looking at.
+test("a session renders an open slot, a slot with no role, and one with nobody on it at all", async () => {
+  const w = await world();
+  try {
+    const id = aSession(w);
+    const cookie = await w.signIn(w.people[0]);
+
+    // An OPEN slot on this session: person_id NULL is what the board is built on, so the page must name it rather
+    // than rendering an empty space where a person goes.
+    const open = await (await w.get(`/session/${id}`, cookie)).text();
+    const hasOpen = w.db.prepare(`SELECT COUNT(*) n FROM assignments WHERE session_id=? AND person_id IS NULL`)
+      .get(id).n;
+    assert.ok(hasOpen > 0, "the fixture must have an unfilled slot, or the open-slot branch is not taken");
+    assert.match(open, /Open|Ledig/, "an unfilled slot must say so, not leave a blank where a name belongs");
+
+    // A slot with NO ROLE: workshops need one person and the role parenthetical must simply be absent.
+    w.db.prepare("UPDATE assignments SET role=NULL WHERE session_id=?").run(id);
+    const noRole = await (await w.get(`/session/${id}`, cookie)).text();
+    // Scoped to the <small> that carries the role, not the whole document. The first version searched the page for
+    // "()" and matched a parenthesis in a source comment that was being served — which is the same trap that made
+    // the board's empty-state assertion vacuous, found in the same hour. Comments are stripped now; the assertion
+    // is scoped anyway, because a page-wide search for punctuation is not a claim about the role.
+    for (const m of noRole.matchAll(/<small>([\s\S]*?)<\/small>/g)) {
+      assert.doesNotMatch(m[1], /\(\s*\)/, `an empty parenthetical where a role would go: ${JSON.stringify(m[1])}`);
+    }
+
+    // And a session with NOBODY on it: every slot removed, so the empty-state arm is the one rendered.
+    w.db.prepare("DELETE FROM assignments WHERE session_id=?").run(id);
+    const empty = await (await w.get(`/session/${id}`, cookie)).text();
+    assert.match(empty, /class="empty"/, "a session with no slots must render its empty state, not an empty list");
+  } finally { w.close(); }
+});
+
+// The note form's PRESENCE, which nothing asserted. It was rendered behind a canWrite ternary whose only caller
+// passed the literal true and whose false arm no test ever took — so it read as a permission model and was a
+// constant, and this page had the lowest branch coverage in the project because of it. The parameter is gone; what
+// remains is a policy worth asserting, because the reasoning is not obvious: the form is offered to ANY signed-in
+// reader, deliberately not only to whoever holds the shift, since the person who might take it is exactly who needs
+// to ask about it.
+test("the note form is offered to a signed-in volunteer who does NOT hold the shift", async () => {
+  const w = await world();
+  try {
+    const id = aSession(w);
+    // Somebody with no assignment on it at all — the case the deleted parameter appeared to gate.
+    const stranger = await w.signIn(w.people[2]);
+    const held = w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id = a.session_id
+                                WHERE a.person_id = ? AND s.id = ?`).get(w.people[2], id).n;
+    assert.equal(held, 0, "the fixture must use somebody NOT on this shift, or it tests the easy case");
+
+    const body = await (await w.get(`/session/${id}`, stranger)).text();
+    assert.match(body, /<form method="post" action="\/session\/\d+\/note"/, "the form must be rendered");
+    assert.match(body, /name="csrf"/, "with a token, or posting it would be refused");
+    assert.match(body, /id="note-body"/, "and the field a label points at");
+  } finally { w.close(); }
+});
+
 test("a signed-out visitor sees no notes and cannot write one", async () => {
   const w = await world();
   try {

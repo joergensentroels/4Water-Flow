@@ -36,8 +36,27 @@ const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
 };
 
+// HTML comments are stripped on the way out, and the reason is a measurement rather than tidiness.
+//
+// The explanatory comments in the page templates are HTML comments, so they were being SERVED. Measured across six
+// pages: 55% of the bytes. /plan alone was 264 KB of which 195 KB was comment, because the one comment in
+// src/pages/plan.mjs sits inside a per-row map and was therefore emitted once per row — 223 times over a season.
+// On the phone this app exists for, three-quarters of the page was prose for whoever maintains it.
+//
+// The comments stay in the source: a decision without its reason decays, and several of them record measurements
+// that cost real time. They are simply not worth sending.
+//
+// HERE rather than in layout(), for two reasons. This is the one boundary every response passes through, so no page
+// has to remember. And doing it in layout() meant calling raw() on an interpolated value, which test/seams.test.mjs
+// correctly refuses — raw() takes literals so that nobody has to reason case by case about whether a particular
+// interpolation is safe. At this point the payload is already a rendered string and no escaping decision is left.
+//
+// Safe on user content: html`` escapes < to &lt;, so a note somebody types cannot form a comment.
+const stripComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "");
+
 export function send(res, status, body, headers = {}) {
-  const payload = typeof body === "string" ? body : (body?.__raw ?? String(body ?? ""));
+  const rendered = typeof body === "string" ? body : (body?.__raw ?? String(body ?? ""));
+  const payload = stripComments(rendered);
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Length": Buffer.byteLength(payload),

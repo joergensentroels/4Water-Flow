@@ -24,7 +24,7 @@ export function sessionFlash(t, code) {
   return o ? { text: t(o.key, { max: NOTE_MAX }), bad: !!o.bad } : null;
 }
 
-export function renderSession({ t, session, roles, who, me, detail, people, notes, flash, canWrite }) {
+export function renderSession({ t, session, roles, who, me, detail, people, notes, flash }) {
   const when = `${formatDate(t, detail.date)} ${formatTime(detail.hour, detail.minute)}`;
   const body = html`
     <h2>${detail.activityLabel}</h2>
@@ -44,18 +44,25 @@ export function renderSession({ t, session, roles, who, me, detail, people, note
     <p class="hint">${t("notes.hint")}</p>
     ${noteList(t, notes, { me, session, formatWhen: (at) => at.slice(0, 16).replace("T", " ") })}
 
-    <!-- The form is offered only to somebody who can be on this shift — a signed-in volunteer. Not gated on being
-         assigned to it: the person who might TAKE the shift is exactly who needs to ask a question about it, and
-         the shift exchange is one click away. -->
-    ${canWrite ? html`
-      <form method="post" action="/session/${detail.id}/note" class="card">
-        ${csrfField(session)}
-        <label for="note-body">${t("notes.add")}</label>
-        <textarea id="note-body" name="body" rows="3" maxlength="${NOTE_MAX}" required
-                  placeholder="${t("notes.placeholder")}"></textarea>
-        <p class="hint">${t("notes.limit", { max: NOTE_MAX })}</p>
-        <button type="submit">${t("notes.post")}</button>
-      </form>` : ""}
+    <!-- The form is offered to every reader of this page, and that is the policy rather than an oversight: it is
+         NOT gated on being assigned to the shift, because the person who might TAKE it is exactly who needs to ask
+         a question about it, and the shift exchange is one click away. Being signed in is the only requirement, and
+         the route's own gate() is what enforces it.
+         There used to be a canWrite parameter and a ternary here. One caller, passing the literal true, and no test
+         ever passing false — so the ternary had exactly one reachable arm and read as a permission model that did
+         not exist. src/calendar.mjs deleted the identical shape and says why: a hook that looks wired and is not is
+         worse than no hook, because the next person reads it as a supported feature. That note lived in one file;
+         the rule is in CONTRIBUTING.md now. Found by branch coverage — this page was the lowest in the project at
+         just over half, and the unreachable arm was most of the gap.
+         No backticks in this comment: it sits inside a template literal and one would end the string. -->
+    <form method="post" action="/session/${detail.id}/note" class="card">
+      ${csrfField(session)}
+      <label for="note-body">${t("notes.add")}</label>
+      <textarea id="note-body" name="body" rows="3" maxlength="${NOTE_MAX}" required
+                placeholder="${t("notes.placeholder")}"></textarea>
+      <p class="hint">${t("notes.limit", { max: NOTE_MAX })}</p>
+      <button type="submit">${t("notes.post")}</button>
+    </form>
 
     <p><a class="btn secondary" href="/plan">${t("nav.plan")}</a></p>`;
 

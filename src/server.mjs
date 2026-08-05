@@ -386,7 +386,6 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       t, session: c.session, roles: c.roles, who: c.who, me: c.personId, detail,
       people: peopleOnSession(db, detail.id),
       notes: listNotes(db, detail.id),
-      canWrite: true,
       flash: sessionFlash(t, query.get("r")),
     }));
   });

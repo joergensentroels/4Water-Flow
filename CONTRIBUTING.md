@@ -22,7 +22,7 @@ node tools/demo.mjs
 then start it with the developer sign-in enabled (the command is printed for you). Demo names are deliberately
 `Demo One` / `demo1@example.invalid` so a demo database can never be mistaken for production.
 
-## Six rules that are not preferences
+## Seven rules that are not preferences
 
 **1. Zero dependencies.** `node:*` only. There is no `node_modules` and no build step, because the people who
 inherit this are volunteers, and a dependency is something they will one day have to upgrade under pressure.
@@ -48,6 +48,18 @@ plumbing, and the two most embarrassing ones here were invisible to unit tests e
 
 **6. Mobile is the target.** The reported pain was "a nightmare to use on the phone". Phone-first is the
 design, not a media query. Planners too: whoever fixes a Sunday-morning dropout is holding a phone.
+
+**7. A conditional needs two reachable arms, or it is not a conditional.** A parameter, flag or ternary whose
+alternative branch no caller ever takes reads as a supported feature and is a constant wearing a costume. Two have
+been deleted here: a per-shift calendar duration nothing ever set, and a `canWrite` flag on the session page whose
+single caller passed `true` — the second read as a permission model that did not exist, and gave that page the
+lowest branch coverage in the project. **A hook that looks wired and is not is worse than no hook**, because the
+next person builds on it.
+
+The rule was written in a source comment the first time and recurred in another file, which is why it is here now.
+Nothing checks it mechanically — a single-caller helper with a default is perfectly normal — so it is a question for
+review: *what input takes the other branch, and does a test pass it?* `node --test --experimental-test-coverage`
+answers it faster than reading; branch percentage well below the rest of the file is the tell.
 
 ## If you add a route, five audits will have an opinion
 
