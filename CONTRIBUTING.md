@@ -109,6 +109,30 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
 - **Config edits write a file.** `buildApp` takes `patternFile` so tests never rewrite the repository's own
   config — which they silently did until it was caught.
 
+## Escaping — where the surface is, and the one shape to avoid
+
+`h()` escapes `&`, `<`, `>`, `"` and `'`. That is the correct set for element text and for a **quoted** attribute
+value, which is every interpolation in this codebase. Audited rather than assumed, and the result is recorded here
+so nobody has to redo it:
+
+- **All four `raw()` call sites are static literals** — three `aria-current` attributes and the SVG droplet.
+  `test/seams.test.mjs` now enforces that the argument is a literal with nothing interpolated, because
+  `raw(person.name)` renders exactly as well as the safe version until the first volunteer with a bracket in
+  their name.
+- **No `href`, `src`, `action` or `formaction` carries user data.** The five interpolated ones take either a
+  static path from `navFor`'s literal list or a constant passed within the same file, so no value can supply a
+  `javascript:` scheme — which `h()` would not catch, since it does not touch the colon.
+- **Non-HTML responses are safe by Content-Type, not by escaping.** `send()` does not escape a plain string, and
+  `/healthz`, the ICS feed, the JSON exports and the season CSV each pass one — with their own Content-Type and
+  `X-Content-Type-Options: nosniff`, so none can be sniffed as HTML. Every HTML response goes through `` html`` ``.
+
+**The shape to avoid, which has no automated check: an unquoted attribute.** `<div class=${cls}>` lets a value
+add attributes of its own, because `h()` escapes quotes and not spaces — `x onmouseover=…` would become a second
+attribute. There are none today. A scan for it was written and deliberately NOT committed: both of its two hits
+were false positives (a `console.error` string and a cookie header, neither of them HTML), and distinguishing
+markup from ordinary strings needs template-boundary tracking. A check that mostly cries wolf gets rubber-stamped,
+which is the same reasoning that keeps the translation gate narrow. Quote your attributes and this stays moot.
+
 ## Contrast and target size — the standard, and how to check it
 
 Nothing in this repository said what accessibility standard was applied, which meant the next person to change a
