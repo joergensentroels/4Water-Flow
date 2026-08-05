@@ -228,6 +228,18 @@ reports it as a fault naming both keys**. That is the thing to look at if the pl
 sessions; narrowing them does **not** delete the ones already created, for the same reason removing an activity does
 not — deleting sessions would destroy assignments volunteers have agreed to.
 
+## An activity with no weekly slot is never scheduled
+
+Sessions come only from the weekly rhythm. An activity that exists in `config/pattern.json` and that no weekly entry
+names has no dates, no slots and nobody on it — and a volunteer's capability for it can never be used. A test
+requires each such activity to be declared with a reason, so one missing by accident is not indistinguishable from
+one missing on purpose.
+
+Three are in that position deliberately: the Steel House social and the two workshops. They happen on particular
+dates rather than a fixed weekday. **A single date for one of them is not expressible today** — adding a weekly
+entry makes it recur every week of the season, and the only way to thin that out is to close the other dates one at
+a time. If 4water runs one-off sessions regularly, say so; it wants to be a feature rather than a workaround.
+
 ## Closing a single date — the venue is shut, the term breaks, nobody can teach
 
 Administration → **Close a date**. Pick any date inside the season and the sessions on it are removed; the date is

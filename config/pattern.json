@@ -11,19 +11,33 @@
     "prose that went stale the moment a third item was added. Same failure as the throttle comment that counted",
     "endpoints and was wrong for an entire increment, here in the one file an operator is told to hand-edit.",
     "A test now checks that any count in this comment matches the list. Describe the list; do not tally it.",
-    "1. The clock times (19:00 and 15:00) were never stated anywhere. The Wed/Sun rhythm IS from the real",
-    "   export; the times are invented.",
-    "2. ONE timeslot per day is also invented. The real export has four parallel schedules and a Master",
-    "   Schedule, which implies a richer grid - several times on a day is normal and fully supported.",
-    "3. calendar.eventMinutes (90) is invented too - no shift length was ever stated. calendar.timezone is",
-    "   NOT invented; it is what makes the calendar feed put 19:00 at the right instant, and getting it wrong",
-    "   shifts every event by the UTC offset for the whole season.",
-    "4. locale is 'en', and that is a GUESS about who reads this rather than a technical default. strings/da.json",
+    "",
+    "IT ALSO CLAIMED THE CLOCK TIMES WERE INVENTED, AND THEY ARE NOT. The discovery spec's section 1 - the part",
+    "read from the real export - states: Wednesdays 19:00 (Salsa, Bachata), 20:15 (DJ); Sundays 13:00-16:00, all",
+    "Salsa and Bachata. So Wednesday 19:00 was sourced all along and this file called it a guess, while the 20:15",
+    "DJ slot WAS stated and was missing entirely - a weekly DJ shift the app would never have scheduled. The rhythm",
+    "above is corrected. The lesson is the one that keeps recurring here: a provenance claim is a claim, and this one",
+    "went unchecked because nothing reads the spec except a person deciding to.",
+    "",
+    "1. Sunday's single 15:00 slot is a SIMPLIFICATION, not an invention: the export states 13:00-16:00, which is a",
+    "   range, and this app models discrete timeslots. 15:00 sits inside the stated range and one slot stands in for",
+    "   whatever the real granularity is. How many Sunday slots there actually are is 4water's answer; several times",
+    "   on a day is fully supported and editable from the Administration screen.",
+    "2. calendar.eventMinutes (90) is invented - no shift length was ever stated. calendar.timezone is NOT invented;",
+    "   it is what makes the calendar feed put 19:00 at the right instant, and getting it wrong shifts every event by",
+    "   the UTC offset for the whole season.",
+    "3. locale is 'en', and that is a GUESS about who reads this rather than a technical default. strings/da.json",
     "   is complete, so setting it to 'da' switches every volunteer-facing word and the <html lang> with it.",
     "   Note the tension one line apart in this very file: export.csvDelimiter is ';' BECAUSE the people opening",
     "   the spreadsheet are on a Danish Windows, while the interface they read is English. Either can be right -",
     "   an international volunteer base on Danish computers - but it is a decision nobody has made out loud.",
     "The clock times and the timeslots are editable from the Administration screen; the rest is edited here.",
+    "",
+    "ACTIVITIES WITH NO WEEKLY SLOT can never be scheduled: sessions come only from the weekly rhythm, so an",
+    "activity no entry names has no dates, no slots and nobody on it. sh, workshop_other and workshop_yoga are in",
+    "that position deliberately - the export's recurring pattern does not place them - and a test requires each one",
+    "to be declared rather than merely absent. A one-off date for one of them is NOT expressible today: adding a",
+    "weekly entry recurs every week of the season.",
     "",
     "export.csvDelimiter is a SEMICOLON here, and that is not a typo. A spreadsheet splits a double-clicked",
     ".csv on the locale's list separator, which on a Danish Windows is ';' - so a comma-separated file arrives",
@@ -128,12 +142,20 @@
       ]
     },
     {
+      "dayOfWeek": 3,
+      "hour": 20,
+      "minute": 15,
+      "activities": [
+        "dj"
+      ]
+    },
+    {
       "dayOfWeek": 0,
       "hour": 15,
       "minute": 0,
       "activities": [
         "salsa",
-        "workshop_yoga"
+        "bachata"
       ]
     }
   ],
@@ -154,7 +176,10 @@
   "holidays": {
     "_comment": "No sessions are created on a public holiday. country is ISO 3166-1 alpha-2 (DK, FR); an unrecognised one suppresses nothing rather than guessing. extra is for days 4water is closed but the country is not — 24 and 31 December are here as a suggestion and the board can remove them; Grundlovsdag (5 June) is deliberately NOT, because an evening class can run. classesAnyway is the planner's opt-back-in, one date at a time, from the Administration screen.",
     "country": "DK",
-    "extra": ["2026-12-24", "2026-12-31"],
+    "extra": [
+      "2026-12-24",
+      "2026-12-31"
+    ],
     "classesAnyway": []
   }
 }

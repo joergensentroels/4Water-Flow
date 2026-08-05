@@ -217,3 +217,70 @@ test("the admin screen lists the rhythm with translated day names", withAdmin({}
   assert.match(body, /19:00/);
   assert.match(body, /name="activities"/, "and offer the activities as checkboxes");
 }));
+
+// ---- the direction nothing checked: an activity no weekly entry staffs -------------------------------------
+//
+// validatePattern already refuses a weekly entry naming an unknown activity. The reverse was unchecked, and it is
+// the consequential half: sessions come ONLY from the weekly rhythm, so an activity no entry names has no dates,
+// no slots, and nobody on it. A capability for it is a flag on a person that can never be used. That is the same
+// one-directional-gate shape as the environment variables documented in one direction only, and the plural check
+// keyed to the name of its own fix.
+//
+// Found by reading the discovery spec's section 1 — the part read from the real export — and comparing its stated
+// recurring pattern against config/pattern.json. The export states a Wednesday 20:15 DJ slot; the config had none,
+// so `dj` was an activity the app could never schedule anybody for, and nothing said so.
+//
+// DECLARED rather than forbidden: an activity with no fixed weekly slot is legitimate, and 4water has some. What is
+// not legitimate is one being absent by accident, which is indistinguishable from one being absent on purpose.
+const UNSTAFFED_ON_PURPOSE = {
+  sh: "The Steel House social. Real, and the export's recurring pattern does not place it on a fixed weekday — it " +
+      "happens on particular dates. Scheduling one means adding a weekly entry, which recurs, so a single date is " +
+      "not expressible today; that limitation is written in config/pattern.json and in RUNBOOK.md.",
+  workshop_other: "A workshop of no fixed subject, on no fixed weekday. Same position as sh: the capability exists " +
+      "so the roster can match on it the moment somebody adds a weekly entry for it.",
+  workshop_yoga: "Likewise absent from the export's recurring pattern. It WAS on the shipped weekend slot, which " +
+      "the export gives to the two dances it names — an invention contradicting a stated fact, corrected with " +
+      "the rhythm. The names are keys here rather than labels because test/seams.test.mjs forbids the labels in " +
+      "a string literal, and it caught the first draft of this entry.",
+};
+
+test("every configured activity is staffed by some weekly entry, or declared unstaffed with a reason", () => {
+  const pattern = JSON.parse(readFileSync(new URL("../config/pattern.json", import.meta.url), "utf8"));
+  const keys = pattern.activities.map((a) => a.key);
+  const staffed = new Set(pattern.weekly.flatMap((w) => w.activities));
+  assert.ok(keys.length >= 4, `only ${keys.length} activities read from the config — this check is not reading it`);
+  assert.ok(staffed.size >= 2, `only ${staffed.size} activities are staffed at all — the collector is not working`);
+
+  const orphans = keys.filter((k) => !staffed.has(k) && !(k in UNSTAFFED_ON_PURPOSE));
+  assert.deepEqual(orphans, [],
+    "these activities exist in the configuration and no weekly entry names them, so no session for them can ever " +
+    "be created and a capability for them can never be used. Add a weekly entry, or record the reason in " +
+    "UNSTAFFED_ON_PURPOSE:\n  " + orphans.join("\n  "));
+
+  // The other direction, so an exemption cannot outlive its activity or quietly cover a staffed one.
+  const stale = Object.keys(UNSTAFFED_ON_PURPOSE).filter((k) => !keys.includes(k));
+  assert.deepEqual(stale, [], `declared unstaffed but no longer an activity — remove: ${stale}`);
+  const contradicted = Object.keys(UNSTAFFED_ON_PURPOSE).filter((k) => staffed.has(k));
+  assert.deepEqual(contradicted, [],
+    `declared unstaffed on purpose AND named by a weekly entry — one of the two is wrong: ${contradicted}`);
+  for (const [k, why] of Object.entries(UNSTAFFED_ON_PURPOSE)) {
+    assert.ok(why.length >= 60, `${k}: say why it has no weekly slot, not merely that it does not`);
+  }
+});
+
+test("and the shipped rhythm staffs the activities the export's own pattern names", () => {
+  // Not the whole spec — that document lives outside the repository and cannot be read from here. This pins the
+  // one thing that was wrong: the export states a Wednesday DJ slot, so `dj` must be scheduled somewhere.
+  const pattern = JSON.parse(readFileSync(new URL("../config/pattern.json", import.meta.url), "utf8"));
+  const staffed = new Set(pattern.weekly.flatMap((w) => w.activities));
+  for (const key of ["salsa", "bachata", "dj"]) {
+    assert.ok(staffed.has(key),
+      `${key} is in the export's stated recurring pattern and no weekly entry staffs it — a shift the app would ` +
+      `silently never schedule. config/pattern.json carries the provenance.`);
+  }
+  // And the DJ slot is its own timeslot, not bolted onto the class hour: the export says 20:15, after 19:00.
+  const dj = pattern.weekly.find((w) => w.activities.includes("dj"));
+  const classes = pattern.weekly.find((w) => w.activities.includes("salsa") && w.dayOfWeek === dj.dayOfWeek);
+  assert.ok(dj.hour * 60 + dj.minute > classes.hour * 60 + classes.minute,
+    "the later slot follows the class it comes after, which is what makes it a separate shift somebody else can take");
+});

@@ -33,6 +33,7 @@ export async function waitFor(fn, { timeoutMs = 2000, everyMs = 10 } = {}) {
 }
 
 export async function makeWorld({ volunteers = 2, openSessions = true, roles = {}, today, notifier = null,
+                                 capableOfEverything = false,
                                   patternFile = null, onPatternChange = null } = {}) {
   const pattern = loadPattern();
   const db = new DatabaseSync(":memory:");
@@ -61,7 +62,14 @@ export async function makeWorld({ volunteers = 2, openSessions = true, roles = {
   const people = seedPeople(db, seasonId, Array.from({ length: volunteers }, (_, i) => ({
     name: `Volunteer ${i + 1}`,
     contact: `v${i + 1}@example.org`,
-    can: [pattern.activities[0].key],
+    // One activity by default, which is what most tests want: it makes "not capable" reachable without setup.
+    // `capableOfEverything` is for the tests whose SUBJECT is filling the plan — with one capability each, every
+    // slot for every other activity is unfillable by construction, so "fill everything that can be filled" leaves
+    // a proportion that depends on how many activities the shipped config happens to schedule. That coupling made
+    // test/profile.test.mjs's gap-severity assertion sit one slot from its threshold, and correcting the weekly
+    // rhythm to match the export's stated pattern tipped it. A fixture should not be sensitive to a department's
+    // real timetable.
+    can: capableOfEverything ? pattern.activities.map((a) => a.key) : [pattern.activities[0].key],
   })));
 
   // roles: { 0: ["planner"], 1: [] } — index into `people`.

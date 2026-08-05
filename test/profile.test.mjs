@@ -172,14 +172,17 @@ test("a current and a future season are distinguished", withWorld({}, async (w) 
   assert.equal(factFor(early, "season").level, "warn", "not yet started is a warning, not a fault");
 }));
 
-test("gap severity is proportional, not a raw count", withWorld({}, async (w) => {
+test("gap severity is proportional, not a raw count", withWorld({ capableOfEverything: true }, async (w) => {
   const all = collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null });
   assert.equal(factFor(all, "gaps").level, "bad", "everything unfilled is a problem");
 
-  // Fill everything that CAN be filled. Note what is unreachable here: each timeslot carries two activities
-  // and these volunteers are capable of one, so a single person can never take both — the double-booking rule
-  // makes "no gaps at all" impossible in this world. The first version of this test asserted "ok" and failed
-  // for exactly that reason, which is the rule working rather than the status page being wrong.
+  // Fill everything that CAN be filled. These volunteers are capable of EVERY activity — without that, each
+  // slot for an activity nobody can do is unfillable by construction, and the unfilled proportion then depends on
+  // how many activities the department's real timetable schedules. This assertion sat one slot from its threshold
+  // for that reason, and correcting config/pattern.json to match the export's stated rhythm tipped it over.
+  //
+  // "No gaps at all" is still unreachable: each timeslot carries two activities and the double-booking rule stops
+  // one person taking both, so a handful always remain. That is the rule working, not the status page being wrong.
   for (const p of w.people) makeAvailableEverywhere(w.db, p, w.pattern.season.from);
   for (const row of w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
                                   WHERE a.person_id IS NULL ORDER BY s.date`).all()) {
