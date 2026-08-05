@@ -122,9 +122,20 @@ export function rosterReview(db, seasonId) {
      ORDER BY p.name`).all({ sid: seasonId });
 
   // How many distinct weekdays each person could have been given, from their own availability. Needed to avoid
-  // blaming the roster for concentration the volunteer chose: someone who only ever offered Sundays was not
-  // put on Sundays by an algorithm. Day-level availability only — an hour-level override could in principle
-  // narrow this further, so treat it as a floor on choice rather than an exact count.
+  // blaming the roster for concentration the volunteer chose: someone who only ever offered Sundays was not put
+  // on Sundays by an algorithm.
+  //
+  // Day-level availability only, and this is a CEILING on their real choice, not a floor — the previous comment
+  // said floor and had it exactly backwards. An hour-level row can override a day-level "yes" to "no", which
+  // narrows the real choice below this count; nothing can widen it above. That matters because the number is used
+  // as `choice > 1` to decide whether to flag concentration, so over-counting flags MORE people, including
+  // somebody whose hour-level answers left them one weekday. The error therefore runs against this guard's whole
+  // purpose, which is why the direction is worth naming rather than hand-waving as "approximate".
+  //
+  // Left as a ceiling on purpose. Resolving hour-over-day here would be a THIRD copy of a rule this project
+  // insists is defined once — `GATE.available` in queries.mjs is the one — and a report that over-flags is a
+  // smaller problem than an eligibility rule with three implementations. If it ever needs to be exact, compose
+  // the gate rather than rewriting the resolution.
   const choice = new Map();
   for (const r of db.prepare(`
     SELECT av.person_id AS pid, COUNT(DISTINCT CAST(strftime('%w', s.date) AS INTEGER)) AS d
@@ -178,5 +189,14 @@ export function workloadSpread(db, seasonId) {
      WHERE p.status = 'active'
      GROUP BY p.id`).all({ sid: seasonId });
   const counts = rows.map((r) => r.n);
+  // Guarded for the same reason rosterReview guards its own totals, which it does and this did not. On an empty
+  // list `Math.min()` is Infinity and `Math.max()` is -Infinity, so `spread` came out -Infinity — and the natural
+  // way to assert fairness is `spread <= N`, which -Infinity satisfies. A test written that way would pass on a
+  // world containing nobody at all: a check that is not looking, reported as a pass.
+  //
+  // Not a live defect, and saying so matters: the two assertions that use this today are `>= 6` and `< before`,
+  // both of which FAIL on -Infinity rather than passing. This closes the footgun before somebody writes the
+  // assertion that would have been fooled by it.
+  if (!counts.length) return { counts, min: 0, max: 0, spread: 0 };
   return { counts, min: Math.min(...counts), max: Math.max(...counts), spread: Math.max(...counts) - Math.min(...counts) };
 }

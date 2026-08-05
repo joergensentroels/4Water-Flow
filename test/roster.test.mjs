@@ -92,16 +92,39 @@ test("balancing measurably evens out the workload", withPlanner({}, async (w) =>
     assert.equal(r.ok, true, `setup assignment refused: ${r.reason}`);
   }
   const before = workloadSpread(w.db, w.seasonId);
+  // Precondition on the HEADCOUNT, not just the spread. Both assertions below are about a number derived from
+  // `counts`, and a fairness comparison over an empty list is satisfied by an empty world — 0 <= anything. These
+  // two happen to fail on that (`>= 6` and `< before`), but the next one written here might not, and a test that
+  // passes because it is looking at nobody is the failure mode this project keeps finding.
+  assert.ok(before.counts.length >= 3, `the fairness numbers must be over real people, got ${before.counts.length}`);
   assert.ok(before.spread >= 6, `expected a lopsided start, got spread ${before.spread}`);
 
   autoRoster(w.db, { seasonId: w.seasonId, fromDate: w.today });
   const after = workloadSpread(w.db, w.seasonId);
+  assert.equal(after.counts.length, before.counts.length, "the same people, before and after");
   assert.ok(after.spread < before.spread, `spread should shrink: ${before.spread} -> ${after.spread}`);
 
   // And the person who was already loaded should not have been given the next slots.
   const gotMore = proposals(w).filter((p) => p.person_id === w.people[1]).length;
   const gotOthers = proposals(w).filter((p) => p.person_id !== w.people[1]).length;
   assert.ok(gotOthers > gotMore, "the busiest volunteer should be picked last, not first");
+}));
+
+// The empty case, pinned because it used to produce arithmetic no assertion should be handed. With no active
+// people `Math.min()` is Infinity and `Math.max()` is -Infinity, so spread came out -Infinity — and `spread <= 2`,
+// which is the obvious way to assert fairness, is TRUE of -Infinity. `rosterReview` guarded its own totals and
+// this did not; now both report zeroes, which is at least an honest description of an empty world.
+test("the fairness numbers do not return arithmetic nonsense when there is nobody", withPlanner({ volunteers: 0, roles: {} }, async (w) => {
+  const s = workloadSpread(w.db, w.seasonId);
+  assert.deepEqual(s.counts, [], "precondition: this world really has no active people");
+  assert.deepEqual({ min: s.min, max: s.max, spread: s.spread }, { min: 0, max: 0, spread: 0 });
+  assert.ok(Number.isFinite(s.spread), "an infinite spread is not a fairness measurement");
+
+  // And the summary a human reads agrees, rather than the two disagreeing about the same empty season.
+  const r = rosterReview(w.db, w.seasonId);
+  assert.deepEqual({ min: r.min, max: r.max, spread: r.spread }, { min: 0, max: 0, spread: 0 });
+  assert.deepEqual(r.people, []);
+  assert.deepEqual(r.concentrated, []);
 }));
 
 // ---- the distribution a planner actually sees ---------------------------------------------------------
