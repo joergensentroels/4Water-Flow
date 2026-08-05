@@ -126,10 +126,21 @@ test("the running server refuses everyone the declared rule excludes, and admits
     };
 
     const rules = declaredRules();
+    // COUNTED, and asserted below. This loop skips public routes, and a skip is how an audit shrinks without
+    // anybody noticing: the two tests above compare the parse against the route table, so they would catch a route
+    // vanishing or drifting to public — but neither of them can see how many routes THIS test actually probed. A
+    // second `continue` added later for some good local reason would quietly narrow the only check that talks to
+    // the running server about authorization, and every sibling would stay green.
+    //
+    // Measured before adding it: with every route treated as public this test passed while probing nothing. That
+    // exact mutation is not reachable (the first test catches a parse that stops seeing gates), but the shape is,
+    // and this is the half of the pair that has no floor of its own.
+    let probed = 0;
     for (const r of w.routes()) {
       const key = `${r.method} ${r.pattern}`;
       const rule = rules.get(key);
       if (rule === "public") continue;   // covered by the two tests above; hitting these adds only rate-limiter noise
+      probed++;
 
       const anon = await hit(r, "anon");
       assert.ok(anon.signin, `${key} gates on "${rule}" but an anonymous request got ${anon.status} instead of a bounce to /signin`);
@@ -146,5 +157,11 @@ test("the running server refuses everyone the declared rule excludes, and admits
       assert.notEqual(ok.status, 403, `${key} refuses a ${allowed}, which "${rule}" is supposed to admit — ` +
         `so the 403s above are the route refusing everyone, not the role check working`);
     }
+    // The floor. Most of this app's routes are gated, so a probe count in single figures means the loop skipped
+    // almost everything — whatever the reason, that is not an authorization audit any more.
+    assert.ok(probed >= 25,
+      `only ${probed} gated route(s) were actually probed against the running server. This test looks like broad ` +
+      `coverage and is the only one that asks the server itself who it admits, so a loop that skips its way to a ` +
+      `handful of routes is worse than a missing test — it reads as thorough.`);
   } finally { w.close(); }
 });
