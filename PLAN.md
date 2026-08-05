@@ -4,6 +4,8 @@ Planned as ten increments; it ran to thirty-four (A–Z, then AA–AH), and the 
 after AH is one defect per commit, so read `git log` for it rather than counting rows in the table below and
 concluding the project ended at AH. **Each one ends with `npm test` green and is independently
 shippable**; the app is usable by volunteers from D onward even while planners are still on the spreadsheet.
+Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
+and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
 **Not only defects any more.** 4water answered the questions from the spec read-back, and the answers were feature
 work: attendance counting (which forced Score into two numbers — see item 5 below), an audit trail with a screen to
@@ -12,8 +14,6 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 is NOT built: a chat facility**, which needs a decision between a planner broadcast and per-slot notes — Mattermost
 already runs with the same sign-in, so a third general chat is the option worth arguing against. Shift swaps are
 noted but not designed.
-Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
-and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
 Status: **✅ A–AH complete plus the commits since, 441 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
