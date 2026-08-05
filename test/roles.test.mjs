@@ -79,6 +79,53 @@ test("topping up is per role — a half-staffed session gets its missing role, n
   db.close();
 });
 
+// The other direction: an activity the config no longer defines. RUNBOOK says removing one "stops new sessions
+// being created for it and LEAVES EXISTING ONES ALONE, because deleting sessions would destroy assignments
+// volunteers have already agreed to". That was true of the sessions and false of their slots.
+//
+// `byKey.get()` returned undefined for the missing activity, and roleSlotsFor's "absent needs means one person,
+// role irrelevant" default then invented a role-less slot for every session of it. Measured before the fix:
+// removing a single activity produced 51 phantom open slots across a season, including a third row on classes
+// whose leader and follower were both already filled and confirmed. The shift exchange offers a slot on a
+// fully-staffed class, a volunteer can take it, and the planner sees a gap that is not one.
+test("an activity the config no longer defines gains no phantom slots, even a fully staffed one", () => {
+  // Two people, so a session can actually be filled — `world()` seeds nobody by default.
+  const { db, pattern, seasonId, ids } = world({ people: [
+    { name: "Lead", preferredRole: "l", can: ["salsa"] },
+    { name: "Follow", preferredRole: "f", can: ["salsa"] },
+  ] });
+  const twoRole = pattern.activities.find((a) => a.needs && (a.needs.l || a.needs.f));
+  assert.ok(twoRole, "precondition: the fixture needs a two-role activity for this to mean anything");
+
+  const rowsOf = () => db.prepare(`
+    SELECT a.id, a.role, a.person_id FROM assignments a
+      JOIN sessions s ON s.id = a.session_id JOIN activities act ON act.id = s.activity_id
+     WHERE act.key = ? ORDER BY a.id`).all(twoRole.key);
+
+  // Fill one session completely, so "left alone" is distinguishable from "topped up".
+  const first = rowsOf().slice(0, 2);
+  assert.equal(first.length, 2, "a class opens two slots to begin with");
+  db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(ids[0], first[0].id);
+  db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(ids[1], first[1].id);
+  const before = rowsOf();
+
+  // The only way to remove an activity: edit the config. The admin screen can add one but not take one away.
+  const without = { ...pattern, activities: pattern.activities.filter((a) => a.key !== twoRole.key) };
+  const created = openEverySession(db, seasonId, without);
+
+  assert.equal(created, 0, "an unknown activity must produce no slots at all, not one per session");
+  assert.deepEqual(rowsOf(), before, "and the existing rows must be byte-for-byte what they were");
+  // Specifically: no role-less row alongside the leader and follower.
+  assert.equal(rowsOf().filter((r) => r.role === null).length, 0,
+    "a role-less slot on a partner-dance class is a claimable gap that should not exist");
+
+  // A second call must not accumulate either — the first version added exactly one per session and then stopped,
+  // which is the kind of "idempotent" that has already done the damage.
+  assert.equal(openEverySession(db, seasonId, without), 0);
+  assert.deepEqual(rowsOf(), before);
+  db.close();
+});
+
 // ---- eligibility --------------------------------------------------------------------------------------
 test("a leader slot offers leaders and both-role people, never followers", () => {
   const { db, ids } = world({ people: [

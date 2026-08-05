@@ -136,12 +136,34 @@ export function openEverySession(db, seasonId, pattern = null) {
 
   const insert = db.prepare("INSERT INTO assignments (session_id, person_id, role, state) VALUES (?, NULL, ?, 'confirmed')");
   let created = 0;
+  // Skipping is right, but skipping SILENTLY is not: sessions for an activity nobody defines any more are a
+  // config edit somebody should know landed. Named at the end rather than per session, because a season has
+  // dozens of each.
+  const unknown = new Set();
   db.exec("BEGIN");
   try {
     for (const s of sessions) {
+      // An activity the pattern no longer defines: leave its sessions EXACTLY as they are.
+      //
+      // Without this, `byKey.get` returns undefined and roleSlotsFor's "absent needs means one person, role
+      // irrelevant" default invents a role-less slot for every such session. Measured: removing one activity from
+      // config and rebooting created 51 phantom open slots across a season — including a third row on classes
+      // whose leader and follower were both already filled and confirmed. The shift exchange then offers a slot on
+      // a fully-staffed class, a volunteer can claim it, and the planner sees a gap that is not one.
+      //
+      // RUNBOOK says removal "stops new sessions being created for it and leaves existing ones alone, because
+      // deleting sessions would destroy assignments volunteers have already agreed to". That was true of the
+      // sessions and false of their slots. Reachable by editing config/pattern.json and restarting, which is the
+      // only way to remove an activity — the admin screen can add one but not take one away.
+      //
+      // roleSlotsFor's own default is fine and stays: it is about `needs` being absent from a known activity. The
+      // mistake was asking it about an activity that does not exist.
+      const activity = byKey.get(s.key);
+      if (!activity) { unknown.add(s.key); continue; }
+
       // Count how many of each role this session should have, then top up to that number.
       const wanted = new Map();
-      for (const role of roleSlotsFor(byKey.get(s.key))) wanted.set(role, (wanted.get(role) ?? 0) + 1);
+      for (const role of roleSlotsFor(activity)) wanted.set(role, (wanted.get(role) ?? 0) + 1);
       for (const [role, want] of wanted) {
         const already = have.get(`${s.id}:${role ?? ""}`) ?? 0;
         for (let i = already; i < want; i++) { insert.run(s.id, role); created++; }
@@ -149,5 +171,9 @@ export function openEverySession(db, seasonId, pattern = null) {
     }
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
+  if (unknown.size) {
+    console.warn(`[seed] ${unknown.size} activity key(s) in this season are not in the config and were left ` +
+                 `untouched: ${[...unknown].sort().join(", ")}`);
+  }
   return created;
 }
