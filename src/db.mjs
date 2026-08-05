@@ -166,12 +166,28 @@ export function migrate(db) {
     );
 
     -- FOUR OF THESE COLUMNS ARE WRITTEN AND READ BY NOTHING: parent, subtype, booth_label, consolidation.
-    -- They carry values from 4water's real workbook export (consolidation codes S/B/D/W/H, and the activity
-    -- hierarchy) and the seeder stores them faithfully, but no query selects them and no screen shows them.
+    -- The seeder stores whatever config/pattern.json says; no query selects them and no screen shows them.
+    --
+    -- THEY ARE MODELLED ON 4water's EXPORT, NOT COPIED FROM IT. This paragraph used to say the seeder "stores them
+    -- faithfully" and that the codes came from the real workbook — wrong in four ways at once, in the file a
+    -- handover reader opens to find out what a field means. Reading the discovery spec's export table back against
+    -- the shipped config found all four:
+    --   * booth labels are ABBREVIATED. The export has "Boo Sa" / "Boo Ba" / "Boo Wo" / "Boo Yo"; config has
+    --     SA / BA / WO / WY. A deliberate tidy-up, but not the export's values.
+    --   * ONE activity is N/A for BOTH fields in the export and carried a booth label and a consolidation letter
+    --     here. That activity does not staff the booth, so the config asserted something false about the domain.
+    --     Now null / null. (Which one is in config/pattern.json; test/seams.test.mjs forbids naming it here.)
+    --   * The two workshop subtypes have DIFFERENT consolidation letters in the export. Config had the same one
+    --     for both, silently merging two codes the spreadsheet keeps apart — a consolidation view built on that
+    --     data could not have told the two subtypes apart. Now distinct, as the export has them.
+    --   * the sh activity is not in the export's activity table at all; SH appears there in the CAPABILITY matrix. Making it
+    --     an activity was this build's decision, so its SH / H codes are invented rather than sourced.
+    -- Nothing reads any of it, so none of that had a symptom — it would have acquired one the moment somebody built
+    -- the consolidation view these columns exist for and took the codes as authoritative.
     --
     -- Kept rather than dropped, on purpose. They are cheap, and re-deriving that mapping means going back to the
     -- source spreadsheets — a one-way loss against a few nullable TEXT columns. A consolidation view is a
-    -- plausible next feature and this is the data it would need.
+    -- plausible next feature and this is the data it would need, with the caveats above.
     --
     -- Said out loud because a handover artefact must not leave the reader guessing which fields do something.
     -- If you are about to rely on one of these, grep for it under src/ first: as of this line, nothing reads it.

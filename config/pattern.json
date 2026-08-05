@@ -77,8 +77,8 @@
       "parent": "music",
       "subtype": "dj",
       "label": "DJ",
-      "boothLabel": "DJ",
-      "consolidation": "D",
+      "boothLabel": null,
+      "consolidation": null,
       "needs": {
         "any": 1
       }
@@ -89,7 +89,7 @@
       "subtype": "yoga",
       "label": "Workshop: Yoga",
       "boothLabel": "WY",
-      "consolidation": "W",
+      "consolidation": "Y",
       "needs": {
         "any": 1
       }
