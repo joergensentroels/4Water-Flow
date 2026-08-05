@@ -3,6 +3,9 @@
 // actually registers, so a POST added later cannot quietly arrive without the guard.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { ROOT } from "../src/config.mjs";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
 
 // The one deliberate exception, named here so it is a decision rather than an oversight. /auth/dev runs
@@ -43,6 +46,55 @@ test("every registered POST route refuses a missing and a wrong CSRF token", asy
     }
     assert.ok(audited.length >= 12, `only audited ${audited.length} routes: ${audited.join(", ")}`);
   } finally { w.close(); }
+});
+
+// ---- the other audit: which routes are throttled ------------------------------------------------------
+//
+// `ratelimit.mjs` opened with "Throttling for the TWO endpoints anyone can reach without a session", and
+// buildApp said the same. There are three. The calendar feed was added later, wired to the same limiter, and
+// nobody updated either sentence — so the document describing a security control's scope understated it, and that
+// is a large part of why the calendar path's throttle had no test until somebody went looking route by route.
+//
+// A count in prose is the problem. This enumerates instead, from the source, and requires the set to match: add a
+// fourth unauthenticated endpoint without recording it here and this fails; take the throttle off one of these
+// three and it fails too. Same shape as the CSRF exception list above and as PLANNER_WRITE_HONOURS — the decision
+// has to be written down somewhere a test can read.
+const THROTTLED = {
+  "/auth/callback": "OIDC state comes back in a URL an attacker can supply; a wrong one is a failed sign-in.",
+  "/invite/:token": "The invite token IS the credential, and the route is reachable by anyone with the link.",
+  "/calendar/:token.ics": "The feed URL is the credential — a calendar client cannot present a cookie — and it " +
+                          "is the one of the three that is polled repeatedly by real software.",
+};
+
+test("exactly the unauthenticated secret-in-the-URL routes are throttled, and each is written down", () => {
+  const src = readFileSync(path.join(ROOT, "src", "server.mjs"), "utf8");
+
+  // Split on route registrations and keep the ones whose body touches the limiter. Reading the source rather than
+  // the route table because `blocked`/`fail` are calls inside a handler, which no introspection exposes.
+  const found = new Set();
+  const parts = src.split(/app\.(?:get|post)\("/);
+  for (const part of parts.slice(1)) {
+    const pattern = part.slice(0, part.indexOf('"'));
+    // Up to the next registration, which is where this handler ends.
+    if (/limiter\.(?:blocked|fail)\(/.test(part)) found.add(pattern);
+  }
+  assert.ok(parts.length > 20, "the route split found almost nothing — this check is not looking at anything");
+
+  assert.deepEqual([...found].sort(), Object.keys(THROTTLED).sort(),
+    "the set of throttled routes has changed. Either a new endpoint reachable without a session needs an entry " +
+    "here, or one of these has lost its guard — and the second is the one that matters.");
+
+  for (const [route, why] of Object.entries(THROTTLED)) {
+    assert.ok(why.length >= 40, `${route}: record WHY it needs throttling, not just that it does`);
+  }
+
+  // And neither document may put a number on it again, since that is what went stale.
+  for (const f of ["src/ratelimit.mjs", "src/server.mjs"]) {
+    const text = readFileSync(path.join(ROOT, f), "utf8");
+    assert.ok(!/\b(two|three|2|3)\s+endpoints\b/i.test(text),
+      `${f} counts the throttled endpoints in prose. Name them or say "the endpoints reachable without a ` +
+      `session" — a count is what was wrong for an entire increment.`);
+  }
 });
 
 test("the exception list is exactly one route, and it is the one that cannot have a token", async () => {

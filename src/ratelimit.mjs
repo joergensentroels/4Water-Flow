@@ -1,5 +1,11 @@
-// Throttling for the two endpoints anyone can reach without a session: invite redemption and the OIDC
-// callback. Both take a secret from the URL, so both are guessable in principle.
+// Throttling for the endpoints anyone can reach without a session, each of which takes a secret from the URL and
+// is therefore guessable in principle: invite redemption, the OIDC callback, and the calendar feed.
+//
+// No count in that sentence, deliberately. It used to give one, and name only the first pair; the calendar feed
+// was wired to this same limiter later and neither this comment nor buildApp's was updated. A document that
+// understates a security control's scope is how the calendar path ended up with no test for its throttle at all —
+// nobody looking here would have known there was one to test. `test/csrf-audit.test.mjs` now enumerates the routes
+// from the source and fails if the set changes, so the list lives somewhere that cannot quietly rot.
 //
 // This is an ALARM more than a lock. An invite token is 24 random bytes — nobody is guessing it — so the
 // value here is that a burst of failures becomes visible instead of silent. That framing matters, because a

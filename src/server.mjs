@@ -67,7 +67,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   const reloadPattern = (next) => { cfg = next; t = makeT(cfg.locale); onPatternChange?.(next); };
   const seasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(cfg.season.key)?.id ?? null;
 
-  // Throttle for the two endpoints reachable without a session. An alarm, not a lock — see ratelimit.mjs.
+  // Throttle for the routes reachable without a session — the OIDC callback, invite redemption and the calendar
+  // feed. An alarm, not a lock; see ratelimit.mjs. The list is enumerated and enforced in test/csrf-audit.test.mjs
+  // rather than counted here, because this sentence said "two" for an entire increment after the third arrived.
   const limiter = makeLimiter();
   setInterval(() => limiter.sweep(), 60_000).unref?.();
 

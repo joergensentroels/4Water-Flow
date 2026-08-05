@@ -63,6 +63,14 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
   nobody was even capable. None could fail a test, because a false explanation renders exactly as well as a
   true one. So any new one has to be listed with a note saying what makes it true. If you cannot write the
   note, reword the string to describe the state rather than its cause.
+- **If you add a check that forbids a phrase or a character, do not write that thing into the comment explaining
+  the check.** This has caught four separate commits now, so it is a rule rather than a joke. The comment saying
+  "write `﻿` as an escape, never the literal character" contained three literal byte-order marks. The comment
+  explaining that a test count had gone stale quoted the stale count — twice, in two files. The comment explaining
+  that the throttled-endpoint list must not be given as a number gave it as a number. In each case the new gate
+  failed on its own documentation, which at least means the gate worked. Describe the forbidden thing, assemble
+  test fixtures from parts at runtime (`seams.test.mjs` and `docs.test.mjs` both do), and expect the first run to
+  catch you.
 - **`test/journey.test.mjs` is the acceptance gate, and it deliberately does not use `tools/testkit.mjs`.**
   Everything else builds its world with that harness, and twice the harness supplied something production did
   not — open slots, and a notifier — so a green suite reported success over a deployment that could not work.
