@@ -29,6 +29,47 @@ test("the form offers exactly the season's session dates and needs no JavaScript
   assert.match(body, /<form method="post" action="\/availability"/);
 }));
 
+// The answer is hour-granular — `availability_hour` is keyed (person_id, date, hour) and the form names each radio
+// group `slot:${date}:${hour}`. The row query grouped one level finer, by minute, so two timeslots in the same hour
+// produced TWO rows sharing one radio name and one set of ids. Adding a 19:30 beside 19:00 is a supported admin
+// edit, and it made the page render controls it could not answer: the rows were one radio group, so answering the
+// second blanked the first; the colliding `id`s meant `<label for>` resolved to the first row, so clicking the
+// second row's glyph toggled the first row's radio; and `checked` was computed per row from the same stored answer,
+// marking two radios checked in one group.
+test("two timeslots in one hour are one answerable row, not two that fight each other",
+  withWorld({ volunteers: 2, roles: { 0: ["admin"] } }, async (w) => {
+    const admin = await w.signIn(w.people[0]);
+    const { token } = await w.csrfFrom("/admin", admin);
+    const first = w.pattern.weekly[0];
+    const r = await w.post("/admin/weekly/add", admin, new URLSearchParams({
+      csrf: token, dayOfWeek: String(first.dayOfWeek),
+      time: `${String(first.hour).padStart(2, "0")}:30`, activities: w.pattern.activities[0].key,
+    }));
+    assert.equal(new URL(r.headers.get("location"), "http://x").searchParams.get("r"), "weekly_added",
+      "precondition: the second slot in the same hour must actually be added");
+
+    const vol = await w.signIn(w.people[1]);
+    const body = await (await w.get("/availability", vol)).text();
+
+    // One radio NAME per date+hour, and — the part that was broken — one set of ids, so every label points at its
+    // own control.
+    const ids = [...body.matchAll(/<input type="radio" id="([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(ids.length, new Set(ids).size, "duplicate ids make a label toggle somebody else's radio");
+
+    // And exactly one row for the hour that now holds two timeslots.
+    const rows = w.db.prepare(`SELECT s.date, t.hour, COUNT(*) n FROM sessions s
+                                JOIN timeslots t ON t.id = s.timeslot_id
+                               WHERE s.season_id = ? GROUP BY s.date, t.hour HAVING n > 1 LIMIT 1`).get(w.seasonId);
+    assert.ok(rows, "precondition: some hour must now hold more than one session");
+    const names = [...body.matchAll(/name="(slot:[^"]+)"/g)].map((m) => m[1]);
+    const forHour = names.filter((n) => n === `slot:${rows.date}:${rows.hour}`);
+    assert.equal(forHour.length, 3, "exactly one radio group of three for that hour, not two groups sharing a name");
+
+    // No radio may be pre-checked twice within a group, which is what the per-row `checked` produced.
+    const checked = [...body.matchAll(/name="(slot:[^"]+)"[^>]*\schecked/g)].map((m) => m[1]);
+    assert.equal(checked.length, new Set(checked).size, "two checked radios in one group is not a state a browser can hold");
+  }));
+
 test("answers round-trip, and the three states stay distinguishable", withWorld({}, async ({ db, people, signIn, csrfFrom, post, get }) => {
   const cookie = await signIn(people[0]);
   const { token, body: page } = await csrfFrom("/availability", cookie);

@@ -6,12 +6,34 @@ import { layout, formatDate, formatTime, csrfField, navFor } from "../views.mjs"
 
 // Only ask about dates that actually have sessions. Asking a volunteer to rate 180 days when 52 of them
 // matter is how a form becomes a chore nobody finishes.
+// One row per (date, HOUR) — not per (date, hour, minute), which is what this grouped by and what made the page
+// render controls it could not answer.
+//
+// `availability_hour` is keyed (person_id, date, hour): the answer a volunteer gives is hour-granular by design,
+// and the form names each radio group `slot:${date}:${hour}`. Grouping the rows any finer than the answer produces
+// two rows that are secretly one control. Measured after adding a 19:30 slot beside 19:00 through the admin screen,
+// which is a supported edit:
+//
+//   data rows for that date: 2, distinct radio names: 1   (six radios, all named slot:2026-01-07:19)
+//
+// Three things follow, all volunteer-facing. The two rows are ONE radio group, so answering the second clears the
+// first and the row goes blank. The `id`s collide too, so `<label for>` resolves to the first row and clicking the
+// second row's glyph toggles the first row's radio — a control that does the wrong thing. And `checked` is computed
+// per row from the same stored answer, so the initial render marks two radios checked in one group.
+//
+// Grouping by hour is the fix rather than making availability minute-granular: "are you free at 19:00" reasonably
+// covers a class that starts at 19:30, the schema says so already, and a migration to change that would be a
+// larger claim about what the app asks people. `minute` becomes the EARLIEST in the hour, so the displayed time is
+// a real session time rather than an invented one, and `sessions` counts everything the answer covers.
+//
+// `saveAvailability`'s allow-list is keyed `${date}:${hour}`, so it is unchanged by this; `bulkScopes` uses the
+// date only.
 export function datesNeedingAnswer(db, seasonId) {
   return db.prepare(`
-    SELECT s.date, t.hour, t.minute, COUNT(*) AS sessions
+    SELECT s.date, t.hour, MIN(t.minute) AS minute, COUNT(*) AS sessions
       FROM sessions s JOIN timeslots t ON t.id = s.timeslot_id
      WHERE s.season_id = :sid
-     GROUP BY s.date, t.hour, t.minute
+     GROUP BY s.date, t.hour
      ORDER BY s.date, t.hour
   `).all({ sid: seasonId });
 }
