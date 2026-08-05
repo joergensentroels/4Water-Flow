@@ -74,6 +74,68 @@ test("a failing webhook returns not-ok, records the failure, and NEVER throws", 
   assert.ok(!logged[0].includes("/hooks/"), `the warning leaked the webhook path: ${logged[0]}`);
 });
 
+// The sibling sink this file used to check only half of. The test above asserts the LOG carries no credential;
+// nothing asserted the same of `notifications.error`, which is the more exposed of the two — it is rendered on
+// the outbox screen, so a credential landing there is shown to whoever opens it.
+//
+// Nothing observed leaks it: the timeout text names "the webhook", a non-2xx names only the status, undici's
+// rejection is "fetch failed". So this drives the case that WOULD leak — a transport whose error message quotes
+// the URL it was given, which is a perfectly ordinary thing for a transport to do — and requires the notifier to
+// scrub rather than to be lucky about somebody else's wording.
+test("a webhook URL never reaches the notifications row, even when the transport quotes it back", async () => {
+  const { db } = world();
+  const logged = [];
+  // The kind of message a transport writes when it wants to be helpful.
+  const fetchImpl = async (url) => { throw new Error(`connect ECONNREFUSED for ${url}`); };
+  const n = makeNotifier({ db, config: notifyConfig({ MATTERMOST_WEBHOOK: SECRET_URL }), fetchImpl,
+                           log: { warn: (m) => logged.push(m) } });
+
+  const r = await n.send({ kind: "slot_open", body: "a slot is open" });
+  assert.equal(r.ok, false);
+  const row = db.prepare("SELECT * FROM notifications WHERE id=?").get(r.id);
+  assert.equal(row.status, "failed");
+
+  for (const [where, text] of [["the stored error", row.error], ["the log line", logged[0]],
+                               ["the returned error", r.error]]) {
+    assert.ok(!text.includes("SECRET"), `${where} leaked the webhook URL: ${text}`);
+    assert.ok(!text.includes("/hooks/"), `${where} leaked the webhook path: ${text}`);
+  }
+  // And it must still be diagnosable — scrubbing that removes the reason is its own failure.
+  assert.match(row.error, /ECONNREFUSED/, "the operator still has to be able to tell what went wrong");
+  assert.match(row.error, /chat\.example\.org/, "and which host, since that is not the secret part");
+});
+
+// "already_sent" was returned for EVERY insert failure, not just the UNIQUE violation it names. runNudge reads
+// only `ok`, so a genuine database rejection meant the volunteer was silently never nudged — no row, no log line,
+// nothing in the data. A false explanation with a silent consequence, in the file whose opening argument is that
+// a broken channel must be visible in the data.
+test("only a duplicate is reported as already-sent; a real insert failure says so and is logged", async () => {
+  const { db } = world();
+  const { fetchImpl } = stubTransport();
+  const logged = [];
+  const n = makeNotifier({ db, config: notifyConfig({ MATTERMOST_WEBHOOK: SECRET_URL }), fetchImpl,
+                           log: { warn: (m) => logged.push(m) } });
+
+  // The real duplicate case, which must keep working: same kind, person and period twice.
+  const first = await n.send({ kind: "availability_nudge", personId: 1, period: "2026-W20", body: "please answer" });
+  assert.equal(first.ok, true);
+  const again = await n.send({ kind: "availability_nudge", personId: 1, period: "2026-W20", body: "please answer" });
+  assert.deepEqual(again, { ok: false, skipped: true, reason: "already_sent" });
+  assert.equal(logged.length, 0, "a duplicate is normal and must not warn");
+
+  // A different constraint failure entirely. The CHECK on `status` cannot be tripped through send(), so this
+  // drops the table's NOT NULL on `body` in the way a botched migration would: rename the column out from under
+  // the prepared statement. Any insert error that is not 2067 must take the honest path.
+  db.exec("ALTER TABLE notifications RENAME TO notifications_gone");
+  const broken = await n.send({ kind: "availability_nudge", personId: 2, period: "2026-W21", body: "please answer" });
+  assert.equal(broken.ok, false);
+  assert.equal(broken.skipped, false, "a database that refused the write has NOT already sent anything");
+  assert.equal(broken.reason, "not_recorded");
+  assert.equal(logged.length, 1, "and it is the only place this can surface, since there is no row to mark");
+  assert.match(logged[0], /could not be recorded/);
+  assert.ok(!logged[0].includes("SECRET"), "still no credential in the log");
+});
+
 test("without a webhook, messages queue in the outbox rather than vanishing", async () => {
   const { db } = world();
   const n = makeNotifier({ db, config: notifyConfig({}) });
