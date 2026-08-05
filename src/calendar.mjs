@@ -92,7 +92,15 @@ export function buildIcs({ rows, calendarName, timeZone, eventMinutes = 90, now 
 
   for (const r of rows) {
     const start = utcInstantFor(r.date, r.hour, r.minute ?? 0, timeZone);
-    const minutes = Number(r.minutes) > 0 ? Number(r.minutes) : eventMinutes;
+    // One duration for every shift, from config. This used to read `Number(r.minutes) > 0 ? Number(r.minutes)
+    // : eventMinutes`, a per-row override that nothing has ever set: `calendarRowsFor` does not select such a
+    // column and no test passes one, so the ternary had exactly one reachable arm. A hook that looks wired and
+    // is not is worse than no hook, because the next person reads it as a supported feature.
+    //
+    // If per-activity durations are wanted — a two-hour workshop against a ninety-minute class is the obvious
+    // case — they belong on the activity entries in `config/pattern.json`, selected by `calendarRowsFor` and
+    // validated in `config.mjs` beside `calendar.eventMinutes`. Adding them here alone would not reach the data.
+    const minutes = eventMinutes;
     const role = r.role && t ? ` (${t(`role.dance.${r.role}`)})` : "";
     lines.push(
       "BEGIN:VEVENT",
@@ -140,9 +148,27 @@ export function revokeCalendarToken(db, personId) {
 export const hasCalendarToken = (db, personId) =>
   Boolean(db.prepare("SELECT calendar_token_hash AS h FROM people WHERE id = ?").get(personId)?.h);
 
-// Compared in constant time. The lookup is by hash so the comparison is over fixed-length hex, and a
-// timing-safe compare costs nothing here — this endpoint is reachable without a session, so it is the one
-// place an attacker can guess at their leisure.
+// What actually protects this endpoint, written out because the comment that used to be here credited the wrong
+// thing and got a fact wrong on the way.
+//
+// It said an attacker "can guess at their leisure". They cannot: `GET /calendar/:token.ics` runs every failed
+// lookup through the same limiter that guards sign-in and invite redemption (`limiter.fail(key,
+// "calendar-token")` in server.mjs), and answers 404 rather than 403 so a wrong token and a missing feed are
+// indistinguishable. server.mjs's own comment says so. Two comments about one endpoint, disagreeing.
+//
+// The real protections, in the order they matter: the token is 24 random bytes, so guessing is not a strategy;
+// failed lookups are throttled per caller; and only a SHA-256 hash is stored, so a copy of the database yields
+// no working URLs.
+//
+// The constant-time compare below is NOT one of them, and saying so is more useful than implying it is. A
+// timing attack on a comparison needs the attacker not to know the value being compared against — here they
+// choose the token and can compute its hash themselves, and learning a stored hash from timing would mean
+// finding a token whose SHA-256 has a chosen prefix, which is the brute force it was supposed to avoid. It is
+// kept because comparing secrets in constant time is the right habit and it costs nothing at forty rows, not
+// because anything rests on it. If this ever guards something guessable, that changes.
+//
+// One honest leak: the loop returns on the first match, so the time reveals roughly the matching row's position
+// in the table. That is information only available to somebody who already holds a valid token.
 export function personByCalendarToken(db, token) {
   const raw = String(token ?? "");
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(raw)) return null;

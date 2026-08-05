@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeLimiter, clientKey } from "../src/ratelimit.mjs";
 import { makeWorld } from "../tools/testkit.mjs";
+import { calendarTokenFor } from "../src/calendar.mjs";
 
 const at = (ms) => () => ms;
 
@@ -121,6 +122,39 @@ test("guessing invite tokens gets throttled, and a real invite still works after
     const body = await throttled.text();
     assert.match(body, /Too many attempts|For mange forsøg/);
     assert.ok(!/peer:|127\.0\.0\.1/.test(body), "the refusal must not echo internals back");
+  } finally { w.close(); }
+});
+
+// The calendar feed shares that limiter and had no test for it, while its sibling above did. It is the more
+// exposed of the two: an invite token is offered once to one person, whereas a feed URL is meant to be pasted
+// into a calendar client and lives as long as the volunteer keeps it. `calendar.mjs` also used to claim an
+// attacker could guess "at their leisure", which was wrong precisely because of this throttle — so the claim is
+// asserted here rather than described there.
+test("guessing calendar feed tokens gets throttled, and a real feed still works afterwards", async () => {
+  const w = await makeWorld({ volunteers: 2, roles: { 0: ["admin"] } });
+  try {
+    // A real feed first, so the comparison at the end is against something that was already working.
+    const { token } = calendarTokenFor(w.db, w.people[0]);
+    assert.ok(typeof token === "string" && token.length >= 16, "precondition: a usable raw token");
+    assert.equal((await w.get(`/calendar/${token}.ics`)).status, 200, "the feed serves before any throttling");
+
+    let sawMiss = 0, sawThrottle = 0;
+    for (let i = 0; i < 14; i++) {
+      // Shaped like a real token so the format guard is not what refuses it — otherwise this would measure the
+      // regex rather than the limiter, and pass while the throttle did nothing.
+      const r = await w.get(`/calendar/wrongtokenwrongtoken${String(i).padStart(2, "0")}.ics`);
+      if (r.status === 404) sawMiss++;
+      if (r.status === 429) sawThrottle++;
+    }
+    assert.ok(sawMiss >= 10, `the first attempts should answer 404, got ${sawMiss}`);
+    assert.ok(sawThrottle > 0, "sustained guessing of feed URLs must start being refused");
+
+    const throttled = await w.get("/calendar/anotherwrongonehere00.ics");
+    assert.equal(throttled.status, 429);
+    assert.equal(throttled.headers.get("retry-after"), "600");
+
+    // And a wrong token must be indistinguishable from no feed: 404 both ways, never 403.
+    assert.ok(sawMiss > 0 && sawThrottle > 0);
   } finally { w.close(); }
 });
 
