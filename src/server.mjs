@@ -811,7 +811,16 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 // file:///C:/... with THREE slashes, so `file://${path}` never matches and `node src/server.mjs` exits 0
 // having done nothing — no error, no output. Caught by running it, not by any unit test.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const db = openDb();
+  // Cleanly, the same as a failed bind below. openDb now explains itself, but an uncaught throw still buries that
+  // explanation under a stack trace naming db.mjs — and the operator reading a container log has no use for the
+  // line number of a file they are not going to open.
+  let db;
+  try {
+    db = openDb();
+  } catch (e) {
+    console.error(`\n✖ ${e.message}\n`);
+    process.exit(1);
+  }
   migrate(db);
 
   // Materialise the season from config. This was MISSING and the app booted completely inert — no season, no

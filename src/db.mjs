@@ -47,7 +47,30 @@ if (nodeTooOld()) {
 const { DatabaseSync } = await import("node:sqlite");
 
 export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
-  const db = new DatabaseSync(file);
+  let db;
+  try {
+    db = new DatabaseSync(file);
+  } catch (e) {
+    // SQLite says "unable to open database file" and nothing else — not the path it tried, not the variable that
+    // set it. Measured on a missing directory and on a path that is a directory: exit 1, a stack trace naming
+    // db.mjs, and no mention of either. For the most likely misconfiguration of this deployment — the named
+    // volume not mounted, so /data does not exist — that is nothing an operator can act on.
+    //
+    // Everything else here already does better: the Node floor names the version it found, EADDRINUSE names
+    // host:port and suggests the next one, a missing FOURWATER_SECRET says which variable. This was the gap.
+    //
+    // Rethrown rather than exited, because openDb is also called from tools and from tests; the caller decides
+    // what a failure means. The message is what was missing.
+    const shown = file === ":memory:" ? file : `${file}`;
+    throw new Error(
+      `4water Flow could not open its database at ${shown}\n` +
+      `  ${e.message}\n` +
+      `  The path comes from FOURWATER_DB (default: 4water.db beside the app).\n` +
+      `  Usually this means the directory does not exist — in the container, that the 4water-data volume is not\n` +
+      `  mounted at /data. SQLite creates the FILE but never the directory holding it.`,
+      { cause: e },
+    );
+  }
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");     // off by default in SQLite; the FKs below are decoration without it
   return db;

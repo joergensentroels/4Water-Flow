@@ -42,6 +42,31 @@ const waitHealthy = async (port, child) => {
   return false;
 };
 
+// The likeliest misconfiguration of this whole deployment: the named volume not mounted, so the directory
+// FOURWATER_DB points into does not exist. SQLite creates the FILE but never the directory holding it.
+//
+// Measured before the fix: exit 1, `Error: unable to open database file`, a stack trace naming db.mjs — and no
+// mention of the path it tried or the variable that set it. Nothing an operator reading a container log can act
+// on, in an app that already names the version it found for a wrong Node and names host:port for a busy one.
+test("an unopenable database says which path and which variable, without a stack trace", async () => {
+  const dir = freshDir();
+  try {
+    const missing = path.join(dir, "no-such-directory", "app.db");
+    const { child, out } = bootReal(dir, 8395, { FOURWATER_DB: missing });
+    const code = await new Promise((r) => child.once("exit", r));
+    assert.equal(code, 1, `expected a clean refusal, got ${code} — output:\n${out()}`);
+
+    const text = out();
+    assert.ok(text.includes(missing), `the message must name the path it tried:\n${text}`);
+    assert.match(text, /FOURWATER_DB/, "and the variable that set it, so an operator knows where to look");
+    assert.match(text, /volume/i, "and the likely cause, since this is what an unmounted volume looks like");
+
+    // No stack trace: an operator reading a container log has no use for a line number in a file they will not
+    // open, and a stack buries the sentence that would have helped. Same treatment a failed bind already got.
+    assert.ok(!/\bat openDb\b|db\.mjs:\d+/.test(text), `the refusal must not be a stack trace:\n${text}`);
+  } finally { cleanup(dir); }
+});
+
 // The divergence this whole file exists because of, checked in the other direction too.
 //
 // Every other suite builds its world through the harness, and twice the harness did setup the boot path skipped.
