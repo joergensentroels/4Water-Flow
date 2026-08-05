@@ -43,6 +43,23 @@ plumbing, and the two most embarrassing ones here were invisible to unit tests e
 **6. Mobile is the target.** The reported pain was "a nightmare to use on the phone". Phone-first is the
 design, not a media query. Planners too: whoever fixes a Sunday-morning dropout is holding a phone.
 
+## If you add a route, three audits will have an opinion
+
+They all walk `app.routes()` or `src/server.mjs` rather than a list somebody maintains, so a new route is covered
+the moment it is registered — which also means you cannot add one and discover later that nothing checked it.
+
+| | what it insists on |
+|---|---|
+| `test/csrf-audit.test.mjs` | a POST refuses a missing, empty and wrong CSRF token, **and** accepts a good one — the last part is what stops a route that refuses everything from passing |
+| `test/authz-audit.test.mjs` | the route's `gate()`/`postGate()` rule is one this app has, an ungated route is on a short list of eight with a reason each, `/admin/*` gates on `admin` and `/planner/*` on `planner`, and the running server agrees |
+| `test/names.test.mjs` | every control the route renders has a name of its own (see below) |
+
+The authz audit's fourth check exists because of a hole in the first three: weakening `gate(x, "admin")` to
+`gate(x)` changes what the source declares *and* what the server does, together, so every consistency check stays
+green. Only an expectation taken from somewhere other than the handler notices — here, the path. Two routes
+needing a role from outside those prefixes (`/outbox`, `/status`) are named explicitly, and a stale entry fails
+rather than lingering as apparent coverage.
+
 ## Where things live
 
 | | |
