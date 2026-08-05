@@ -148,6 +148,39 @@ test("without a webhook, messages queue in the outbox rather than vanishing", as
   assert.equal(row.channel, "outbox");
 });
 
+// A hand-back INSIDE the deadline is a different fact from an ordinary opening, and the person who needs to know
+// is the planner, not the volunteer who just handed it back. The banner asks that volunteer to tell the planner as
+// well — asking a person to relay something the app already knows is the chasing this file exists to reduce — so
+// the announcement carries it, in the channel planners already read.
+test("a hand-back at short notice says so in the channel; an ordinary one reads exactly as before", () => {
+  const tl = makeT("en");
+  const label = loadPattern().activities[0].label;
+  const args = { when: "4/1 15:00", activity: label, eligible: 3 };
+
+  const ordinary = slotOpenMessage(tl, args);
+  const urgent = slotOpenMessage(tl, { ...args, shortNotice: true });
+
+  // The control, and it is the half that matters: the flag must CHANGE something. A test that only checks the
+  // urgent case would pass on a build where every announcement says "short notice".
+  assert.notEqual(urgent, ordinary, "the flag must change the message, or it is not wired to anything");
+  assert.equal(ordinary, slotOpenMessage(tl, { ...args, shortNotice: false }),
+    "and the default must be indistinguishable from not passing it at all");
+  assert.ok(!/short notice/i.test(ordinary), `an ordinary opening must not claim urgency: "${ordinary}"`);
+  assert.match(urgent, /short notice/i);
+
+  // It must still be the whole announcement — a prefix that swallowed the slot details would leave a planner
+  // knowing something is urgent and not which shift.
+  assert.ok(urgent.includes(label), "the activity must survive");
+  assert.match(urgent, /4\/1 15:00/, "and so must the time");
+  assert.match(urgent, /3/, "and the count of people who could take it");
+  assert.ok(!urgent.includes("{"), `unfilled placeholder: "${urgent}"`);
+
+  // Both locales, because a Danish deployment reading an English urgency marker is the same defect.
+  const da = slotOpenMessage(makeT("da"), { ...args, shortNotice: true });
+  assert.ok(!/short notice/i.test(da), `the Danish message must be Danish: "${da}"`);
+  assert.notEqual(da, slotOpenMessage(makeT("da"), args), "and the flag must work there too");
+});
+
 test("board announcements are not deduplicated with each other", async () => {
   const { db } = world();
   const { calls, fetchImpl } = stubTransport();

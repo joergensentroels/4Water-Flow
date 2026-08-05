@@ -60,7 +60,7 @@
   "board.handBack": "Hand this slot back",
   "board.claimed": "Someone else already took it.",
   "board.notEligible": "That slot is not open to you any more — this page was probably out of date. Reload it and the list will be current.",
-  "board.pastCutoff": "Too late to hand this back — message the planner.",
+  "board.pastCutoff": "Short notice — the slot IS back on the exchange, but tell the planner too, in case nobody picks it up.",
   "slot.open": "Open",
   "score.label": "Activities this season",
   "score.active": "Active volunteer",
@@ -386,5 +386,6 @@
   "board.why.not_on_roster": "You are not on the active roster, so nothing can be assigned to you. A planner or an admin can put you back.",
   "planner.why.nobody_on_roster": "Everybody who could take this is currently stood down. An admin can put one of them back on the roster.",
   "notify.linkBoard": "Open the shift exchange: {url}",
-  "notify.linkAvailability": "Enter your availability: {url}"
+  "notify.linkAvailability": "Enter your availability: {url}",
+  "notify.shortNotice": "Short notice:"
 }

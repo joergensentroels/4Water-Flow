@@ -456,7 +456,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
     // Announce it, and never let that failure reach the volunteer: the slot IS released, and an error page
     // would make them try again. Deliberately not awaited into the response path.
-    if (r.ok && detail) announceOpenSlot(id, detail).catch(() => {});
+    // shortNotice so the channel post itself says a planner needs to look, instead of relying on the
+    // volunteer relaying it. The banner asks them to as well; this makes that a courtesy.
+    if (r.ok && detail) announceOpenSlot(id, detail, { shortNotice: !!r.pastCutoff }).catch(() => {});
     redirect(res, `/board?r=${code}`);
   });
 
@@ -1078,7 +1080,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // How many OTHER people could take this slot â€” the number is what makes the message actionable rather
   // than noise. Uses the same eligibility definition as the board.
-  async function announceOpenSlot(assignmentId, detail) {
+  async function announceOpenSlot(assignmentId, detail, { shortNotice = false } = {}) {
     if (!notifier) return;
     const eligible = db.prepare(`
       SELECT COUNT(*) n FROM people p
@@ -1106,6 +1108,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
         // was built with, and a second copy of the same value is a second thing to keep in step. Optional-chained
         // because a test may hand in a bare { send } with no config at all.
         publicUrl: notifier.config?.publicUrl ?? null,
+        shortNotice,
       }),
     });
   }

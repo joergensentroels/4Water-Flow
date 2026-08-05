@@ -60,7 +60,7 @@
   "board.handBack": "Giv vagten tilbage",
   "board.claimed": "Vagten er taget af en anden.",
   "board.notEligible": "Den vagt er ikke længere åben for dig — siden var sandsynligvis ikke opdateret. Genindlæs den, så er listen aktuel.",
-  "board.pastCutoff": "Det er for sent at give vagten tilbage — skriv til planlæggeren.",
+  "board.pastCutoff": "Kort varsel — vagten ER tilbage på vagtbørsen, men sig det også til planlæggeren, hvis ingen tager den.",
   "slot.open": "Ledig",
   "score.label": "Aktiviteter i denne sæson",
   "score.active": "Aktiv frivillig",
@@ -386,5 +386,6 @@
   "board.why.not_on_roster": "Du er ikke på den aktive liste, så du kan ikke få tildelt vagter. En planlægger eller en administrator kan sætte dig tilbage.",
   "planner.why.nobody_on_roster": "Alle, der kunne tage denne, er sat på pause lige nu. En administrator kan sætte en af dem tilbage på listen.",
   "notify.linkBoard": "Åbn vagtbørsen: {url}",
-  "notify.linkAvailability": "Indtast din tilgængelighed: {url}"
+  "notify.linkAvailability": "Indtast din tilgængelighed: {url}",
+  "notify.shortNotice": "Kort varsel:"
 }

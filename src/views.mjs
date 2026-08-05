@@ -33,7 +33,11 @@ export function layout({ t, title, who, nav = [], flash, body }) {
 ${nav.length ? html`<nav class="tabs">${nav.map((n) =>
   html`<a href="${n.href}"${n.current ? raw(' aria-current="page"') : ""}>${n.label}</a>`)}</nav>` : ""}
 <main>
-  ${flash ? html`<p class="flash ${flash.bad ? "bad" : ""}">${flash.text}</p>` : ""}
+  <!-- Three states. The warn state is for an outcome that SUCCEEDED and still needs attention: a hand-back at
+       short notice forced it, because reporting that as bad told the volunteer their slot had not been released
+       when it had. A caller that sets neither flag gets the plain banner, exactly as before.
+       No backticks in here — this comment sits inside a template literal, and one would end the string. -->
+  ${flash ? html`<p class="flash ${flash.bad ? "bad" : flash.warn ? "warn" : ""}">${flash.text}</p>` : ""}
   ${body}
 </main>
 </body>

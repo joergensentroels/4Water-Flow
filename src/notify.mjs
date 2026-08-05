@@ -132,8 +132,18 @@ export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, l
 export const withLink = (t, base, key, publicUrl, path) =>
   (publicUrl ? [base, t(key, { url: publicUrl + path })].join("\n") : base);
 
-export const slotOpenMessage = (t, { when, activity, eligible, publicUrl = null }) =>
-  withLink(t, t("notify.slotOpen", { when, activity, eligible }), "notify.linkBoard", publicUrl, "/board");
+// `shortNotice` when the slot came back inside the hand-back deadline, which is the case a planner has to read
+// differently from an ordinary opening. The volunteer's own banner asks them to tell the planner as well — and
+// asking a person to relay a fact the app already knows is exactly the chasing this file exists to reduce. The
+// announcement goes to the channel planners already read, so it can carry the urgency itself and the volunteer's
+// message becomes a courtesy rather than the mechanism.
+//
+// A leading sentence, not a second message: two announcements for one slot is how a channel starts getting muted.
+export const slotOpenMessage = (t, { when, activity, eligible, publicUrl = null, shortNotice = false }) => {
+  const base = t("notify.slotOpen", { when, activity, eligible });
+  const body = shortNotice ? [t("notify.shortNotice"), base].join(" ") : base;
+  return withLink(t, body, "notify.linkBoard", publicUrl, "/board");
+};
 
 export const nudgeMessage = (t, { name, from, to, publicUrl = null }) =>
   withLink(t, t("notify.nudge", { name, from, to }), "notify.linkAvailability", publicUrl, "/availability");

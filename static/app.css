@@ -142,6 +142,10 @@ button:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent); out
 
 .flash { border-left: 4px solid var(--accent); background: var(--card); padding: .7rem .9rem; border-radius: .3rem; margin: 0 0 1rem; }
 .flash.bad { border-left-color: var(--no); }
+/* An outcome that succeeded and still wants reading: a hand-back at short notice. Distinct from .bad, which
+   means it did not happen. Uses --edge rather than a new colour, so the palette stays four colours and there is
+   nothing new to check for contrast — the border is decorative and the text carries the meaning. */
+.flash.warn { border-left-color: var(--edge); border-left-width: 6px; }
 
 /* Wide screens get more room, never a different layout. */
 @media (min-width: 45rem) {

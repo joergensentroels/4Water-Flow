@@ -158,9 +158,19 @@ test("inside the cutoff the slot still releases, but the volunteer is told a pla
     assert.equal(db.prepare("SELECT person_id FROM assignments WHERE id=?").get(id).person_id, null,
       "it must still release — refusing would just make the volunteer not turn up without telling anyone");
 
-    // The message lives on the page the volunteer is redirected TO.
+    // The message lives on the page the volunteer is redirected TO — and it must agree with the line above.
+    //
+    // It used to read "Too late to hand this back — message the planner", styled as an error, while the assertion
+    // two lines up proves the slot WAS released. A volunteer reading that believes they are still on the hook and
+    // turns up to a shift that is now on the board and may already have been taken. This test asserted the release
+    // and the message separately and never compared them.
     const { body: page } = await w.follow(r, a);
-    assert.match(page, /message the planner|skriv til planlæggeren/i);
+    assert.match(page, /back on the exchange|tilbage på vagtbørsen/i,
+      "the banner must say the slot was released, because it was");
+    assert.doesNotMatch(page, /too late|for sent/i,
+      "and must not say it was too late, which is the opposite of what happened");
+    assert.match(page, /planner|planlæggeren/i, "while still saying a planner needs to know, at short notice");
+    assert.match(page, /class="flash warn"/, "styled as needing attention, not as a failure");
   } finally { w.close(); }
 });
 
@@ -182,12 +192,33 @@ test("every outcome a route can produce has a real message, in both locales", as
     assert.equal(flashFor(t, "not-a-code"), null, "an unknown code must be no flash, not a blank one");
     assert.equal(flashFor(t, null), null);
   }
-  // Failures must be marked as failures — a refusal styled like a success reads as "it worked".
+  // Failures must be marked as failures — a refusal styled like a success reads as "it worked". AND THE CONVERSE,
+  // which is what this list got wrong: `handed_back_late` sat among the refusals for eleven increments, so a
+  // success was styled as a failure and the message said so. The test was named for the property and enforced its
+  // inversion — in the same assertion whose comment explains why the direction matters.
+  //
+  // Stated as two sets now, because a single list of "bad" codes cannot express that the other codes must NOT be
+  // bad, and that is the half that was missing.
   const t = makeT("en");
-  assert.equal(flashFor(t, "claimed").bad, false);
-  for (const bad of ["already_taken", "not_eligible", "no_such_slot", "not_yours", "handed_back_late"]) {
-    assert.equal(flashFor(t, bad).bad, true, `${bad} should be styled as a problem`);
+  const SUCCEEDED = ["claimed", "handed_back", "handed_back_late"];
+  const REFUSED = ["already_taken", "not_eligible", "no_such_slot", "not_yours"];
+  // The sets must together be every code the routes emit, or one could quietly go unclassified.
+  assert.deepEqual([...SUCCEEDED, ...REFUSED].sort(), [...codes].sort(),
+    "every outcome must be classified as having happened or not — an unclassified one is how the last inversion hid");
+  for (const code of REFUSED) {
+    assert.equal(flashFor(t, code).bad, true, `${code} did not happen, so it must read as a problem`);
   }
+  for (const code of SUCCEEDED) {
+    assert.equal(flashFor(t, code).bad, false,
+      `${code} DID happen, so styling it as a failure tells the volunteer the opposite of the truth`);
+    // And the words must not undo the styling. A neutral banner reading "too late" is the same defect wearing
+    // different clothes, which is exactly how this one survived: the flag and the sentence were never compared.
+    assert.doesNotMatch(flashFor(t, code).text, /too late|failed|could not|not possible/i,
+      `${code} succeeded, so its message must not say otherwise: "${flashFor(t, code).text}"`);
+  }
+  // One of the successes needs attention without being a failure, and that state must actually exist.
+  assert.equal(flashFor(t, "handed_back_late").warn, true, "a hand-back at short notice must still stand out");
+  assert.equal(flashFor(t, "handed_back").warn, false, "while an ordinary one must not");
 });
 
 test("the board never offers a slot that has already happened", withWorld({}, async (w) => {
@@ -251,6 +282,54 @@ test("handing a slot back announces it, naming how many others could take it", a
     // message actionable instead of noise.
     assert.match(call.body, /\b3\b/, `the message should say how many can take it: ${call.body}`);
     assert.equal(w.db.prepare("SELECT status FROM notifications WHERE kind='slot_open'").get().status, "sent");
+  } finally { w.close(); }
+});
+
+// The builder is unit-tested in test/notify.test.mjs. This is the OTHER half — that the route passes the flag —
+// and it is the half that has been missing before: the notification links existed as strings for a whole increment
+// while no call site passed publicUrl, and makeNotifier and startJobs were wired only from tests for longer than
+// that. A message the code can compose and the app never sends is the same as not having it.
+test("a hand-back inside the deadline announces itself as short notice; an ordinary one does not", async () => {
+  // Clock one day before the first session, against the two-day cutoff, so the hand-back is genuinely late.
+  const probe = await makeWorld({});
+  const firstDate = probe.db.prepare("SELECT MIN(date) d FROM sessions").get().d;
+  probe.close();
+  const dayBefore = new Date(Date.parse(`${firstDate}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
+  const { stub, opts } = withNotifier();
+  const w = await makeWorld({ ...opts, today: dayBefore });
+  try {
+    assert.ok(Number(w.pattern.board.cutoffDays) >= 2, "this test assumes a cutoff of at least two days");
+    for (const p of w.people) makeAvailableEverywhere(w.db, p, w.today);
+    const { cookie, token, id } = await claimFirst(w, w.people[0]);
+
+    const before = stub.calls.length;
+    const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
+    assert.equal(reasonOf(r), "handed_back_late", "the fixture must produce a LATE hand-back or this proves nothing");
+
+    const call = await waitFor(() => (stub.calls.length > before ? stub.calls.at(-1) : null));
+    assert.match(call.body, /short notice|kort varsel/i,
+      `the channel post must carry the urgency, so a planner does not depend on the volunteer relaying it: ${call.body}`);
+    // Still the whole announcement — a prefix that swallowed the details would leave a planner knowing something
+    // is urgent and not which shift.
+    assert.match(call.body, /Open slot|Ledig vagt/, "and still say what is open");
+  } finally { w.close(); }
+});
+
+// The control for the test above, and it has to be a separate world because the clock is what differs. Without it,
+// "the late announcement says short notice" would pass just as well on a build where EVERY announcement says it.
+test("and an ordinary hand-back's announcement says nothing about short notice", async () => {
+  const { stub, opts } = withNotifier();
+  const w = await makeWorld(opts);
+  try {
+    for (const p of w.people) makeAvailableEverywhere(w.db, p, w.today);
+    const { cookie, token, id } = await claimFirst(w, w.people[0]);
+    const before = stub.calls.length;
+    const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
+    assert.equal(reasonOf(r), "handed_back", "the default fixture must be well inside the deadline");
+    const call = await waitFor(() => (stub.calls.length > before ? stub.calls.at(-1) : null));
+    assert.doesNotMatch(call.body, /short notice|kort varsel/i,
+      `an ordinary opening must not claim urgency, or the marker means nothing: ${call.body}`);
   } finally { w.close(); }
 });
 

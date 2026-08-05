@@ -6,10 +6,26 @@ import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from ".
 
 // Outcome codes from claimSlot/handBackSlot mapped to what the volunteer should read. Kept as a table
 // rather than inline strings so an unmapped reason is a visible gap instead of a blank flash.
+//
+// THREE states, not two, and `handed_back_late` is the reason.
+//
+// It used to be `bad: true`, reading "Too late to hand this back — message the planner." The slot was already
+// released by then: handBackSlot sets person_id to NULL, returns ok, and the route goes on to announce it on the
+// exchange. So the volunteer got an error banner saying the thing had not happened, about a thing that had.
+// Measured at one day and at zero days before the shift: released both times, told it was too late both times.
+//
+// The cost is not confusion, it is double cover or none. Read as a refusal, the volunteer believes they are still
+// on the hook and turns up — to a shift that is now on the board and may already have been taken. Or they message
+// the planner about a slot the planner can see is open, and neither of them can tell whether anybody is coming. In
+// an app whose entire job is knowing who turns up, a success reported as a failure is the most expensive sentence
+// it can print.
+//
+// `warn` rather than no emphasis at all: it DID succeed, so `bad` is untrue, but short notice is precisely when a
+// banner needs reading rather than skimming.
 const OUTCOME = {
   claimed: { key: "board.claimOk" },
   handed_back: { key: "board.handedBackOk" },
-  handed_back_late: { key: "board.pastCutoff", bad: true },
+  handed_back_late: { key: "board.pastCutoff", warn: true },
   already_taken: { key: "board.claimed", bad: true },
   not_eligible: { key: "board.notEligible", bad: true },
   no_such_slot: { key: "board.noSuchSlot", bad: true },
@@ -18,7 +34,7 @@ const OUTCOME = {
 
 export function flashFor(t, code) {
   const o = OUTCOME[code];
-  return o ? { text: t(o.key), bad: !!o.bad } : null;
+  return o ? { text: t(o.key), bad: !!o.bad, warn: !!o.warn } : null;
 }
 
 // `emptyReason` is only consulted when `open` is empty, and defaults to null so a caller that does not compute
