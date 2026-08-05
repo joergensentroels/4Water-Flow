@@ -313,6 +313,44 @@ test("a config file broken by hand is reported, not overwritten by what the proc
 // zero — so a volunteer could drop a shift the same evening and no planner would be told. "1e9" was accepted too,
 // which flags every hand-back as late forever and trains planners to ignore the flag: the same end state by the
 // other road.
+// "Run the clean-up now" DELETES, and it ran with the config this process loaded at boot. `retention.seasons` and
+// `retention.notificationDays` are file-only settings — the way an operator raises them is to edit
+// config/pattern.json — so the button could delete history the file had just asked to keep. Measured: four seasons
+// in the database, the file hand-edited to keep six, no restart, and two seasons were deleted. The operator raised
+// the number for exactly the purpose the button then defeated. Same shape as tools/backup.mjs reading the wrong
+// config file on its own retention step.
+test("running retention honours the keep count written in the file, not the one the process remembers", withAdmin({}, async (w) => {
+  const ins = w.db.prepare("INSERT INTO seasons (key, from_date, to_date) VALUES (?,?,?)");
+  for (const [k, f, t2] of [["2024-Q1Q2", "2024-01-01", "2024-06-30"],
+                            ["2024-Q3Q4", "2024-07-01", "2024-12-31"],
+                            ["2025-Q1Q2", "2025-01-01", "2025-06-30"]]) ins.run(k, f, t2);
+  const keys = () => w.db.prepare("SELECT key FROM seasons ORDER BY from_date").all().map((r) => r.key);
+  assert.equal(keys().length, 4, "precondition: enough seasons for a keep count to matter");
+  assert.ok((w.pattern.retention?.seasons ?? 2) < 6, "precondition: the process's own number is lower than the edit");
+
+  const edited = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  edited.retention = { seasons: 6, notificationDays: 90 };
+  writeFileSync(w.patternFile, JSON.stringify(edited, null, 2) + "\n", "utf8");
+
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const r = await w.post("/admin/retention", admin, new URLSearchParams({ csrf: token }));
+  assert.equal(reasonOf(r), "retention_done");
+  assert.equal(new URL(r.headers.get("location"), "http://x").searchParams.get("seasons"), "0",
+    "it must report removing none, because the file asked to keep all four");
+  assert.deepEqual(keys().length, 4, "and none may actually be gone");
+
+  // The control: with a keep count the seasons genuinely exceed, it still deletes. Otherwise this test would pass
+  // on a retention button that does nothing at all.
+  const tighter = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  tighter.retention = { seasons: 2, notificationDays: 90 };
+  writeFileSync(w.patternFile, JSON.stringify(tighter, null, 2) + "\n", "utf8");
+  const r2 = await w.post("/admin/retention", admin, new URLSearchParams({ csrf: token }));
+  assert.equal(new URL(r2.headers.get("location"), "http://x").searchParams.get("seasons"), "2",
+    "with a keep count of two it must remove the two oldest — the button still works");
+  assert.equal(keys().length, 2);
+}));
+
 test("the hand-back cutoff cannot be set to something that is not a number of days", withAdmin({}, async (w) => {
   const admin = await w.signIn(w.people[0]);
   const { token } = await w.csrfFrom("/admin", admin);

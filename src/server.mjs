@@ -672,7 +672,19 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/retention", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const r = runRetention(db, { pattern: cfg, currentKey: cfg.season.key });
+    // The LIVE config, for the same reason the admin forms use it — and here it decides what gets DELETED.
+    //
+    // This ran with `cfg`, the copy loaded at boot. `retention.seasons` and `retention.notificationDays` are
+    // file-only settings, so the way an operator raises them is to edit config/pattern.json. Measured: put four
+    // seasons in the database, hand-edit the file to keep six, press "run the clean-up now" without restarting —
+    // and two seasons were deleted, because the process still believed its own copy said two. The operator raised
+    // the number for exactly the purpose the button then defeated.
+    //
+    // Same shape as tools/backup.mjs reading the wrong config file on its retention step. A destructive action
+    // must read the policy that is written down, not the one it happens to remember.
+    const live = baseForEdit();
+    if (live.__unreadable) return redirect(res, `/admin?r=invalid&m=${encodeURIComponent(live.__unreadable)}`);
+    const r = runRetention(db, { pattern: live, currentKey: live.season.key });
     // Invitations are reported too. A clean-up that silently deletes a category it does not mention is the same
     // problem as one that never deletes it: the operator cannot tell what happened.
     redirect(res, `/admin?r=retention_done&notifications=${r.notifications.removed}` +
