@@ -142,6 +142,9 @@ export function renderPrivacy({ t, roles = [], signedIn = false }) {
              they belong on the page the volunteer reads and not only in the board's document. This page listed
              neither for one commit — the same omission as docs/PRIVACY.md, one screen closer to the person. -->
         <p>${t("privacy.attendance")}</p>
+        <!-- Free text is the one kind of personal data erasure cannot reach field by field, so the volunteer is
+             told what it can and cannot do rather than left to assume the usual completeness. -->
+        <p>${t("privacy.notes")}</p>
         <p>${t("privacy.changes")}</p>
         <p>${t("privacy.rights")}</p>
       </div>

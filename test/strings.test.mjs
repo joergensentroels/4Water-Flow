@@ -366,6 +366,8 @@ const GLOSSARY = {
   // Two senses, and both are real: a permission role (planner/admin/volunteer) and a dance role (leader/follower).
   // Danish uses "rolle" for both, which is why one entry covers it — the ambiguity is in English, not the Danish.
   role: ["rolle", "fører", "følger"],
+  note: ["note"],
+  notes: ["note"],
 };
 // English words common in the strings that name no domain concept, so no Danish rendering is prescribed. Listed so
 // the coverage check below can insist the glossary knows about every frequent noun, rather than quietly skipping
@@ -382,7 +384,7 @@ const NOT_DOMAIN = new Set(["the", "and", "you", "your", "that", "this", "for", 
   "something", "nothing", "anything", "yours", "ours", "app", "chat", "status", "version", "total", "number",
   // Ordinary verbs and adjectives that carry no concept of their own. `open` is the one worth naming: it is an
   // adjective about a slot ("ledig") and never a noun in this app, so prescribing a word for it would be wrong.
-  "open", "could", "else", "created", "address", "sent", "exist", "look"]);
+  "open", "could", "else", "created", "address", "sent", "exist", "look", "cannot", "write", "written"]);
 
 const proseOnly = (s) => s
   .replace(/\{[^}]*\}/g, " ")

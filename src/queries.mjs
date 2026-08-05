@@ -229,6 +229,25 @@ export function markAttendance(db, assignmentId, attended, { today }) {
   return { ok: true, personId: row.personId, date: row.date, attended };
 }
 
+// One session, for its own page. Returns null rather than throwing on an id that does not exist, because the id
+// arrives out of a URL and a 404 is the answer.
+export const sessionDetail = (db, id) => db.prepare(`
+  SELECT s.id, s.date, s.season_id AS seasonId, t.hour, t.minute, act.label AS activityLabel, act.key AS activityKey
+    FROM sessions s
+    JOIN timeslots  t   ON t.id = s.timeslot_id
+    JOIN activities act ON act.id = s.activity_id
+   WHERE s.id = :id
+`).get({ id }) ?? null;
+
+// Who is on it — OPEN SLOTS INCLUDED. An empty slot is part of the answer to "who is on this", and leaving it out
+// would show a shorter list that reads as fully staffed, which is the shape of defect this project keeps finding.
+export const peopleOnSession = (db, sessionId) => db.prepare(`
+  SELECT a.id AS assignmentId, a.role, a.state, p.name
+    FROM assignments a LEFT JOIN people p ON p.id = a.person_id
+   WHERE a.session_id = :sid
+   ORDER BY CASE WHEN p.name IS NULL THEN 1 ELSE 0 END, p.name
+`).all({ sid: sessionId });
+
 // Shifts in the past that nobody has marked either way — the planner's to-do list, and the reason attendance
 // does not silently stay empty forever. Capped, because a season of unmarked shifts is not a page.
 export const unmarkedShifts = (db, seasonId, today, limit = 50) =>

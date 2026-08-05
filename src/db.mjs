@@ -307,6 +307,32 @@ export function migrate(db) {
       detail     TEXT
     );
 
+    -- Notes on a session: the small amount of talking a rota needs. 4water asked for "a chat system of sorts", and
+    -- this is the half a general chat tool cannot replace, because the conversation is ATTACHED TO THE SHIFT rather
+    -- than scrolling past in a channel: "bring the speaker", "I will be ten minutes late", "swapped with Anna".
+    -- Mattermost already runs with the same sign-in, so a third general chat would be the wrong thing to build.
+    --
+    -- Anchored to the SESSION, not the assignment. The conversation is about the class, and assignments come and go
+    -- as people hand shifts back — a note tied to an assignment would vanish with it, which is precisely when the
+    -- next person most needs to read it. ON DELETE CASCADE therefore also means season retention removes notes
+    -- without anything having to remember they exist.
+    --
+    -- ⚠ THIS IS THE FIRST FREE TEXT ABOUT PEOPLE IN THE DATABASE, and that is a step change rather than a feature:
+    -- structured data can be erased field by field, and free text cannot. docs/PRIVACY.md said "no free-text notes
+    -- about people" and now has to say something more careful. What erasure can do is delete a person's OWN notes,
+    -- which it does; what it cannot do is find their name inside somebody else's sentence. The cap is 280 characters
+    -- to keep this a margin note rather than a correspondence archive nobody can honour a request against.
+    CREATE TABLE IF NOT EXISTS notes (
+      id          INTEGER PRIMARY KEY,
+      session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      person_id   INTEGER REFERENCES people(id) ON DELETE SET NULL,
+      author_name TEXT NOT NULL,
+      body        TEXT NOT NULL,
+      at          TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notes_session  ON notes(session_id);
+    CREATE INDEX IF NOT EXISTS idx_notes_person   ON notes(person_id);
     CREATE INDEX IF NOT EXISTS idx_audit_at       ON audit(at);
     CREATE INDEX IF NOT EXISTS idx_audit_actor    ON audit(actor_id);
     CREATE INDEX IF NOT EXISTS idx_assign_session ON assignments(session_id);

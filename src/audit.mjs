@@ -55,6 +55,11 @@ export const NOT_AUDITED = {
   "/me": "a volunteer editing their own name and contact details.",
   "/me/calendar": "a volunteer creating or revoking their own calendar link. The token itself is never stored "
     + "in the clear anywhere, and it must not appear here either.",
+  "/session/:id/note": "a volunteer writing a note on a shift. Ordinary use, and the note itself IS the record — "
+    + "it carries its author and its time on the row, visible to everyone who can read the shift. Logging it would "
+    + "duplicate the text into a second table that erasure treats differently, which is worse than not logging it.",
+  "/note/:id/delete": "somebody deleting their OWN note. Nobody can delete another person's, so there is no "
+    + "action here that one volunteer needs to be able to attribute to another.",
 };
 
 // One writer, so the shape cannot drift between call sites. `actorName` is stored as it was, because a hard

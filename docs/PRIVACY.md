@@ -20,6 +20,7 @@ the retention period; the rest is factual and can be checked against the code.
 | Calendar-feed credential | `people.calendar_token_hash` | the volunteer, if they ask for a feed |
 | Whether they turned up to a shift | `assignments.attended` | a planner, afterwards |
 | Who changed the plan or a person's record | `audit.actor_name`, `actor_id`, `detail` | derived from the action |
+| Notes written on a shift | `notes.body`, `notes.author_name`, `notes.person_id` | a volunteer, in their own words |
 
 **The calendar feed deserves its own paragraph**, because it is the one place this app hands out a URL that
 works without signing in. A calendar client cannot present a session, so the link itself is the credential.
@@ -51,9 +52,30 @@ contribution figure to count activities *attended* rather than merely taken. Sta
 - If the board would rather not hold it, this is one nullable column and one screen, and removing it costs
   nothing else.
 
+**Free text arrived, and it is a step change rather than a feature.** 4water asked for "a chat system of sorts",
+and the app now has short notes attached to a shift — "bring the speaker", "I will be ten minutes late". This
+paragraph used to say the app kept *no free-text notes about people*, and the board should understand exactly what
+changed, because free text is the one kind of personal data that cannot be erased field by field:
+
+- A note is **at most 280 characters**, deliberately, so that this stays a margin note and not a correspondence
+  archive nobody can honour a request against.
+- Every signed-in volunteer can read the notes on a shift. That is a decision for an association of forty people
+  who already share a chat channel, and it is the point: a note nobody can see would not be worth writing.
+- **Nobody can edit anybody's words**, including their own. A note somebody has read and acted on must not change
+  under them; a correction is a second note.
+- **Erasure deletes that person's own notes outright**, rather than relabelling them as it does audit rows. An
+  audit row is a record *of* an action and still answers "who did this" under a `#id` label; a note is the person's
+  own sentence, and there is no version of it with the person taken out.
+- **What erasure cannot do is find somebody's name inside another volunteer's note.** No software can do that
+  reliably, and it is more honest to say so than to imply completeness. What bounds it is retention: notes belong to
+  a session, so they are deleted with the season under `retention.seasons`.
+
+If the board would rather not hold free text at all, this is one table and one screen, and removing it costs nothing
+else.
+
 **What is deliberately NOT stored:** no passwords (sign-in is NextCloud's job or a single-use link), no
-payment details, no free-text notes about people, and no analytics or tracking of any kind. There are no
-third-party scripts — the Content-Security-Policy forbids them outright.
+payment details, and no analytics or tracking of any kind. There are no third-party scripts — the
+Content-Security-Policy forbids them outright.
 
 Roughly 40 volunteers per department. Ordinary contact data, no special categories.
 

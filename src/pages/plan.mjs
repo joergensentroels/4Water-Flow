@@ -41,7 +41,7 @@ export function renderHome({ t, session, roles, who, mine, score, flash }) {
   return layout({ t, title: t("home.title"), who, nav: navFor(t, roles, "home"), flash, body });
 }
 
-export function renderPlan({ t, roles, who, rows, personId }) {
+export function renderPlan({ t, roles, who, rows, personId, notes = new Map() }) {
   const days = byDate(rows);
   const body = days.length === 0
     ? html`<p class="empty">${t("plan.empty")}</p>`
@@ -58,6 +58,12 @@ export function renderPlan({ t, roles, who, rows, personId }) {
                   ? t("slot.open")
                   : (r.personId === personId ? t("plan.you") : r.personName)}</small>
               </span>
+              <!-- A LINK, never a form. Notes live on their own page: a textarea and a CSRF token per row is
+                   exactly how /planner reached 534 KB and /admin 953 KB, and this page renders a whole season.
+                   The count arrives from ONE query covering every session on the page — see noteCounts. -->
+              <a class="chip" href="/session/${r.sessionId}" aria-label="${
+                t("plan.openSession")} — ${formatDate(t, r.date)} ${slotLine(t, r)}">${
+                notes.get(r.sessionId) ? t("plan.notes", { n: notes.get(r.sessionId) }) : t("plan.openSession")}</a>
             </div></li>`)}</ul>
         </div>`)}`;
   return layout({ t, title: t("plan.title"), who, nav: navFor(t, roles, "plan"), body });

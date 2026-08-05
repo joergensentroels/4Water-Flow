@@ -123,6 +123,13 @@ const JUSTIFIED = {
     "eligiblePeopleFor, autoRoster and isActive all read score(), which counts confirmed assignments and does " +
     "not look at `attended` — test/attendance.test.mjs asserts marking attendance leaves score() unchanged. " +
     "'A planner can change it back': null is an accepted value, which is why the column is nullable.",
+  "privacy.notes":
+    "Four claims, each with code behind it. 'Everybody signed in can read them': GET /session/:id is gated on a " +
+    "session and nothing narrower. 'Nobody can edit anybody's': there is no update path — notes.mjs exposes " +
+    "addNote and deleteNote and no editor, which is a shape rather than a promise. 'You can delete your own': " +
+    "deleteNote refuses when person_id is not the caller's, tested from the other volunteer's side. 'Your notes go " +
+    "with them': erasePerson calls deleteNotesBy in both modes. The last sentence is the honest limit — no software " +
+    "finds a name inside somebody else's prose, so the volunteer is told to ask rather than left to assume.",
   "privacy.changes":
     "'What changed, when, who': the audit row carries action, at, actor_name and detail, and the AUDITED list is " +
     "held against the route table so the coverage is not a promise. 'Kept longer than messages': retentionConfig " +

@@ -1,5 +1,6 @@
 import { releaseFutureShifts } from "./admin.mjs";
 import { pseudonymiseAuditActor, scrubAuditDetail } from "./audit.mjs";
+import { deleteNotesBy } from "./notes.mjs";
 
 // Deleting things on purpose. docs/PRIVACY.md admitted that nothing ever deleted anything, ever — which is
 // both a GDPR gap and the reason `notifications` would grow forever with volunteers' names in it.
@@ -132,6 +133,8 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
   let released = 0;
   let auditRenamed = 0;
   let auditScrubbed = 0;
+  let notesRemoved = 0;
+  let notificationsRemoved = 0;
   // `contact` is read here, before anything is deleted, because the audit sweep below needs the address and both
   // modes destroy it — anonymise nulls the column, remove takes the row.
   const person = db.prepare("SELECT id, name, contact FROM people WHERE id=?").get(personId);
@@ -164,6 +167,42 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
 
   db.exec("BEGIN");
   try {
+    // ⚠ EVERYTHING KEYED ON THE PERSON'S ID HAPPENS FIRST, while the id still resolves to them.
+    //
+    // These four ran AFTER the mode branch, and under `remove` that made three of them do nothing at all. The
+    // people row is deleted there, `PRAGMA foreign_keys = ON` is set in db.mjs, and every one of these tables
+    // declares `person_id ... ON DELETE SET NULL` — so by the time the sweeps ran, no row matched the id any more
+    // and a hard erasure left behind:
+    //
+    //   - the person's NAME in `audit.actor_name`, because pseudonymiseAuditActor matches on actor_id;
+    //   - their own notes, free text and all;
+    //   - notification bodies, which the schema comment says carry names ("Hi Volunteer One — ...").
+    //
+    // Measured, not deduced: an erasure with mode=remove reported `auditRenamed: 0` and the row still read the
+    // person's full name. The comment that used to sit here reasoned about this exact mechanism — "under `remove`
+    // the people row is gone by now and the foreign key has set actor_id to NULL" — and drew the opposite
+    // conclusion from it, treating the nulled id as the REASON to pseudonymise rather than as what made
+    // pseudonymising impossible. Prose can describe a mechanism correctly and still miss what follows.
+    //
+    // It went unnoticed because the test that covered both modes never ran this one: the fixture had a single
+    // admin, so `remove` hit the last-admin guard and `continue`d. A skipped branch inside a loop, passing as
+    // coverage.
+    //
+    // Messages about somebody mention them by name, so they go outright.
+    notificationsRemoved = db.prepare("DELETE FROM notifications WHERE person_id=?").run(personId).changes;
+    // Their own notes go ENTIRELY, and the asymmetry with the audit trail is the point. An audit row is a record OF
+    // an action, and keeping it under a #id label still answers "who did this". A note is the person's own sentence,
+    // and there is no version of it with the person taken out — so over free text the right to erasure is only
+    // satisfiable by deleting the text. What this cannot reach is their name inside somebody ELSE's note;
+    // docs/PRIVACY.md says so plainly rather than implying a completeness that is not available.
+    notesRemoved = deleteNotesBy(db, personId);
+    // The audit keeps its rows and loses the human: pseudonymising rather than deleting is the whole bargain — the
+    // log keeps its answer to "who", erasure takes away "which human", and neither gives up what it exists for.
+    auditRenamed = pseudonymiseAuditActor(db, personId);
+    // And their address out of the details, which the line above does not touch: one action used to write an email
+    // address into `detail`, and nothing reached it. Both modes, for the same reason as the actor rename.
+    auditScrubbed = scrubAuditDetail(db, personId, person.contact);
+
     if (mode === "anonymise") {
       // A stable, obviously-not-a-name label. Keyed on the id so two erased people stay distinguishable in
       // the history without either being identifiable.
@@ -190,25 +229,13 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
       db.prepare("UPDATE invitations SET email='erased', person_id=NULL WHERE person_id=?").run(personId);
       db.prepare("DELETE FROM people WHERE id=?").run(personId);
     }
-    // Messages about them mention them by name.
-    db.prepare("DELETE FROM notifications WHERE person_id=?").run(personId);
-    // And the audit trail, which stores the actor's name as it was so that a deleted person does not reduce a
-    // record to "somebody did this". BOTH modes, and the ordering matters: under `remove` the people row is gone
-    // by now and the foreign key has set actor_id to NULL, so the stored name is the only thing left pointing at
-    // a human being. Pseudonymising rather than deleting is the whole bargain — the audit keeps its answer to
-    // "who", erasure takes away "which human", and neither has to give up the thing it exists for.
-    auditRenamed = pseudonymiseAuditActor(db, personId);
-    // And their address out of the details, which the line above does not touch. See scrubAuditDetail: one action
-    // used to write an email address into `detail`, and nothing here reached it — so the log kept naming a person
-    // whose row had just been deleted. Both modes, for the same reason as the actor rename.
-    auditScrubbed = scrubAuditDetail(db, personId, person.contact);
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
 
   const after = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id=?").get(personId).n;
   return { ok: true, mode, was: person.name, availabilityRemoved: before.availability,
            assignmentsBefore: before.assignments, assignmentsStillLinked: after, released, auditRenamed,
-           auditScrubbed };
+           auditScrubbed, notesRemoved, notificationsRemoved };
 }
 
 // ---- export -------------------------------------------------------------------------------------------

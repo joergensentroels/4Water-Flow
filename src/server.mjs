@@ -26,6 +26,8 @@ import { makeLimiter, clientKey } from "./ratelimit.mjs";
 import { recordAudit, listAudit, countAudit, describeAudit, hasOlderAudit } from "./audit.mjs";
 import { erasePerson, exportPerson, exportSeasonCsv, runRetention, retentionConfig } from "./retention.mjs";
 import { renderAudit } from "./pages/audit.mjs";
+import { renderSession, sessionFlash } from "./pages/session.mjs";
+import { listNotes, addNote, deleteNote, noteCounts } from "./notes.mjs";
 import { holidayConfig, holidaysBetween } from "./holidays.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
@@ -33,7 +35,8 @@ import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
          eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason, slotEmptyReason,
-         attendedCount, markAttendance, unmarkedShifts } from "./queries.mjs";
+         attendedCount, markAttendance, unmarkedShifts,
+         sessionDetail, peopleOnSession } from "./queries.mjs";
 import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
          personByCalendarToken } from "./calendar.mjs";
 
@@ -292,7 +295,52 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = gate({ req, res });
     if (!c) return;
     const sid = seasonId();
-    send(res, 200, renderPlan({ t, roles: c.roles, who: c.who, personId: c.personId, rows: sid ? planForSeason(db, sid) : [] }));
+    const rows = sid ? planForSeason(db, sid) : [];
+    send(res, 200, renderPlan({
+      t, roles: c.roles, who: c.who, personId: c.personId, rows,
+      // ONE query for every session on the page. The per-row alternative is the N+1 this project has fixed twice,
+      // and this page renders the whole season — 173 sessions in the measured fixture.
+      notes: noteCounts(db, [...new Set(rows.map((r) => r.sessionId))]),
+    }));
+  });
+
+  // ---- one session, and the notes on it -----------------------------------------------------------------
+  //
+  // Every signed-in person may read and write here. That is a decision about a volunteer organisation of forty
+  // people who already share a chat channel, not an oversight: a note says "bring the speaker", and hiding it from
+  // whoever might take the shift would defeat the point. What is NOT possible is touching somebody else's words.
+  app.get("/session/:id", ({ req, res, params, query }) => {
+    const c = gate({ req, res });
+    if (!c) return;
+    const detail = sessionDetail(db, Number(params.id));
+    if (!detail) return send(res, 404, renderErrorPage(t, 404));
+    send(res, 200, renderSession({
+      t, session: c.session, roles: c.roles, who: c.who, me: c.personId, detail,
+      people: peopleOnSession(db, detail.id),
+      notes: listNotes(db, detail.id),
+      canWrite: true,
+      flash: sessionFlash(t, query.get("r")),
+    }));
+  });
+
+  app.post("/session/:id/note", async ({ req, res, params }) => {
+    const c = await postGate({ req, res });
+    if (!c) return;
+    const id = Number(params.id);
+    const r = addNote(db, id, { personId: c.personId, authorName: c.who, body: c.form.body });
+    if (!r.ok && r.reason === "no_such_session") return send(res, 404, renderErrorPage(t, 404));
+    redirect(res, `/session/${id}?r=${r.ok ? "note_added" : r.reason}`);
+  });
+
+  // Deleting your OWN note. Which note comes from the URL; WHOSE it is comes from the session and never from the
+  // form — the same rule as the profile page, where a person field in a form is a person field an attacker fills in.
+  app.post("/note/:id/delete", async ({ req, res, params }) => {
+    const c = await postGate({ req, res });
+    if (!c) return;
+    const note = db.prepare("SELECT session_id AS sessionId FROM notes WHERE id=?").get(Number(params.id));
+    if (!note) return send(res, 404, renderErrorPage(t, 404));
+    const r = deleteNote(db, Number(params.id), c.personId);
+    redirect(res, `/session/${note.sessionId}?r=${r.ok ? "note_deleted" : r.reason}`);
   });
 
   // ---- the vagtbÃ¸rs (increment D) ----------------------------------------------------------------------

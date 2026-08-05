@@ -84,9 +84,18 @@ test("a planner unassigning somebody is attributable afterwards", async () => {
 
 // The GDPR bargain, and the reason it is a bargain: the audit keeps its answer to "who", erasure takes away
 // "which human". If either side took everything, the other would be pointless.
+// ⚠ TWO ADMINS in the fixture, and that is the whole reason this test now covers what it claims to.
+//
+// It had one, so the erased person WAS the last administrator, `remove` hit the last-admin guard, and the loop
+// `continue`d — the mode was never exercised. Under it, the pseudonymisation did nothing at all: the people row is
+// deleted first, `PRAGMA foreign_keys = ON`, and `audit.actor_id ... ON DELETE SET NULL` had already nulled the id
+// the UPDATE matches on. A hard erasure left the person's full name in the log and reported `auditRenamed: 0`.
+//
+// A skipped branch inside a loop reads exactly like a covered one. The guard was doing its job; the fixture made
+// the test agree with it and call that a pass.
 test("erasure pseudonymises the actor in the audit but keeps the rows", async () => {
   for (const mode of ["anonymise", "remove"]) {
-    const w = await makeWorld({ volunteers: 2, roles: { 0: ["admin", "planner"] } });
+    const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"], 1: ["admin"] } });
     try {
       const actor = w.people[0];
       recordAudit(w.db, { actorId: actor, actorName: "Alice Planner", action: "planner.unassign", subject: "assignment:1" });
@@ -95,8 +104,10 @@ test("erasure pseudonymises the actor in the audit but keeps the rows", async ()
       assert.equal(before, 2, "the fixture must write audit rows, or this test proves nothing");
 
       const r = erasePerson(w.db, actor, { mode, today: w.today });
-      assert.ok(r.ok || r.reason === "last_admin", `erase ${mode} failed unexpectedly: ${r.reason}`);
-      if (!r.ok) continue;   // a lone admin cannot be erased; that guard has its own test
+      // NOT tolerated any more. `if (!r.ok) continue` is what let `remove` skip itself for three commits: the
+      // fixture had one admin, the guard refused, and the loop moved on reporting a pass. There is a second admin
+      // now, so a refusal here means something is wrong rather than that the case does not apply.
+      assert.ok(r.ok, `erase ${mode} was refused (${r.reason}) — the fixture has two admins, so it must succeed`);
 
       assert.equal(countAudit(w.db), before, `${mode}: audit rows were deleted — the trail must survive erasure`);
       const names = new Set(listAudit(w.db).map((x) => x.actorName));

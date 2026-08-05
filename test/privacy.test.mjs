@@ -95,6 +95,7 @@ const NOTICE_PHRASES = {
   invitations: [/invit/i],
   notifications: [/messages/i, /beskeder/i],
   audit: [/logged/i, /logget/i],
+  notes: [/notes on a shift/i, /noter på en vagt/i],
 };
 
 test("the volunteer's own notice covers every category held about them", () => {
@@ -148,7 +149,10 @@ test("nothing the notice says is NOT stored is in the schema", () => {
   const sentence = m[1].replace(/\([^)]*\)/g, " ").split(".")[0];
 
   const claims = sentence.split(/,| or /).map((s) => s.trim()).filter((s) => /^no\b/.test(s));
-  assert.ok(claims.length >= 3, `expected several 'no X' claims, found ${claims.length} in: ${sentence}`);
+  // Two is now the floor, and the reason the number fell is the point of this whole test: the paragraph used to
+  // claim "no free-text notes about people", and notes on a shift made that false, so the claim was RETIRED rather
+  // than left standing. A check that demanded three would have made removing a false claim fail.
+  assert.ok(claims.length >= 2, `expected several 'no X' claims, found ${claims.length} in: ${sentence}`);
 
   // A claim contradicts the schema when EVERY significant word in it names something in the schema. Requiring all
   // of them is what keeps "no payment details" quiet: `audit.detail` exists, "payment" does not, so the phrase as

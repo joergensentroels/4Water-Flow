@@ -10,12 +10,12 @@ and chasing cover) rather than the part that is most interesting to build — au
 **Not only defects any more.** 4water answered the questions from the spec read-back, and the answers were feature
 work: attendance counting (which forced Score into two numbers — see item 5 below), an audit trail with a screen to
 read it, disclosure of both to the board and to volunteers, and public holidays suppressed by default with the
-planner opting a date back in. Still one thing per commit, still `git log` as the record. **One thing they asked for
-is NOT built: a chat facility**, which needs a decision between a planner broadcast and per-slot notes — Mattermost
-already runs with the same sign-in, so a third general chat is the option worth arguing against. Shift swaps are
-noted but not designed.
+planner opting a date back in. Still one thing per commit, still `git log` as the record. **The chat facility is built as NOTES ON A SHIFT**, which was my choice of the three shapes rather than
+4water's: a general chat would compete with the Mattermost they already have, and a planner broadcast is the same
+table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
+noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 447 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 458 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
