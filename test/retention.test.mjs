@@ -343,7 +343,14 @@ test("the season CSV distinguishes the two halves of a class", withAdmin({}, asy
                                     (SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id) AS slots
                                FROM sessions s JOIN activities act ON act.id=s.activity_id
                               WHERE s.season_id=? AND slots > 1 LIMIT 1`).get(w.seasonId);
-  if (!pair) return;                              // a config with no multi-role activity has nothing to assert
+  // ASSERTED, not skipped. `if (!pair) return` reads as defensive and is not: it hands the test a way to report
+  // success having checked nothing, and the only thing standing between that and a green run is the contents of
+  // config/pattern.json. The same shape was already fixed once in this suite, where `if (!clash) return` would
+  // have let the double-booking test pass by declining to look — there, proving the fixture always provides what
+  // the test needs turned a silent skip into a real check. Same here: the configured pattern has a two-role
+  // activity, so if this ever fails the fixture changed and somebody needs to know rather than not.
+  assert.ok(pair, "the configured pattern must contain an activity with more than one slot, or this test — which " +
+                  "exists to prove the two halves of a class are distinguishable — proves nothing at all");
 
   const csv = exportSeasonCsv(w.db, w.seasonId);
   const header = csv.split("\r\n")[0].split(",").map((f) => f.replace(/"/g, ""));

@@ -4,7 +4,27 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
+// Tolerates a leading byte-order mark, and names the file when it still cannot parse.
+//
+// RUNBOOK tells an operator to hand-edit config/pattern.json for four values — the clock times, the hand-back
+// cutoff, the shift length, the CSV delimiter. Notepad and several other Windows editors write a BOM when they
+// save, and `JSON.parse` refuses one. Measured on a file differing from the working config by exactly that one
+// invisible character: a SyntaxError complaining about an unexpected token which itself renders as nothing,
+// quoting a snippet that appears to begin with an ordinary brace.
+//
+// The real server exited 1 with that stack and nothing else: no filename, no hint that the content is fine and
+// the first character is not, and nothing an operator could act on. For a failure caused by saving a file in the
+// obvious editor, that is the worst possible diagnosis.
+//
+// This app already writes a BOM deliberately, in the CSV export, precisely because Windows tools expect one — so
+// it knows they exist. Refusing to read what its own environment produces was the asymmetry. Stripping is what
+// every BOM-aware reader does (Python's `utf-8-sig`, Excel, LibreOffice); it changes nothing for a file without
+// one, since the mark is only meaningful at the very start.
+const readJson = (p) => {
+  const text = readFileSync(p, "utf8").replace(/^\uFEFF/, "");
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error(`config: ${p} is not valid JSON — ${e.message}`); }
+};
 
 // Which build is running, read once at load and shown on /status.
 //

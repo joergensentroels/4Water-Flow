@@ -2,9 +2,11 @@
 // refuses to load. Both are tested directly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
-import { validatePattern, loadPattern } from "../src/config.mjs";
+import { ROOT, validatePattern, loadPattern } from "../src/config.mjs";
 import { setRole, setCapability, setPersonStatus, savePattern, patternFromForm, addActivityToForm, peopleWithDetail } from "../src/admin.mjs";
 import { rolesOf, hasRole } from "../src/auth.mjs";
 import { erasePerson } from "../src/retention.mjs";
@@ -211,6 +213,45 @@ test("a revoked invite cannot be redeemed afterwards", withAdmin({}, async (w) =
 }));
 
 // ---- config editing -----------------------------------------------------------------------------------
+// RUNBOOK sends an operator to hand-edit config/pattern.json for four values. Notepad and friends write a
+// byte-order mark when they save, and JSON.parse refuses one — so the app died at boot on a file differing from
+// the working config by a single invisible character, with a SyntaxError that named no file and gave no hint that
+// the content was fine and the first character was not. Found by making exactly that mistake in a test harness.
+//
+// The asymmetry is the argument: this app WRITES a BOM deliberately in the CSV export because Windows tools want
+// one, then refused to read what those same tools produce.
+test("a config saved with a byte-order mark still loads, and a broken one names the file", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "4water-bomcfg-"));
+  try {
+    const good = readFileSync(path.join(ROOT, "config", "pattern.json"), "utf8");
+    // Built from a code point, so this file does not contain the character it is about — the same trick
+    // seams.test.mjs uses, and the reason it is needed is that writing the literal here would trip the
+    // invisible-character scan. Doing it the wrong way first is how that lesson was learned, five times.
+    const bom = String.fromCodePoint(0xfeff);
+
+    const withBom = path.join(dir, "bom.json");
+    writeFileSync(withBom, bom + good, "utf8");
+    assert.equal(readFileSync(withBom, "utf8").length, good.length + 1, "precondition: exactly one extra character");
+    const loaded = loadPattern(withBom);
+    assert.equal(loaded.season.key, loadPattern().season.key, "a leading mark must not change what the file means");
+
+    // Only at the very start, where the mark is meaningful. One in the middle is genuinely broken JSON.
+    const middle = path.join(dir, "middle.json");
+    writeFileSync(middle, good.replace(/"season"/, bom + '"season"'), "utf8");
+    assert.throws(() => loadPattern(middle), /not valid JSON/, "a mark inside the document is still an error");
+
+    // And the error names the file, which the raw SyntaxError did not — an operator who has just edited one of
+    // several JSON files needs to know which one.
+    const broken = path.join(dir, "broken.json");
+    writeFileSync(broken, "{ not json", "utf8");
+    assert.throws(() => loadPattern(broken), (e) => {
+      assert.match(e.message, /not valid JSON/);
+      assert.ok(e.message.includes("broken.json"), `the error must name the file, got: ${e.message}`);
+      return true;
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("the validator rejects every way of breaking the config", () => {
   const good = loadPattern();
   const bad = [

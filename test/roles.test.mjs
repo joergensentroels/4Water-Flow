@@ -345,7 +345,12 @@ test("a shift-became-free announcement names the role", async () => {
     for (const p of w.people) makeAvailableEverywhere(w.db, p);
     const roled = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
                                  WHERE a.role IS NOT NULL AND s.date >= ? ORDER BY s.date LIMIT 1`).get(w.today);
-    if (!roled) return;                                  // a pattern with no partner dance has nothing to assert
+    // ASSERTED, not skipped — and this test of all of them, because eight lines below is a comment recording that
+    // it "passed for the wrong reason once already" when a silent redirect made a missing announcement look like a
+    // broken feature. An early return here is a second way to pass for the wrong reason, sitting directly above the
+    // note about the first. The configured pattern has role slots; if it stops having them this must say so.
+    assert.ok(roled, "the configured pattern must open role-specific slots, or this test cannot exercise the " +
+                     "announcement path it exists for");
     // Give it to someone, then have a planner free it — that is the path that announces.
     const who = w.db.prepare(`SELECT p.id FROM people p WHERE p.preferred_role IN ('l','f','b') LIMIT 1`).get().id;
     w.db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(who, roled.id);
