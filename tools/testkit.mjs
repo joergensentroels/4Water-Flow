@@ -33,7 +33,7 @@ export async function waitFor(fn, { timeoutMs = 2000, everyMs = 10 } = {}) {
 }
 
 export async function makeWorld({ volunteers = 2, openSessions = true, roles = {}, today, notifier = null,
-                                  patternFile = null } = {}) {
+                                  patternFile = null, onPatternChange = null } = {}) {
   const pattern = loadPattern();
   const db = new DatabaseSync(":memory:");
   migrate(db);
@@ -67,7 +67,11 @@ export async function makeWorld({ volunteers = 2, openSessions = true, roles = {
   const scratch = patternFile ?? path.join(os.tmpdir(), `4water-pattern-${process.pid}-${++worldCounter}.json`);
   writeFileSync(scratch, JSON.stringify(pattern, null, 2) + "\n", "utf8");
 
-  built = buildApp({ db, pattern, env: TEST_ENV, notifier: wired, patternFile: scratch, today: () => clock });
+  // Passed through so a test can watch config reloads the way the boot block does. The boot block builds the
+  // nudge job's season getter over a mutable holder that this callback updates; without a way to exercise that,
+  // the only test of it would be reading the code.
+  built = buildApp({ db, pattern, env: TEST_ENV, notifier: wired, patternFile: scratch, onPatternChange,
+                     today: () => clock });
   const server = built.listen(0);
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${server.address().port}`;

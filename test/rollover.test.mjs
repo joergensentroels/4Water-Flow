@@ -99,6 +99,76 @@ test("rolling over starts an empty season and carries people and capabilities", 
   assert.equal(score(w.db, w.people[1], w.seasonId), 1, "and the previous season still remembers");
 }));
 
+// The rollover moved the pages and left the BACKGROUND JOBS behind, which is the half nothing looked at.
+//
+// buildApp keeps a mutable `cfg` so an admin's config edit is picked up without a restart. The boot block built
+// the nudge job's season getter as a closure over the pattern it loaded at startup — a different variable, never
+// reassigned. Measured through this same route before the fix: rolling 2026-Q1Q2 to 2026-Q3Q4 seeded 106 sessions
+// into the new season, the pages followed, and the jobs' getter still returned the OLD season's id. Both
+// notification features then work a season entirely in the past, so nobody is nudged and nobody is reminded until
+// somebody restarts — and /status shows a recent run having sent 0, which is what a healthy quiet instance looks
+// like. Season rollover is the one operation this app was built to support.
+//
+// The control is the point of this test: it holds BOTH getters, the fixed one and the frozen one, and asserts they
+// now disagree. Without the frozen half it would pass on an app that never reloads anything.
+test("a rollover moves the season the background jobs work on, not just the pages", async () => {
+  const reloads = [];
+  const w = await makeWorld({
+    volunteers: 3, roles: { 0: ["admin"] },
+    onPatternChange: (next) => reloads.push(next),
+  });
+  try {
+    // Exactly the boot block's wiring: a mutable holder the callback updates, and a getter over it.
+    let live = w.pattern;
+    const jobsSeasonId = () => w.db.prepare("SELECT id FROM seasons WHERE key = ?").get(live.season.key)?.id ?? null;
+    // And the frozen version, which is what the code used to do.
+    const frozen = w.pattern;
+    const staleSeasonId = () => w.db.prepare("SELECT id FROM seasons WHERE key = ?").get(frozen.season.key)?.id ?? null;
+    const before = jobsSeasonId();
+    assert.ok(before, "precondition: the jobs can see the current season to begin with");
+
+    const next = proposeNextSeason(w.pattern);
+    const admin = await w.signIn(w.people[0]);
+    const { token } = await w.csrfFrom("/admin", admin);
+    const r = await w.post("/admin/season", admin, new URLSearchParams({
+      csrf: token, seasonKey: next.key, seasonFrom: next.from, seasonTo: next.to,
+    }));
+    assert.equal(reasonOf(r), "saved");
+
+    // The hook fired, once, with the pattern that was actually written.
+    assert.equal(reloads.length, 1, "a config edit must announce itself, or anything holding the old one is stale");
+    assert.equal(reloads.at(-1).season.key, next.key);
+
+    // Keep the holder in step exactly as the boot block does, then check what the jobs would now query.
+    live = reloads.at(-1);
+    const created = w.db.prepare("SELECT id FROM seasons WHERE key=?").get(next.key);
+    assert.ok(created, "the new season should be materialised");
+    assert.equal(jobsSeasonId(), created.id, "the nudge and the shift reminders must follow the season over");
+    assert.notEqual(jobsSeasonId(), before, "and must not still be pointed at the season that just ended");
+
+    // THE CONTROL: the frozen getter is still on the old season. If this ever stops being true, this test has
+    // stopped distinguishing the fix from the bug.
+    assert.equal(staleSeasonId(), before,
+      "a getter closed over the booted pattern must still be stale — that is the defect this reproduces");
+  } finally { w.close(); }
+});
+
+// A wiring check, because the boot block only runs when server.mjs is the main module and no test can reach it.
+// Both features that shipped dead in production were dead for this exact reason: the wiring existed nowhere, and
+// every test built its world through the harness instead. Asserting the wiring is present is the cheapest thing
+// that would have caught either of them.
+test("the boot block wires the config reload into the jobs, and does not close over the booted pattern", () => {
+  const src = readFileSync(path.join(ROOT, "src", "server.mjs"), "utf8");
+  const boot = src.slice(src.indexOf("import.meta.url === pathToFileURL"));
+  assert.ok(boot.length > 500, "the boot block was not located — this check is not looking at anything");
+
+  assert.match(boot, /onPatternChange:/,
+    "the boot block must pass onPatternChange, or an admin's season change never reaches the nudge timer");
+  assert.match(boot, /seasonId: currentSeasonId/, "and the jobs must take a getter rather than a fixed id");
+  assert.ok(!/get\(boot\.season\.key\)/.test(boot),
+    "the jobs' season getter must not read the booted pattern directly — that is what went stale");
+});
+
 test("the admin screen offers the rollover pre-filled, and the button names the season", withAdmin({}, async (w) => {
   const admin = await w.signIn(w.people[0]);
   const body = await (await w.get("/admin", admin)).text();

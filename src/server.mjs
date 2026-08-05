@@ -37,8 +37,9 @@ import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
 // in tests. Returns an ISO date string because everything stored is a date, not an instant.
 // `patternFile` is injectable so a test never rewrites the repository's own config. Without it, running the
 // admin suite would silently edit config/pattern.json — a test that damages the thing it is testing.
+// `onPatternChange` exists because the config is mutable HERE and was frozen everywhere else. See reloadPattern.
 export function buildApp({ db, pattern = loadPattern(), env = process.env, notifier = null,
-                           patternFile = PATTERN_FILE, jobs = null,
+                           patternFile = PATTERN_FILE, jobs = null, onPatternChange = null,
                            today = () => new Date().toISOString().slice(0, 10) } = {}) {
   const secret = sessionSecret(env);
   const secure = env.NODE_ENV === "production";
@@ -50,7 +51,20 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // credential that only looks rotated — the file says one thing while the process believes another.
   let cfg = pattern;
   let t = makeT(cfg.locale);
-  const reloadPattern = (next) => { cfg = next; t = makeT(cfg.locale); };
+  // ...and ANNOUNCED, because "the running process must pick that up immediately" was true of the routes and
+  // false of the nudge timer. The boot block built the jobs' season getter as a closure over the pattern it
+  // loaded at startup, so `cfg` moved here and that getter did not.
+  //
+  // Measured through the real admin route: rolling over from 2026-Q1Q2 to 2026-Q3Q4 seeded 106 sessions into the
+  // new season, the pages followed it, and the jobs' getter still returned the OLD season's id. Both notification
+  // features then operate on a season that is entirely in the past, so `volunteersNeedingNudge` finds no dates in
+  // its window and `shiftsNeedingReminder` finds no shifts — nobody is nudged and nobody is reminded, until
+  // somebody restarts the process. `/status` reports a recent run having sent 0, which is precisely what a
+  // healthy quiet instance looks like: jobs.mjs warns in its own comments that a dead nudge and an unneeded one
+  // are indistinguishable from outside, and this is how that happens.
+  //
+  // Season rollover is the one operation this app was explicitly built to support, so the failure is not exotic.
+  const reloadPattern = (next) => { cfg = next; t = makeT(cfg.locale); onPatternChange?.(next); };
   const seasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(cfg.season.key)?.id ?? null;
 
   // Throttle for the two endpoints reachable without a session. An alarm, not a lock — see ratelimit.mjs.
@@ -775,7 +789,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const notifyCfg = notifyConfig(process.env);
   const notifier = makeNotifier({ db, config: notifyCfg });
   const bootT = makeT(boot.locale ?? "en");
-  const currentSeasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(boot.season.key)?.id ?? null;
+  // The LIVE pattern, not the booted one. `boot` is loaded once and never reassigned, so a season getter closed
+  // over it goes stale the moment an admin rolls the season over from the Administration screen — and both
+  // notification features then work a season that is entirely in the past. buildApp calls `onPatternChange` from
+  // its reloadPattern, which is the only thing that keeps this in step.
+  let live = boot;
+  const currentSeasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(live.season.key)?.id ?? null;
   // The formatters go in from here, where the view layer is already imported. jobs.mjs contains no date wording
   // and no role vocabulary on purpose, and a shift reminder that read "2026-03-15 19:00 Salsa l" would be worse
   // than none — it is read in a chat channel with none of the app's context around it.
@@ -789,8 +808,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const port = Number(process.env.PORT) || 8080;
   const host = process.env.HOST || "127.0.0.1";
-  const server = buildApp({ db, pattern: boot, patternFile: configFile, notifier, jobs })
-    .listen(port, host, () => console.log(`4water listening on http://${host}:${port}`));
+  const server = buildApp({
+    db, pattern: boot, patternFile: configFile, notifier, jobs,
+    // Without this the nudge and the shift reminders keep working the season that was current when the process
+    // started. `remindDaysBefore` is deliberately NOT re-read: nothing in the admin screen can change it, so a
+    // file edit plus a restart is the only way to set it and boot-capture is the honest behaviour there.
+    onPatternChange: (next) => {
+      live = next;
+      console.log(`config reloaded: season ${next.season.key}`);
+    },
+  }).listen(port, host, () => console.log(`4water listening on http://${host}:${port}`));
 
   // listen() is ASYNCHRONOUS, so the success line has to be its callback. Printed on the next statement — which
   // it was — the app announces "4water listening on ..." and then dies of EADDRINUSE, and the log reads as a
