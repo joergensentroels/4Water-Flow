@@ -137,6 +137,21 @@ Sign in as an admin → **Administration** → find the person → press `+ Plan
 The last administrator **cannot** remove their own admin role. If you genuinely need to hand over, grant
 admin to the other person first, then remove it from yourself.
 
+**⚠ Marking somebody inactive does NOT take their access away.** This is the one thing on this page most likely
+to be assumed wrong, so it is measured rather than described: `status='inactive'` is honoured by the eligibility
+rules and the auto-roster — it stops them being offered or assigned anything, which is what it is for — and by
+nothing else. It does not remove a role, and it does not stop them signing in. **An administrator who has stood
+down still has full administrative access until you remove the role explicitly.** When somebody leaves, do both:
+remove the role, then set them inactive.
+
+Two related things follow from that, and both used to be wrong in the app rather than just undocumented. An
+inactive admin is not counted as a spare when the app decides whether removing an admin would lock the
+organisation out — correct, because an org that has stood somebody down is not relying on them. But that count
+and the "is this person an admin" test disagreed about anybody inactive, so the app refused to remove a
+stood-down admin's stale role *and* refused their own right-to-erasure request, both reporting "the last
+administrator" when an active administrator was sitting right there. Fixed; the guard still refuses to erase or
+demote the genuinely last active administrator.
+
 ## Add a volunteer who has no NextCloud account
 
 **Administration** → **Invitations** → enter their email → **Send an invitation**. The link appears **once**

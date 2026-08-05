@@ -112,14 +112,24 @@ export function erasePerson(db, personId, { mode, now = new Date() }) {
   const person = db.prepare("SELECT id, name FROM people WHERE id=?").get(personId);
   if (!person) return { ok: false, reason: "no_such_person" };
 
-  // The same guard as removing an admin role: an organisation must not be able to erase its way out of
-  // having an administrator.
+  // The same guard as removing an admin role: an organisation must not be able to erase its way out of having
+  // an administrator.
+  //
+  // Both halves count the same thing, which they did not used to. The tally was of ACTIVE admins and the
+  // "is this person one" test had no status filter, so the two disagreed about anybody inactive — and the
+  // asymmetry refused a request it had no reason to refuse. Measured: one active admin plus a former admin
+  // marked inactive (which is the documented way to handle somebody leaving, and leaves their role row in
+  // place) gave a tally of 1, an `isAdmin` of true, and `{ ok: false, reason: "last_admin" }` for the former
+  // admin's own erasure request. Nothing was at risk of lockout; the app refused a right-to-erasure request and
+  // gave a reason that was not true. A guard that fails closed is not automatically a safe guard when what it
+  // closes is somebody's GDPR request.
   const admins = db.prepare(`SELECT COUNT(*) n FROM person_roles pr JOIN roles r ON r.id=pr.role_id
                               JOIN people p ON p.id=pr.person_id
                              WHERE r.name='admin' AND p.status='active'`).get().n;
-  const isAdmin = db.prepare(`SELECT 1 FROM person_roles pr JOIN roles r ON r.id=pr.role_id
-                               WHERE pr.person_id=? AND r.name='admin'`).get(personId);
-  if (isAdmin && admins <= 1) return { ok: false, reason: "last_admin" };
+  const isActiveAdmin = db.prepare(`SELECT 1 FROM person_roles pr JOIN roles r ON r.id=pr.role_id
+                                     JOIN people p ON p.id=pr.person_id
+                                    WHERE pr.person_id=? AND r.name='admin' AND p.status='active'`).get(personId);
+  if (isActiveAdmin && admins <= 1) return { ok: false, reason: "last_admin" };
 
   const before = {
     assignments: db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id=?").get(personId).n,
@@ -222,12 +232,12 @@ export function exportSeasonCsv(db, seasonId, { delimiter = ",", bom = true } = 
   // system ANSI codepage: measured, "Søren Nørgård" renders as "SÃ¸ren NÃ¸rgÃ¥rd". For a Danish organisation
   // that is most volunteer names in the export, in the one artefact the board is most likely to open.
   //
-  // `﻿` as an escape, never the literal character: a BOM pasted into source is invisible, so a later edit
+  // `\uFEFF` as an escape, never the literal character: a BOM pasted into source is invisible, so a later edit
   // can delete or duplicate it with nothing on screen to show for it.
   //
   // The cost is honest rather than zero. Readers that strip a leading BOM — Excel, LibreOffice, Google Sheets,
   // Python's utf-8-sig, Node reading with a BOM-aware decoder — see nothing. A reader that does NOT strip it
-  // gets the mark glued to the first header name, so the first column is called `﻿"date"` instead of
+  // gets the mark glued to the first header name, so the first column is called `\uFEFF"date"` instead of
   // `date`. That is a cosmetic surprise in one cell, against mojibake in every Danish name on every row.
-  return bom ? `﻿${body}` : body;
+  return bom ? `\uFEFF${body}` : body;
 }

@@ -60,7 +60,16 @@ export function setRole(db, personId, roleName, on) {
     const admins = db.prepare(`SELECT COUNT(*) n FROM person_roles pr JOIN roles r ON r.id = pr.role_id
                                 JOIN people p ON p.id = pr.person_id
                                 WHERE r.name='admin' AND p.status='active'`).get().n;
-    if (admins <= 1) return { ok: false, reason: "last_admin" };
+    // Only refuse if THIS person is one of the admins being counted. The tally alone is not enough: it counts
+    // active admins, so with one active admin plus a former one marked inactive it reads 1 and refused to strip
+    // the stale role from the inactive person — a role that still grants full access, since inactive revokes
+    // neither sign-in nor privileges. It refused the very tidy-up that would have made the situation safe.
+    // Measured, together with the identical asymmetry in erasePerson.
+    const targetIsActiveAdmin = db.prepare(`SELECT 1 FROM person_roles pr JOIN roles r ON r.id = pr.role_id
+                                             JOIN people p ON p.id = pr.person_id
+                                            WHERE pr.person_id=? AND r.name='admin' AND p.status='active'`)
+      .get(personId);
+    if (targetIsActiveAdmin && admins <= 1) return { ok: false, reason: "last_admin" };
   }
   db.prepare("DELETE FROM person_roles WHERE person_id=? AND role_id=?").run(personId, role.id);
   return { ok: true };

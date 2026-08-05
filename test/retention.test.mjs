@@ -233,7 +233,7 @@ test("the season CSV quotes every field so a comma or apostrophe cannot shift a 
   assignSlot(w.db, slot, w.people[1], { expectPersonId: null });
 
   const csv = exportSeasonCsv(w.db, w.seasonId);
-  assert.equal(csv[0], "﻿", "the export leads with a UTF-8 BOM — see the encoding test below");
+  assert.equal(csv[0], "\uFEFF", "the export leads with a UTF-8 BOM — see the encoding test below");
   const lines = csv.slice(1).trim().split("\r\n");
   assert.equal(lines[0], '"date","time","activity_key","activity","role","person","state"');
   assert.match(csv, /"O'Brien, ""Bo"""/, "internal quotes must be doubled, not dropped");
@@ -261,7 +261,7 @@ test("Danish names survive the round trip a spreadsheet actually makes", withAdm
   // A BOM-aware reader — which is what every spreadsheet is — gets the name back exactly.
   const decoded = new TextDecoder("utf-8", { ignoreBOM: false }).decode(bytes);
   assert.ok(decoded.includes("Søren Nørgård"), "a BOM-aware reader must see the real name");
-  assert.ok(!decoded.startsWith("﻿"), "and must not see the mark itself");
+  assert.ok(!decoded.startsWith("\uFEFF"), "and must not see the mark itself");
 
   // Turning the BOM off reproduces the defect, so this test is measuring the fix rather than describing it.
   const naked = exportSeasonCsv(w.db, w.seasonId, { bom: false });

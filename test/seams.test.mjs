@@ -110,6 +110,53 @@ test("DoD 6 — and the gate genuinely fails when a name IS planted", () => {
   assert.deepEqual(offences(literalsIn(innocent), names), [], "translation keys and activity keys are legal");
 });
 
+// A different thing that must not appear in source, checked here because this file already walks it: characters
+// you cannot see.
+//
+// `retention.mjs` writes a UTF-8 byte-order mark at the front of the CSV export, deliberately, and the comment
+// explaining it said: "`\uFEFF` as an escape, never the literal character: a BOM pasted into source is invisible,
+// so a later edit can delete or duplicate it with nothing on screen to show for it." The file then contained
+// THREE literal U+FEFF characters and zero escapes — including the one in the template literal the export
+// depends on. The rule and its violation were three lines apart, and no reading could have caught it, because
+// the thing to notice renders as nothing.
+//
+// Scanned as characters rather than trusted to review. All four of these are invisible and none has a legitimate
+// use in this codebase's source; where the export genuinely needs a BOM it writes the escape, which is ASCII.
+const INVISIBLE = [
+  { code: 0xfeff, name: "U+FEFF byte-order mark", escape: "\\uFEFF" },
+  { code: 0x200b, name: "U+200B zero-width space", escape: "\\u200B" },
+  { code: 0x2060, name: "U+2060 word joiner", escape: "\\u2060" },
+  { code: 0x00ad, name: "U+00AD soft hyphen", escape: "\\u00AD" },
+];
+
+test("no source file contains an invisible character — write the escape instead", () => {
+  const bad = [];
+  for (const file of sourceFiles()) {
+    const src = readFileSync(file, "utf8");
+    for (const { code, name, escape } of INVISIBLE) {
+      const hits = [...src].filter((c) => c.codePointAt(0) === code).length;
+      if (hits) {
+        bad.push(`${path.relative(ROOT, file)}: ${hits}× ${name} — write ${escape} so an edit can see it`);
+      }
+    }
+  }
+  assert.deepEqual(bad, [], `invisible characters in source:\n  ${bad.join("\n  ")}`);
+});
+
+test("and that scan genuinely fires — a BOM built at runtime is caught", () => {
+  // Built from a code point so this test file stays free of the thing it forbids, which is the same trick the
+  // planted-name test above uses. A scan for something invisible is exactly the kind that can silently look at
+  // nothing, so it gets a control.
+  const planted = `const x = "a${String.fromCodePoint(0xfeff)}b";`;
+  const found = INVISIBLE.filter(({ code }) => [...planted].some((c) => c.codePointAt(0) === code));
+  assert.equal(found.length, 1, "the scan must catch a planted BOM");
+  assert.equal(found[0].code, 0xfeff);
+  // And it must not fire on the escape, which is what source is supposed to contain.
+  const innocent = 'const x = "a\\uFEFFb";';
+  assert.equal(INVISIBLE.filter(({ code }) => [...innocent].some((c) => c.codePointAt(0) === code)).length, 0,
+    "the escape sequence is six ASCII characters and must be legal");
+});
+
 test("every string the UI asks for exists in the primary locale", () => {
   const da = loadStrings("da");
   const en = loadStrings("en");

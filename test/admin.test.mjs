@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
 import { validatePattern, loadPattern } from "../src/config.mjs";
 import { setRole, setCapability, setPersonStatus, savePattern, patternFromForm, addActivityToForm, peopleWithDetail } from "../src/admin.mjs";
-import { rolesOf } from "../src/auth.mjs";
+import { rolesOf, hasRole } from "../src/auth.mjs";
+import { erasePerson } from "../src/retention.mjs";
 
 const withAdmin = (opts, fn) => async () => {
   const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin"], 1: ["planner"] }, ...opts });
@@ -46,11 +47,52 @@ test("the last admin cannot remove their own admin role", withAdmin({}, async (w
   assert.ok(!rolesOf(w.db, w.people[0]).includes("admin"));
 }));
 
-test("an inactive admin does not count toward the lockout guard", withAdmin({}, async (w) => {
+// This test's reasoning used to say "an admin who cannot sign in is not a spare admin". That premise is FALSE,
+// and measuring it is what turned up the two defects below. `status='inactive'` is honoured by the eligibility
+// gates and the roster — it stops somebody being offered or assigned anything — and by nothing else. It does not
+// revoke a role, `rolesOf` and `hasRole` do not filter on it, and `linkIdentity` will sign an inactive person
+// straight back in. So an inactive admin retains full administrative access.
+//
+// Excluding them from the tally is still right, for a different reason: an org that has marked somebody inactive
+// is not relying on them, and counting them as a spare would let it believe it has redundancy it is not actually
+// using. What is NOT right is concluding they are harmless — see RUNBOOK on handing over.
+test("an inactive admin is not counted as a spare, though they can still sign in", withAdmin({}, async (w) => {
   setRole(w.db, w.people[2], "admin", true);
   setPersonStatus(w.db, w.people[2], "inactive");
   assert.deepEqual(setRole(w.db, w.people[0], "admin", false), { ok: false, reason: "last_admin" },
-    "an admin who cannot sign in is not a spare admin");
+    "an org that has stood somebody down is not relying on them as its second administrator");
+
+  // The measured half, so the comment above cannot quietly become wrong: inactive revokes nothing.
+  assert.ok(rolesOf(w.db, w.people[2]).includes("admin"),
+    "marking somebody inactive does not remove their roles");
+  assert.equal(hasRole(w.db, w.people[2], "admin"), true,
+    "and it does not revoke the privilege either — this is why RUNBOOK says to remove the role explicitly");
+}));
+
+// The other end of that asymmetry, and a real refusal of a real right. The tally counts ACTIVE admins; the
+// "is this person an admin" test had no status filter. So with one active admin plus a former admin stood down,
+// the guard refused to erase the former admin — reporting `last_admin` when nothing was at risk. Measured before
+// the fix: `{ ok: false, reason: "last_admin" }` for their own erasure request, and the same for tidying up the
+// stale role that was still granting them access.
+test("a former admin who has been stood down can be erased, and their stale role removed", withAdmin({}, async (w) => {
+  setRole(w.db, w.people[2], "admin", true);
+  setPersonStatus(w.db, w.people[2], "inactive");
+  const activeAdmins = () => w.db.prepare(`SELECT COUNT(*) n FROM person_roles pr JOIN roles r ON r.id=pr.role_id
+    JOIN people p ON p.id=pr.person_id WHERE r.name='admin' AND p.status='active'`).get().n;
+  assert.equal(activeAdmins(), 1, "precondition: one active admin, so nothing is at risk of lockout");
+
+  assert.deepEqual(setRole(w.db, w.people[2], "admin", false), { ok: true },
+    "removing a stood-down admin's stale role is the safe tidy-up, not a lockout risk");
+
+  setRole(w.db, w.people[2], "admin", true);   // put it back, and try the erasure with the role still in place
+  setPersonStatus(w.db, w.people[2], "inactive");
+  assert.equal(erasePerson(w.db, w.people[2], { mode: "remove" }).ok, true,
+    "a former administrator's right to erasure must not be refused to protect an admin seat they no longer hold");
+
+  // The control: the guard still does its actual job.
+  assert.deepEqual(erasePerson(w.db, w.people[0], { mode: "remove" }), { ok: false, reason: "last_admin" },
+    "the genuinely last ACTIVE admin must still be un-erasable");
+  assert.deepEqual(setRole(w.db, w.people[0], "admin", false), { ok: false, reason: "last_admin" });
 }));
 
 // ---- roles and capabilities ---------------------------------------------------------------------------
