@@ -6,8 +6,9 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawn } from "node:child_process";
 import { migrate } from "../src/db.mjs";
-import { loadPattern } from "../src/config.mjs";
+import { ROOT, loadPattern } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { makeBackup, prune, verifyBackup, upload, backupConfig, uploadEnabled, describeTarget,
          refuseUnsafeDir, stampFor } from "../tools/backup.mjs";
@@ -148,6 +149,57 @@ test("a missing database is a clear failure, not an empty backup", () => {
     assert.equal(r.ok, false);
     assert.equal(r.reason, "no_database");
     assert.equal(readdirSync(dir).filter((f) => f !== "backups").length, 0);
+  } finally { cleanup(dir); }
+});
+
+// ---- the CLI, run as a process ------------------------------------------------------------------------
+//
+// Everything above tests the exported functions. The MAIN BLOCK is not one of them, and it is where the retention
+// step lives — the part that reads the config and then deletes things. It called `loadPattern()` with no argument,
+// so on any deployment setting FOURWATER_PATTERN (the multi-department plan, and the demo) it applied a DIFFERENT
+// config's retention policy than the app runs on: the wrong season protected from pruning, and the wrong
+// notification window.
+//
+// No unit test reaches that code, and CI's backup step only checks the resulting file is sound — not which config
+// was used. So this spawns the tool for real and reads what it says it did. Verifying my own fix by hand once is
+// not the same as it staying fixed.
+test("the CLI applies the retention policy of the config this instance runs on", async () => {
+  const { dir, dbPath } = realDb();
+  try {
+    // A second department's file, distinguishable purely by its retention numbers.
+    const alt = path.join(dir, "alt-pattern.json");
+    writeFileSync(alt, JSON.stringify({ ...loadPattern(), retention: { seasons: 4, notificationDays: 17 } }, null, 2));
+
+    const run = (env, backupDir) => new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, "tools", "backup.mjs"), "--no-upload"], {
+        env: { ...process.env, FOURWATER_DB: dbPath, FOURWATER_BACKUP_DIR: backupDir, ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      child.stdout.on("data", (d) => { out += d; });
+      child.stderr.on("data", (d) => { out += d; });
+      child.once("exit", (code) => resolve({ code, out }));
+    });
+
+    // Separate directories: the stamp has second precision and refuses to overwrite, which is correct — a backup
+    // must never clobber another — but it means two runs in one second collide. Found by doing exactly that.
+    const withDefault = await run({ FOURWATER_PATTERN: "" }, path.join(dir, "b-default"));
+    assert.equal(withDefault.code, 0, `the default run failed: ${withDefault.out}`);
+    const base = loadPattern();
+    assert.match(withDefault.out, new RegExp(`older than ${base.retention?.notificationDays ?? 90} days`),
+      `the default run should use the repository config's window:\n${withDefault.out}`);
+
+    const withAlt = await run({ FOURWATER_PATTERN: alt }, path.join(dir, "b-alt"));
+    assert.equal(withAlt.code, 0, `the configured run failed: ${withAlt.out}`);
+    assert.match(withAlt.out, /older than 17 days/,
+      `FOURWATER_PATTERN was set and the tool used a different config's retention window:\n${withAlt.out}`);
+    assert.match(withAlt.out, /newest 4/, "and a different season keep count");
+
+    // The control: the two runs must actually DIFFER, or this passes on a tool that ignores both files equally.
+    assert.notEqual(
+      withDefault.out.match(/older than (\d+) days/)?.[1],
+      withAlt.out.match(/older than (\d+) days/)?.[1],
+      "both runs reported the same window, so this test is not distinguishing the configs at all");
   } finally { cleanup(dir); }
 });
 
