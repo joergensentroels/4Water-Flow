@@ -49,7 +49,7 @@ plumbing, and the two most embarrassing ones here were invisible to unit tests e
 **6. Mobile is the target.** The reported pain was "a nightmare to use on the phone". Phone-first is the
 design, not a media query. Planners too: whoever fixes a Sunday-morning dropout is holding a phone.
 
-## If you add a route, four audits will have an opinion
+## If you add a route, five audits will have an opinion
 
 They all walk `app.routes()` or `src/server.mjs` rather than a list somebody maintains, so a new route is covered
 the moment it is registered — which also means you cannot add one and discover later that nothing checked it.
@@ -58,8 +58,19 @@ the moment it is registered — which also means you cannot add one and discover
 |---|---|
 | `test/csrf-audit.test.mjs` | a POST refuses a missing, empty and wrong CSRF token, **and** accepts a good one — the last part is what stops a route that refuses everything from passing. The exception list is derived: exactly the POSTs with no session to carry a token, no more and no fewer |
 | `test/authz-audit.test.mjs` | the route's `gate()`/`postGate()` rule is one this app has, an ungated route is on a short list with a reason each, `/admin/*` gates on `admin` and `/planner/*` on `planner`, and the running server agrees |
+| `test/ownership-audit.test.mjs` | a route with an `:id` either has a probe that tries to act on **another volunteer's** row through it, or a stated reason why its id names nothing one person owns |
 | `test/getwrites.test.mjs` | a GET does not write. One exception, `/auth/callback`, because the protocol makes the sign-in return a GET |
 | `test/names.test.mjs` | every control the route renders has a name of its own (see below) |
+
+**Why the ownership one exists, since the role audit looks like it should cover it.** It cannot, structurally. Every
+route it examines is one a plain volunteer is *entitled* to call, so the role gate says yes and is right to; what
+stops them reaching somebody else's shift is a guard inside the handler. The role audit fills `:id` with `1` and
+asserts the allowed role does not get a 403 — a volunteer successfully deleting the administrator's note satisfies
+it exactly as well as correct behaviour does. Nothing was wrong when this was written; it exists for **shift swaps**,
+where one volunteer reaching for another's shift is the entire feature.
+
+Each probe ends by having the *owner* perform the same action successfully. Without that, a route broken so badly
+that it refuses everybody would pass the whole file.
 
 **Why the GET one exists, in one paragraph, because it is the least obvious.** The CSRF audit proves every POST is
 guarded, which says nothing about GETs — and a GET that writes is the way *round* a CSRF guard rather than through
@@ -241,6 +252,9 @@ check, which is how the shadowing in point 4 came to light.
   page, and an administrator who could not reach the planner screen.
 - If you added a `POST` route, `test/csrf-audit.test.mjs` will check it automatically. If you added an outcome
   code, add its message to both locales — a test checks that too.
+- If the route takes an `:id`, `test/ownership-audit.test.mjs` will fail until you say whether that id names one
+  volunteer's row. Writing the probe is the work: have the other volunteer try it, and finish by having the owner
+  succeed.
 - If you changed something a runbook step depends on, update `RUNBOOK.md`. It is the succession plan, and it is
   wrong the moment it stops matching.
 - **If you landed a feature, re-read README's "What is NOT here" section.** `test/docs.test.mjs` verifies that
