@@ -80,7 +80,16 @@ header.bar .drop { flex: 0 0 auto; color: #5cc8f5; }
 
 main { max-width: 40rem; margin: 0 auto; padding: 1rem; }
 
-nav.tabs { display: flex; gap: .5rem; overflow-x: auto; padding: .5rem 1rem 0; }
+/* WRAPS, and does not scroll sideways. It scrolled until this was measured in a browser at 375px, and the
+   measurement is the argument: a plain volunteer on /plan had five tabs totalling 493px of content, and the one
+   carrying aria-current="page" sat at x=332–418 — OFF SCREEN, with nav.scrollLeft at 0. The accent-coloured "you
+   are here" marker was invisible on the device this app is designed for, for its most common user. An admin had
+   nine tabs over 859px and six off screen, Administration and Log among them.
+   Nothing could scroll it into view, either: the CSP forbids browser JavaScript on purpose, so there is no
+   scrollIntoView to reach for, and there was no gradient or mask hinting that more tabs existed. Wrapping costs
+   one extra row for a volunteer and two for an admin, and is the only fix available that keeps every destination
+   and the current-page marker visible without JavaScript. .chiprow below already wraps for its own reasons. */
+nav.tabs { display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 1rem 0; }
 nav.tabs a {
   flex: 0 0 auto; padding: .55rem .9rem; border-radius: 999px;
   border: 1px solid var(--edge); background: var(--card);
@@ -141,10 +150,16 @@ button:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent); out
 }
 
 /* Bulk availability rows: a label plus a row of scope buttons that wrap. The buttons must not be full-width
-   here — that is the default for a single primary action, but four of them stacked would be a wall. */
-.bulkrow { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .5rem 0; }
-.bulkrow .bulklabel { flex: 0 0 100%; color: var(--muted); font-size: .85rem; }
-.bulkrow button { width: auto; min-width: 4rem; padding: 0 .8rem; font-size: .9rem; }
+   here — that is the default for a single primary action, but four of them stacked would be a wall.
+   .attendrow IS THE SAME SHAPE and was written five commits later: the planner's Yes / No / Not recorded control,
+   reusing this row's own .bulklabel class and matching none of its rules. So the prediction in the sentence above
+   came true on the screen it was written to protect. Measured at 375px: each button 178x48, stacked three deep,
+   every planner row 186px tall and 47 of them on one page — about 8,700px of scrolling to work through an
+   attendance backlog on a phone, which is exactly the task the backlog card exists to make easy.
+   One rule for both, rather than a copy: the decision is the same one, and a copy is what drifted here already. */
+.bulkrow, .attendrow { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .5rem 0; }
+.bulkrow .bulklabel, .attendrow .bulklabel { flex: 0 0 100%; color: var(--muted); font-size: .85rem; }
+.bulkrow button, .attendrow button { width: auto; min-width: 4rem; padding: 0 .8rem; font-size: .9rem; }
 
 details.card > summary { cursor: pointer; font-weight: 600; min-height: var(--tap); display: flex; align-items: center; }
 details.card > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -216,20 +231,26 @@ ul.audit > li { background: var(--card); border: 1px solid var(--line); border-r
 .auditaction { margin: .35rem 0 0; }
 .auditaction code { font-size: .74rem; color: var(--muted); }
 
-/* Filter chips (the planner's horizon). Separate from nav.tabs because these are filters within a page, not
-   navigation between pages — but the sizing rule is the same one: WCAG 2.2 SC 2.5.8 wants at least 24x24 CSS
-   px per target, and these were 17px-tall inline links a single space apart. 40px with a .5rem gap clears it
-   outright rather than relying on the "inline in a sentence" exception. */
+/* Chips. Separate from nav.tabs because these are filters or in-row actions, not navigation between pages — but
+   the sizing rule is the same one: WCAG 2.2 SC 2.5.8 wants at least 24x24 CSS px per target, and these were
+   17px-tall inline links a single space apart. 40px with a .5rem gap clears it outright rather than relying on the
+   "inline in a sentence" exception.
+   .chiprow is the LAYOUT and .chip is the APPEARANCE, and they were one rule until a browser said otherwise. The
+   selector was `.chiprow .chip`, so every chip outside a chiprow silently got nothing — and there are 117 of them
+   on one page: the plan renders `<a class="chip">` per session inside a .daterow, which is not a chiprow. They
+   measured 48x26 with no padding, no border, no radius and min-height:auto — plain text links wearing the class
+   name of a 40px target, with all 465 tests passing. A descendant selector is a silent dependency on markup that
+   lives in a different file. */
 .chiprow { display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0 1rem; }
-.chiprow .chip {
+.chip {
   display: inline-grid; place-items: center;
   min-height: 40px; padding: 0 .85rem;
   border: 1px solid var(--edge); border-radius: 999px;
   background: var(--card); color: var(--fg);
   text-decoration: none; font-size: .9rem;
 }
-.chiprow .chip[aria-current] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
-.chiprow .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.chip[aria-current] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+.chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* Labelled fields on the profile and admin forms. */
 label { display: block; margin: .6rem 0; font-size: .9rem; color: var(--muted); }
@@ -247,6 +268,34 @@ select { min-height: var(--tap); max-width: 100%; padding: 0 .6rem;
   font: inherit; color: var(--fg); background: var(--bg);
   border: 1px solid var(--edge); border-radius: .5rem; }
 select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* THE SAME DEFECT AS THE SELECT ABOVE, third time, and worth reading as a pattern rather than an incident: a form
+   control rule scoped to a `label` ancestor, and a control that does not have one. The note box on /session had NO
+   rule at all — the string "textarea" did not appear in this file — so the app's only free-text field fell back to
+   the browser's intrinsic `cols=20` sizing and measured 157x51 inside a card whose label, hint and button were all
+   309px. Two lines of about twenty characters, for a field that accepts 280.
+   Its colours were the browser's dark-scheme defaults rather than this file's, which `color-scheme: light dark` at
+   the top of this file made look plausible in dark mode and would not have in light. That is the "light-mode
+   controls on a dark page" bug this codebase has already shipped once.
+   `resize: vertical` because a volunteer writing on a phone should be able to grow the box, while horizontal
+   resize in a 375px column only breaks the layout. */
+textarea { display: block; width: 100%; margin-top: .25rem; min-height: calc(var(--tap) * 2); resize: vertical;
+  padding: .5rem .6rem; font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--edge); border-radius: .5rem; }
+textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* Notes on a shift. Same omission as the textarea above and found in the same pass: the class names existed in the
+   markup and nothing in this file mentioned them, so the list rendered with the browser's defaults — `list-style:
+   disc` and `padding-left: 40px`, bullets and an 11%-of-the-screen indent, while every other list here is flush
+   with hairline separators. Author and body came out the same size and colour, so a note had no visual hierarchy
+   at all.
+   `overflow-wrap: anywhere` because this is the only field in the app that accepts free text, and one pasted URL
+   with no spaces in it would otherwise push the column wider than the phone. */
+ul.notes { list-style: none; margin: .5rem 0 0; padding: 0; }
+ul.notes > li { border-top: 1px solid var(--line); padding: .6rem 0; }
+ul.notes > li:first-child { border-top: 0; }
+.notebody { margin: 0; overflow-wrap: anywhere; }
+.notemeta { margin: .2rem 0 0; color: var(--muted); font-size: .85rem; }
 
 /* Checkbox lists (activities in a timeslot) read as a row of choices, not a stack of full-width fields. */
 label.inline { display: inline-flex; align-items: center; gap: .4rem; width: auto;

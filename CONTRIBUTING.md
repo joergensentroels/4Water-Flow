@@ -247,9 +247,15 @@ check, which is how the shadowing in point 4 came to light.
 ## Before opening a pull request
 
 - `npm test` green.
-- If you touched a screen, **look at it in a browser** at 375px in both colour schemes. Four real bugs in this
+- If you touched a screen, **look at it in a browser** at 375px in both colour schemes. **Nine** real bugs in this
   codebase were invisible to a passing suite: a 403 dead end, unstyled 404s, light-mode form controls on a dark
-  page, and an administrator who could not reach the planner screen.
+  page, an administrator who could not reach the planner screen, two adjacent links to the same session, and the
+  four found in one pass over the newest three screens — the current-page nav tab scrolled off a 375px viewport,
+  117 session links that asked for a 40px chip and rendered as 26px text, a note box 157px wide beside a 309px
+  button, and three attendance buttons stacked into a 186px-tall row, 47 rows deep.
+  `test/css-audit.test.mjs` now catches the two of those that are decidable from the source. It cannot catch the
+  other two: nothing in `node:test` lays out a box, so **the browser is the only instrument for geometry.** Measure
+  with `getBoundingClientRect` rather than looking — "it seems fine" is how all four survived a review.
 - If you added a `POST` route, `test/csrf-audit.test.mjs` will check it automatically. If you added an outcome
   code, add its message to both locales — a test checks that too.
 - If the route takes an `:id`, `test/ownership-audit.test.mjs` will fail until you say whether that id names one

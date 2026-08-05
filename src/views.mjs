@@ -1,6 +1,6 @@
 // The page shell and shared formatting. Every user-visible string comes through `t`, so this file names no
 // weekday and no activity — test/seams.test.mjs enforces that.
-import { html, raw } from "./http.mjs";
+import { html, raw, assetVersion } from "./http.mjs";
 
 // A water droplet, drawn here rather than fetched. Two reasons, both hard requirements: the Content-Security-
 // Policy is `img-src 'self'`, so nothing loads from 4water.org even if we wanted it to — and their actual logo
@@ -19,7 +19,10 @@ export function layout({ t, title, who, nav = [], flash, body }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title ? `${title} · ${t("app.title")}` : t("app.title")}</title>
-<link rel="stylesheet" href="/static/app.css">
+<!-- The ?v= is a CONTENT HASH, not decoration. /static is served with max-age=3600, so without it a stylesheet
+     change reaches a returning volunteer up to an hour late and no amount of reloading fixes it. Written after
+     watching exactly that happen three times while trying to measure a CSS fix — see assetVersion in http.mjs. -->
+<link rel="stylesheet" href="/static/app.css?v=${assetVersion("app.css")}">
 </head>
 <body>
 <header class="bar">

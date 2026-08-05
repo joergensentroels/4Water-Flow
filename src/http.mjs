@@ -2,6 +2,7 @@
 // whoever inherits this — and the whole app is a dozen routes.
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { ROOT } from "./config.mjs";
 
@@ -92,7 +93,7 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
         try { pathname = decodeURIComponent(url.pathname); }
         catch { return send(res, 400, renderError(400)); }
 
-        if (req.method === "GET" && pathname.startsWith("/static/")) return serveStatic(pathname, res, renderError);
+        if (req.method === "GET" && pathname.startsWith("/static/")) return serveStatic(pathname, res, renderError, req);
 
         for (const r of routes) {
           if (r.method !== req.method) continue;
@@ -124,7 +125,30 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
   return app;
 }
 
-function serveStatic(pathname, res, renderError) {
+// A content hash per static file, so the LINK carries the version and a changed file is a changed URL.
+//
+// Found while trying to measure a CSS fix in a browser and watching the old stylesheet come back three times. The
+// response said `Cache-Control: public, max-age=3600` with no ETag and no Last-Modified, and the file is always at
+// the same path — so a returning volunteer kept the previous stylesheet for up to an hour, the browser would not
+// even send a conditional request in that window, and there was no way to make it. An hour of stale CSS on an app
+// whose entire layout is one stylesheet is a phone that renders wrong with no explanation and nothing the operator
+// can do but wait. A forced reload did not fix it either, which is what made the cause obvious rather than
+// suspected.
+//
+// Computed once per process and memoised: the files are a few kilobytes and never change while running. Eight hex
+// characters of SHA-256 is plenty to distinguish deployments — this is cache-busting, not integrity.
+const versions = new Map();
+export function assetVersion(name) {
+  if (!versions.has(name)) {
+    const file = path.join(ROOT, "static", path.basename(name));
+    versions.set(name, existsSync(file)
+      ? createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 8)
+      : "0");
+  }
+  return versions.get(name);
+}
+
+function serveStatic(pathname, res, renderError, req) {
   const name = path.basename(pathname);                 // basename only: traversal is not expressible
   const ext = path.extname(name);
   const type = STATIC_TYPES[ext];
@@ -132,6 +156,14 @@ function serveStatic(pathname, res, renderError) {
   const file = path.join(ROOT, "static", name);
   if (!existsSync(file)) return send(res, 404, renderError(404));
   const body = readFileSync(file);
-  res.writeHead(200, { "Content-Type": type, "Content-Length": body.length, "Cache-Control": "public, max-age=3600", ...SECURITY_HEADERS });
+  // An ETag as well as the versioned link, because the bare URL stays valid and someone will bookmark or curl it.
+  // Quoted per RFC 9110; a conditional request then costs a 304 instead of the whole file.
+  const etag = `"${createHash("sha256").update(body).digest("hex").slice(0, 16)}"`;
+  const headers = { "Content-Type": type, "Cache-Control": "public, max-age=3600", ETag: etag, ...SECURITY_HEADERS };
+  if (req?.headers?.["if-none-match"] === etag) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  res.writeHead(200, { ...headers, "Content-Length": body.length });
   res.end(body);
 }
