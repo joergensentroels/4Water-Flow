@@ -21,6 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadStrings } from "../src/config.mjs";
+import { BOARD_EMPTY_REASONS, SLOT_EMPTY_REASONS } from "../src/queries.mjs";
 
 // Constructions that EXPLAIN a state, as opposed to naming one. "No answer yet" is a state; ", so there is
 // nothing to offer you" is a claim about why.
@@ -30,6 +31,14 @@ import { loadStrings } from "../src/config.mjs";
 // rather than written here as prose — this comment used to say "ten hits out of 249 strings" and the second number
 // was 262 by the time anybody looked, which is exactly the rot this file exists to prevent, in this file.
 const MAX_EXPLAINING = 20;
+
+// The strings that must be justified whatever their wording, because their job IS to assert a cause. Built from
+// the constants the app returns, so the set cannot drift from what can actually reach a screen.
+const ROLE_REQUIRED = new Set([
+  ...Object.values(BOARD_EMPTY_REASONS).map((c) => `board.why.${c}`),
+  ...Object.values(SLOT_EMPTY_REASONS).map((c) => `planner.why.${c}`),
+]);
+
 const EXPLAINS = [
   /\bbecause\b/i, /,\s*so\b/i, /—\s*so\b/i, /\bmeans\b/i,
   /\busually\b/i, /\bprobably\b/i, /\bis configured\b/i, /\bnobody has\b/i,
@@ -39,9 +48,65 @@ const EXPLAINS = [
 // key -> what makes the claim true. Written to be checkable by a reader, so each names the condition or the
 // code that guarantees it, not just a restatement of the string.
 const JUSTIFIED = {
+  // ---- the reason families -------------------------------------------------------------------------------
+  // Two of these fifteen were justified and thirteen were not, and the reason is worth keeping: whether the guard
+  // below noticed a string depended on whether its WORDING matched one of ten hand-kept regexes. "nobody has" and
+  // an em-dash "— so" got caught; "there are openings, but only on dates you have said you cannot help" did not.
+  // These strings exist for exactly one purpose, which is to assert a cause, so the guard now requires them by
+  // ROLE — every reason code the source can emit — instead of by phrasing. See the test at the bottom.
+  //
+  // What makes all of them true is one mechanism, so it is stated once here rather than thirteen times:
+  // boardEmptyReason and slotEmptyReason add the GATE fragments one at a time in GATE_ORDER and report the gate
+  // that takes the count to zero. So a reason is returned ONLY when its gate is the binding one and every earlier
+  // gate passed — which is what licenses each string to name one cause and one remedy. The gates come from the
+  // same GATE object as the eligibility rule itself, so the explanation cannot drift from the rule.
   "board.why.no_capabilities":
     "boardEmptyReason only returns this when the capability gate is the binding one AND the person has zero " +
     "capability rows. Both conditions are counted, not assumed.",
+  "board.why.nothing_in_your_activities":
+    "The other half of the same split: capability is the binding gate but the person HAS capabilities, so the " +
+    "openings are real and belong to activities they do not run. 'Not yours to take' is true of the gate, not a " +
+    "judgement — the claim guard refuses the same slots.",
+  "board.why.none_open":
+    "Returned before any gate is applied, when the count with GATE.open alone is zero. So it is a statement about " +
+    "the season and not about this volunteer, which is why it is the one reason that suggests no action they " +
+    "could take. 'Fully staffed' is exactly what zero open assignment rows means.",
+  "board.why.no_role_stated":
+    "The role gate is binding and preferred_role is unset. Both halves matter: with the role gate binding, the " +
+    "remaining openings really do need a stated role, so 'they will appear here' is a promise the app can keep " +
+    "once they answer — the later gates have already been shown to pass.",
+  "board.why.no_availability":
+    "The availability gate is binding and the person has no answer at all for those dates. 'They will appear " +
+    "here' holds for the same reason as above: every gate before availability passed, so availability is the " +
+    "only thing standing between them and those slots.",
+  "board.why.not_free_then":
+    "The availability gate is binding and there IS an answer — a 'cannot' one. That is the distinction from " +
+    "no_availability, and it is why this text says to correct an answer rather than to give one. Silence and " +
+    "'no' are different states here by design (CONTRIBUTING rule 4), and this pair is where a volunteer sees it.",
+  "board.why.already_busy_then":
+    "The double-booking gate is binding, which means capability, role and availability all passed: they could " +
+    "take these slots except that they are already on something at the same hour. Nothing for them to fix, which " +
+    "is why this is the one reason with no suggested remedy.",
+  "planner.why.no_volunteers":
+    "slotEmptyReason returns this before applying any gate, when no active volunteer exists at all. It is about " +
+    "the roster rather than the slot — and 'active' is load-bearing: a deactivated volunteer is not counted, " +
+    "consistent with every other consumer of the roster.",
+  "planner.why.nobody_capable":
+    "SLOT_REASON_BY_GATE maps the capable gate to this, and the loop only reaches it when the capable gate is the " +
+    "binding one. 'Add it in Administration' is the actual remedy: capabilities are granted on /admin, and a " +
+    "planner cannot grant one from the planning screen.",
+  "planner.why.nobody_in_that_role":
+    "The role gate is binding, so people who could otherwise run this activity exist and are free — the slot " +
+    "needs the other half of a pair. 'Availability is not the problem' is not a guess: the availability gate is " +
+    "applied after this one and has not been reached.",
+  "planner.why.nobody_free":
+    "The availability gate is binding — the one case where the message the whole reason family replaced was " +
+    "actually true. Capability and role passed, so the people who could run it exist and have said they cannot " +
+    "help then, or said nothing.",
+  "planner.why.all_already_busy":
+    "The double-booking gate is binding: every remaining candidate is available and capable and already assigned " +
+    "at that hour. 'Move it' is the remedy because the constraint is the clash, not the person — and this is the " +
+    "last gate, so nothing further can be the cause.",
   "board.why.only_the_other_role":
     "Returned only when the role gate empties the list and preferred_role is set — so the slots really do need " +
     "the other half, and telling them to go and state a role would be nonsense.",
@@ -94,7 +159,16 @@ test("every string that explains a cause is justified, and no new one slips in u
     "state instead of its cause:\n  " + unjustified.join("\n  "));
 
   // The reverse: a justification for a string that no longer explains anything is stale bookkeeping.
-  const stale = Object.keys(JUSTIFIED).filter((k) => !explaining.includes(k));
+  // The reverse: a justification for a string that no longer explains anything is stale bookkeeping.
+  //
+  // Except the reason codes. Those are required by ROLE rather than by wording — see the test at the bottom of
+  // this file — so most of them are deliberately not matched by the narrow patterns above, and asking them to be
+  // would mean rewording thirteen volunteer-facing sentences to satisfy a regex. They cannot go stale silently
+  // either: that test checks the family in both directions against the constants the code actually emits, which
+  // is a stronger guarantee than this one, not a weaker one.
+  const stale = Object.keys(JUSTIFIED)
+    .filter((k) => !ROLE_REQUIRED.has(k))
+    .filter((k) => !explaining.includes(k));
   assert.deepEqual(stale, [],
     `justified but no longer explanatory — reword the note or drop it:\n  ${stale.join("\n  ")}`);
 
@@ -155,4 +229,35 @@ test("no locale invents an explanation the primary language does not make", () =
     DA_EXPLAINS.some((m) => m.test(da[k])) && k in en && !explains(en[k]) && !(k in JUSTIFIED));
   assert.deepEqual(added, [],
     `these Danish strings explain something their English counterparts do not:\n  ${added.join("\n  ")}`);
+});
+
+// The gate above decides by WORDING, and that narrowness is deliberate — a gate catching sixty strings is one
+// that gets rubber-stamped. But one family of strings is causal by construction rather than by phrasing: the
+// reason codes. Their entire job is to name which rule is the binding one, and the app has already shipped a
+// false one — "Nobody has said they are free yet" when nobody was capable, which is why the family exists.
+//
+// Measured before this was written: 2 of 15 reason strings had a justification, and the wording gate was blind to
+// all 13 that did not. Whether a string was covered came down to whether it happened to contain "nobody has" or
+// an em-dash "so". So these are required by ROLE instead, enumerated from the same exported constants the
+// functions return — a new reason code cannot ship without somebody writing down what makes it true, in the same
+// way a new gate cannot ship without a reason code.
+test("every reason code the app can emit has a recorded justification", () => {
+  const en = loadStrings("en");
+  const families = [["board.why.", BOARD_EMPTY_REASONS], ["planner.why.", SLOT_EMPTY_REASONS]];
+
+  const keys = families.flatMap(([prefix, codes]) => Object.values(codes).map((c) => prefix + c));
+  assert.ok(keys.length >= 13, `expected the app to define many reason codes, saw ${keys.length}`);
+
+  const missingString = keys.filter((k) => !(k in en));
+  assert.deepEqual(missingString, [], `reason codes with no translation — a volunteer would see the key: ${missingString}`);
+
+  const unjustified = keys.filter((k) => !(k in JUSTIFIED));
+  assert.deepEqual(unjustified, [],
+    "these strings tell somebody WHICH rule is stopping them, and nothing here records what makes that true:\n  " +
+    unjustified.join("\n  "));
+
+  // Both directions: a justification for a reason code that no longer exists is stale coverage, and it would sit
+  // here looking like the family was fully accounted for.
+  const orphans = Object.keys(JUSTIFIED).filter((k) => /^(board|planner)\.why\./.test(k) && !keys.includes(k));
+  assert.deepEqual(orphans, [], `justified reason codes the app can no longer emit — remove them: ${orphans}`);
 });
