@@ -93,13 +93,21 @@ export function renderAvailability({ t, session, roles, who, rows, answers, flas
       <details class="card">
         <summary>${t("availability.bulkTitle")}</summary>
         <p class="hint">${t("availability.bulkHint")}</p>
+        <!-- Each button names the answer it sets as well as the scope. The row's visible label is a sibling
+             <span>, which a sighted reader takes in at a glance and a screen reader reaching the button does
+             not: the three rows announced "All dates, button" three times over, and the three do OPPOSITE
+             things to about fifty dates each. Same fault as the radios below, in the section added after
+             them. aria-label rather than a fieldset/legend to match how the radios already solve it, and
+             because a fieldset brings default styling this row does not want. -->
         ${[["1", t("availability.yes")], ["0", t("availability.no")], ["", t("availability.unknown")]].map(([value, label]) => html`
           <form method="post" action="/availability/bulk" class="bulkrow">
             ${csrfField(session)}
             <input type="hidden" name="value" value="${value}">
             <span class="bulklabel">${label}:</span>
-            <button type="submit" name="scope" value="all" class="secondary">${t("availability.allDates")}</button>
-            ${scopes.dows.map((s) => html`<button type="submit" name="scope" value="${s.scope}" class="secondary">${s.label}</button>`)}
+            <button type="submit" name="scope" value="all" class="secondary"
+                    aria-label="${label} — ${t("availability.allDates")}">${t("availability.allDates")}</button>
+            ${scopes.dows.map((s) => html`<button type="submit" name="scope" value="${s.scope}" class="secondary"
+                    aria-label="${label} — ${s.label}">${s.label}</button>`)}
           </form>`)}
       </details>
 

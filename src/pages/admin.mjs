@@ -31,11 +31,19 @@ export function adminFlash(t, code, vars) {
 // that passes a plain array still renders — the search UI simply does not appear.
 export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash,
                              roster = { q: "", shown: people.length, matching: people.length, total: people.length, limit: "all" } }) {
-  const toggle = (action, fields, label, cls = "secondary") => html`
+  // `subject` is WHO or WHAT the button acts on, and it belongs in the accessible name. The card around the
+  // button says it; a screen reader arriving at the button does not get the card. With four volunteers this page
+  // announced "Remove entirely, button" four times over, and the same for every role grant, every capability
+  // and every deactivation. Those are irreversible, or they hand out privilege — hearing the wrong one is not
+  // a mistake the reader can undo by re-reading, which is what separates this from a cosmetic label problem.
+  //
+  // Positional and required rather than optional: every caller here acts on a specific person or slot, and a
+  // default would let the next one omit it without anything noticing.
+  const toggle = (action, fields, label, subject, cls = "secondary") => html`
     <form method="post" action="${action}">
       ${csrfField(session)}
       ${Object.entries(fields).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
-      <button type="submit" class="${cls}">${label}</button>
+      <button type="submit" class="${cls}" aria-label="${label} — ${subject}">${label}</button>
     </form>`;
 
   const body = html`
@@ -81,21 +89,21 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         <p class="hint">
           ${pattern.roles.map((role) => html`
             ${toggle("/admin/role", { personId: p.id, role, on: p.roles.includes(role) ? "0" : "1" },
-                     `${p.roles.includes(role) ? "− " : "+ "}${t(`role.${role}`)}`)}`)}
+                     `${p.roles.includes(role) ? "− " : "+ "}${t(`role.${role}`)}`, p.name)}`)}
         </p>
         <p class="hint">
           ${pattern.activities.map((a) => html`
             ${toggle("/admin/capability", { personId: p.id, key: a.key, on: p.can.includes(a.key) ? "0" : "1" },
-                     `${p.can.includes(a.key) ? "− " : "+ "}${a.label}`)}`)}
+                     `${p.can.includes(a.key) ? "− " : "+ "}${a.label}`, p.name)}`)}
         </p>
         ${toggle("/admin/status", { personId: p.id, status: p.status === "active" ? "inactive" : "active" },
-                 p.status === "active" ? t("admin.inactive") : t("admin.active"))}
+                 p.status === "active" ? t("admin.inactive") : t("admin.active"), p.name)}
         <p class="hint"><a href="/admin/person/${p.id}/export.json">${t("admin.export")}</a></p>
         <details>
           <summary>${t("admin.erase")}</summary>
           <p class="hint">${t("admin.eraseHint")}</p>
-          ${toggle("/admin/erase", { personId: p.id, mode: "anonymise" }, t("admin.eraseAnonymise"))}
-          ${toggle("/admin/erase", { personId: p.id, mode: "remove" }, t("admin.eraseRemove"))}
+          ${toggle("/admin/erase", { personId: p.id, mode: "anonymise" }, t("admin.eraseAnonymise"), p.name)}
+          ${toggle("/admin/erase", { personId: p.id, mode: "remove" }, t("admin.eraseRemove"), p.name)}
         </details>
       </div>`)}
 
@@ -113,7 +121,10 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
       <div class="card">
         <b>${i.email}</b>
         <small> · ${i.acceptedAt ? `${t("admin.accepted")}${i.personName ? ` (${i.personName})` : ""}` : t("admin.pending")}</small>
-        ${i.acceptedAt ? "" : toggle("/admin/invite/revoke", { id: i.id }, t("admin.revoke"))}
+        <!-- The audit that found the rest of these did NOT find this one: a fresh instance has fewer than two
+             pending invites, so there was nothing to collide with. Fixed on the same grounds anyway, and the
+             audit now seeds two invites so it is actually looking here. -->
+        ${i.acceptedAt ? "" : toggle("/admin/invite/revoke", { id: i.id }, t("admin.revoke"), i.email)}
       </div>`)}
 
     <h2>${t("admin.retention")}</h2>
@@ -145,7 +156,8 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         <b>${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}</b>
         <p class="hint">${w.activities.map((k) => pattern.activities.find((a) => a.key === k)?.label ?? k).join(", ")}</p>
         <p class="hint">${t("admin.weeklyUsed", { n: used })}</p>
-        ${toggle("/admin/weekly/remove", { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0 }, t("admin.weeklyRemove"))}
+        ${toggle("/admin/weekly/remove", { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0 },
+                 t("admin.weeklyRemove"), `${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}`)}
       </div>`;
     })}
     <div class="card">

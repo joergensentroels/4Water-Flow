@@ -167,6 +167,32 @@ Both are above the minimum with margin, so a palette change has room — but not
 The colour tokens themselves also carry their reasoning: 4water's own water blue measures 3.3:1 on white, which
 fails 1.4.3, so `--accent` is a darker relative of it. Do not "correct" it back to the brand hex.
 
+## Accessible names — a control has to say which one it is
+
+The contrast check above measures colour and hit area. It says nothing about whether a control's *name*
+distinguishes it from the one below, and this app renders hundreds of near-identical controls: one per slot, one
+per date, twelve per person. `test/names.test.mjs` is the check for that. It fails when two controls on a page
+share an accessible name while submitting different things, and when a control resolves no name at all.
+
+**Three things worth knowing before you change it or a page it covers:**
+
+1. **`aria-label` is not the only name, and adding one is not always the fix.** A wrapping `<label>`, or a
+   `<label for>` pointing at the control's id, names it just as well — the audit resolves all three because an
+   earlier version knew only `aria-label` and reported a properly labelled `<select>` as nameless. Acting on that
+   report would have added an `aria-label` duplicating the visible text, which is worse than nothing: it
+   overrides that text, so the two can drift until voice control no longer matches what is on screen.
+2. **The visible row is not the name.** Every instance found here looked fine on screen, because the date and
+   activity sat beside the button. A screen reader arriving at the button does not get the row.
+3. **A check is only looking where the fixture gives it two of the thing.** This is the one to remember. The
+   audit was green over four screens' worth of real defects at various points purely because its world had one
+   pending invite, or nothing assigned, or everything assigned — a single control cannot collide with anything,
+   so removing the fix left the check green. It has a second test asserting the *fixture's* shape for that
+   reason. If you add a page to the audit, add an assertion that the page renders more than one of whatever
+   repeats on it, or you have added a check that cannot fail.
+
+Probed by removing each of the five fixes in turn and confirming the audit names it — 6/6, including one
+mutation that had to be rewritten because the first version left the control a name and so proved nothing.
+
 ## Before opening a pull request
 
 - `npm test` green.

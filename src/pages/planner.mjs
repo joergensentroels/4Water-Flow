@@ -89,6 +89,23 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
       </ul>
     </details>`;
 
+  // Which slot a control belongs to, for its accessible name. The visible row already says this beside the
+  // control; a screen reader reaching the control on its own does not get the row.
+  //
+  // src/pages/availability.mjs learned this and wrote down why: every radio there carries the date, because
+  // without it "a screen reader announced '✓ radio button' 153 times over, with no way to tell which date was
+  // being answered". This screen renders far MORE controls and did not do the same. Measured on the whole season
+  // with everything staffable:
+  //
+  //   /availability      distinct accessible names: 157
+  //   /planner?weeks=all distinct accessible names: 3   —  178 x "Choose a volunteer", 178 x "Assign"
+  //
+  // Three names for three hundred and fifty-six controls. Care applied to one screen and not its sibling, which
+  // is the defect class this project keeps finding, here in accessibility rather than in logic. The contrast and
+  // target-size pass could not see it: it measured colour and hit area, not whether a name distinguishes anything.
+  const slotName = (r) =>
+    `${formatDate(t, r.date)} ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}`;
+
   const filled = (r) => html`
     <span class="when">
       ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}
@@ -98,7 +115,10 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
       ${csrfField(session)}
       <input type="hidden" name="assignmentId" value="${r.assignmentId}">
       <input type="hidden" name="expect" value="${r.personId}">
-      <button type="submit" class="secondary">${t("planner.unassign")}</button>
+      <!-- The name carries WHO as well as which slot: this button frees somebody's shift, and "Remove" repeated
+           three hundred times is the one case where acting on the wrong row is not recoverable by re-reading. -->
+      <button type="submit" class="secondary"
+              aria-label="${t("planner.unassign")} — ${r.personName} — ${slotName(r)}">${t("planner.unassign")}</button>
     </form>`;
 
   // For an open slot, offer the people the rule says could take it. A <select> plus one button is the whole
@@ -122,10 +142,10 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
           ${csrfField(session)}
           <input type="hidden" name="assignmentId" value="${r.assignmentId}">
           <input type="hidden" name="expect" value="">
-          <select name="personId" aria-label="${t("planner.choose")}">
+          <select name="personId" aria-label="${t("planner.choose")} — ${slotName(r)}">
             ${people.map((p) => html`<option value="${p.id}">${p.name} (${p.score})</option>`)}
           </select>
-          <button type="submit">${t("planner.assign")}</button>
+          <button type="submit" aria-label="${t("planner.assign")} — ${slotName(r)}">${t("planner.assign")}</button>
         </form>`}`;
   };
 

@@ -1,11 +1,13 @@
 # Execution plan — 4water scheduling
 
-Planned as ten increments; it ran to thirty-four (A–Z, then AA–AH). **Each one ends with `npm test` green and is independently
+Planned as ten increments; it ran to thirty-four (A–Z, then AA–AH), and the lettering stops there: the work
+after AH is one defect per commit, so read `git log` for it rather than counting rows in the table below and
+concluding the project ended at AH. **Each one ends with `npm test` green and is independently
 shippable**; the app is usable by volunteers from D onward even while planners are still on the spreadsheet.
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete, 377 tests green** — and, as of the AB increment, green on an actual `git clone`
+Status: **✅ A–AH complete plus the commits since, 379 tests green** — and, as of the AB increment, green on an actual `git clone`
 rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a

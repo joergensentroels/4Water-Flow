@@ -24,7 +24,14 @@ export function flashFor(t, code) {
 // `emptyReason` is only consulted when `open` is empty, and defaults to null so a caller that does not compute
 // it still renders a valid page — just without the explanation.
 export function renderBoard({ t, session, roles, who, open, mine, flash, emptyReason = null }) {
-  const slotRow = (r, action, label, extra = "") => html`
+  // The button's accessible name carries the slot. The row beside it says which shift this is, and a screen
+  // reader arriving at the button on its own does not get the row: over a season this page rendered "Take this
+  // slot, button" 178 times with nothing to tell them apart, and taking the wrong shift is a commitment to be
+  // somewhere on a particular evening. Found by an audit that derives controls from the page (test/names.test.mjs)
+  // after the same fault was fixed on two other screens — a list kept by hand would not have named this one.
+  const slotRow = (r, action, label, extra = "") => {
+    const which = `${formatDate(t, r.date)} ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}`;
+    return html`
     <li><div class="daterow">
       <span class="when">
         <b>${formatDate(t, r.date)}</b>
@@ -32,9 +39,10 @@ export function renderBoard({ t, session, roles, who, open, mine, flash, emptyRe
       </span>
       <form method="post" action="${action}">
         ${csrfField(session)}
-        <button type="submit" class="secondary">${label}</button>
+        <button type="submit" class="secondary" aria-label="${label} — ${which}">${label}</button>
       </form>
     </div></li>`;
+  };
 
   const body = html`
     <h2>${t("board.title")}</h2>
