@@ -71,6 +71,19 @@ design, not a media query. Planners too: whoever fixes a Sunday-morning dropout 
   failed on its own documentation, which at least means the gate worked. Describe the forbidden thing, assemble
   test fixtures from parts at runtime (`seams.test.mjs` and `docs.test.mjs` both do), and expect the first run to
   catch you.
+- **When you prove a check by breaking the code, verify the break landed.** The rule below about sweeps —
+  sabotage a colour and confirm the report names it — has a failure mode one level up: if the sabotage silently
+  does not apply, the run comes back green and that is indistinguishable from a working control. It has happened
+  three times here: a find-and-replace whose target string had changed, one that left the value it was supposed
+  to remove, and one where the pattern being searched for was matched by the *comment* explaining the fix rather
+  than by any code. Each produced a clean run that read as evidence.
+  So: assert the file actually changed, and when a check is meant to fail, print something distinguishable from
+  a pass rather than letting a zero speak for itself. This matters most for a probe you expect NOT to fire,
+  because then a silent no-op agrees with you. Two claims in these comments — that `handBackSlot`'s old unchecked
+  branch was unreachable, and that a table-derived test cannot notice a missing entry — rest on exactly that kind
+  of probe, and were re-run with the landing check before being trusted.
+  No tool for this is committed on purpose: it is a habit, not a fixture, and the project's own answer is still
+  the stronger one — write the test first and watch it fail before the fix exists.
 - **`test/journey.test.mjs` is the acceptance gate, and it deliberately does not use `tools/testkit.mjs`.**
   Everything else builds its world with that harness, and twice the harness supplied something production did
   not — open slots, and a notifier — so a green suite reported success over a deployment that could not work.
