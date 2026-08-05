@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
+import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
 
 const read = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
 // JS comments AND SQL ones. The `--` half is not thoroughness for its own sake: the first version of this check
@@ -244,4 +245,59 @@ test("stripping comments removes a SQL comment and leaves a JS decrement alone",
   // in context.
   assert.match(stripComments(read("src/calendar.mjs")), /end--/,
     "src/calendar.mjs has the only decrement in the project and it must still be there after stripping");
+});
+
+// ---- a route that promises a file type must serve it -----------------------------------------------------------
+//
+// `send` defaults to text/html, so every route returning something else has to remember to override it. That is a
+// convention, and this project's record with conventions is that they hold until they do not: the same boundary was
+// where stripping HTML comments corrupted the JSON export one increment ago, because "every response goes through
+// here" is the same sentence as "this also affects the ones you were not thinking about".
+//
+// Nothing was wrong when this was written — all five non-HTML routes override correctly, measured by reading the
+// header that came back rather than the source. What was missing is any reason it would STAY true. A new export
+// route that forgot would be served as text/html with nosniff, so a browser renders JSON as text and a spreadsheet
+// refuses the CSV — a failure that looks like a broken download rather than a missing header.
+//
+// DERIVED from the route table and keyed to the SHAPE: a path ending in a known extension promises that type. A
+// hand-kept list of routes could not fail for the next one.
+const TYPE_FOR = { json: "application/json", csv: "text/csv", ics: "text/calendar" };
+
+test("every route whose path promises a file type serves that type", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const cookie = await w.signIn(w.people[0]);
+    // A real calendar token, so the .ics route answers 200 rather than the 404 a filled-in parameter would get —
+    // a 404 is text/plain and would make this check pass while testing nothing.
+    await w.post("/me/calendar", cookie, new URLSearchParams({ csrf: csrfFromCookie(cookie) }));
+    const token = (await (await w.get("/me", cookie)).text()).match(/\/calendar\/([A-Za-z0-9_-]+)\.ics/)?.[1];
+    assert.ok(token, "the fixture must mint a calendar token, or the .ics route cannot be reached");
+
+    const promising = w.routes().filter((r) => r.method === "GET" && /\.(\w+)$/.test(r.pattern.replace(/:\w+/g, "x")));
+    assert.ok(promising.length >= 3,
+      `only ${promising.length} route(s) promise a file type — the collector is not reading the route table`);
+
+    const checked = [];
+    for (const r of promising) {
+      const ext = r.pattern.match(/\.(\w+)$/)?.[1];
+      assert.ok(ext in TYPE_FOR, `${r.pattern} ends in .${ext} and TYPE_FOR has no expectation for it — add one`);
+      // Fill parameters with something real: the token for the calendar, a person id for the rest.
+      const path = r.pattern.replace(":token", token).replace(/:(\w+)/g, String(w.people[1]));
+      const res = await w.get(path, cookie);
+      assert.equal(res.status, 200, `${path} answered ${res.status}; a non-200 body is text/plain and proves nothing`);
+      const got = res.headers.get("content-type") ?? "";
+      assert.ok(got.startsWith(TYPE_FOR[ext]),
+        `${path} promises ${TYPE_FOR[ext]} and served "${got}". Served as HTML with nosniff, a browser shows JSON ` +
+        `as text and a spreadsheet refuses the CSV — pass a Content-Type to send().`);
+      assert.match(got, /charset=utf-8/, `${path}: the charset must be explicit, or a Danish name decodes wrong`);
+      checked.push(path);
+    }
+    assert.equal(checked.length, promising.length, "every promising route must have been driven, not skipped");
+
+    // The control: an HTML route must come back as HTML. Without it, a broken header reader would report every
+    // route above as fine by comparing two empty strings.
+    const home = await w.get("/", cookie);
+    assert.match(home.headers.get("content-type") ?? "", /^text\/html/,
+      "the reader must see a real header, or the assertions above are comparing nothing");
+  } finally { w.close(); }
 });
