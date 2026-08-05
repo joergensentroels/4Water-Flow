@@ -15,7 +15,7 @@ noted but not designed.
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 440 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 441 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file

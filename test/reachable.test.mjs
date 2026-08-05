@@ -22,7 +22,7 @@
 //     something on a screen, which is what makes "no caller" a user-visible defect rather than dead code.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
 
@@ -132,6 +132,61 @@ test("the reachability check can see an unwired reader", () => {
   const wired = new RegExp("\\blistAudit\\b");
   assert.ok([...code].some(([f, src]) => f !== "src/audit.mjs" && wired.test(src)),
     "listAudit is called by the audit page's route — if this fails, the import-stripping is eating real calls");
+});
+
+// The same shape one layer out: a CONFIG key nothing reads.
+//
+// `board.requiresApproval` sat in config/pattern.json and was read by no code at all. Setting it to true would look
+// like turning on approval-before-claim and do nothing whatsoever — a switch wired to no lamp, which is worse than a
+// missing switch because the operator believes the room is lit. It is deleted now; this stops the next one.
+//
+// DESCRIPTIVE keys are the legitimate exception. A file saying which department it belongs to promises no behaviour
+// and is useful when there are several files, which the multi-department plan says there will be. The difference
+// that matters is whether a reader would expect the app to DO something differently.
+const DESCRIPTIVE_CONFIG = {
+  department:
+    "A label saying whose configuration file this is, for when Copenhagen and Lyon each run their own. It promises " +
+    "no behaviour, so nothing reading it is correct rather than an oversight.",
+};
+
+test("every config setting is read by the code, or is declared descriptive", () => {
+  const files = [];
+  const walk = (rel) => {
+    for (const f of readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+      const n = `${rel}/${f.name}`;
+      if (f.isDirectory()) walk(n);
+      else if (f.name.endsWith(".mjs")) files.push(n);
+    }
+  };
+  walk("src"); walk("tools");
+  const code = files.map((f) => stripComments(read(f))).join("\n");
+  const reads = (leaf) =>
+    new RegExp(`\\.${leaf}\\b|\\[\\s*["']${leaf}["']\\s*\\]|\\b${leaf}\\s*[,:}=]`).test(code);
+
+  // CONTROLS FIRST, and this is not ceremony: the first version of this probe reported all 23 keys as unread — a
+  // broken detector, not a broken config — and only checking a known-read key exposed it. Had the list been short
+  // enough to look plausible, it would have been believed.
+  assert.ok(reads("timezone"), "the detector cannot see `calendar.timezone`, which is read in src/calendar.mjs");
+  assert.ok(!reads("notAKeyAtAll"), "the detector reports a key that does not exist as read");
+
+  const keys = [];
+  const rec = (o, prefix = "") => {
+    for (const [k, v] of Object.entries(o)) {
+      if (k.startsWith("_comment")) continue;
+      keys.push(prefix + k);
+      if (v && typeof v === "object" && !Array.isArray(v)) rec(v, `${prefix}${k}.`);
+    }
+  };
+  rec(JSON.parse(read("config/pattern.json")));
+  assert.ok(keys.length >= 15, `only ${keys.length} config keys found — the collector is not working`);
+
+  const dead = keys.filter((k) => !reads(k.split(".").at(-1)) && !(k in DESCRIPTIVE_CONFIG));
+  assert.deepEqual(dead, [],
+    "these config keys are read by nothing. An operator setting one would expect something to change and nothing " +
+    "would. Wire it up, delete it, or add it to DESCRIPTIVE_CONFIG with the reason:\n  " + dead.join("\n  "));
+
+  const stale = Object.keys(DESCRIPTIVE_CONFIG).filter((k) => !keys.includes(k));
+  assert.deepEqual(stale, [], `declared descriptive but no longer a config key — remove: ${stale}`);
 });
 
 // The comment stripper has to remove SQL comments without removing code, and both halves have bitten. Kept as a
