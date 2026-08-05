@@ -5,6 +5,7 @@ import { layout, csrfField, navFor } from "../views.mjs";
 
 const OUTCOME = {
   invited: { key: "admin.invited" },
+  no_email: { key: "admin.noEmail", bad: true },
   revoked: { key: "admin.revoked" },
   saved: { key: "admin.saved" },
   last_admin: { key: "admin.lastAdmin", bad: true },

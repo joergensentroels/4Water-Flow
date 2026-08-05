@@ -122,6 +122,7 @@
   "admin.revoke": "Tilbagekald",
   "admin.revoked": "Invitationen er tilbagekaldt.",
   "admin.invited": "Invitationen er oprettet.",
+  "admin.noEmail": "Skriv en adresse, før du sender en invitation. Der blev ikke oprettet noget.",
   "admin.pending": "Afventer",
   "admin.accepted": "Taget imod",
   "admin.save": "Gem",

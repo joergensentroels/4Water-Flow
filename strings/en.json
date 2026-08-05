@@ -122,6 +122,7 @@
   "admin.revoke": "Revoke",
   "admin.revoked": "The invitation is revoked.",
   "admin.invited": "The invitation is created.",
+  "admin.noEmail": "Enter an address before sending an invitation. Nothing was created.",
   "admin.pending": "Pending",
   "admin.accepted": "Accepted",
   "admin.save": "Save",

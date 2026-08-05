@@ -442,7 +442,16 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const email = String(c.form.email ?? "").trim();
-    if (!email) return redirect(res, "/admin");
+    // Says so. This used to redirect with no `?r=`, so submitting the form with the field empty reloaded the
+    // Administration page unchanged and told the admin nothing: no new invitation, no message, no clue whether the
+    // app had worked. Every other outcome on this screen reports itself, which is what made this one the odd path
+    // out rather than a deliberate quiet success.
+    //
+    // Deliberately NOT a format check. This app sends no email — the admin copies the link and delivers it
+    // themselves — so the address is a label plus the key `linkIdentity` later matches an OIDC claim against, and
+    // a wrong one is fixable by editing the person's contact. Rejecting valid-but-unusual addresses would do more
+    // harm than accepting a typo, which is the usual outcome of hand-written email validation.
+    if (!email) return redirect(res, "/admin?r=no_email");
     const token = createInvite(db, { email });
     // FOURWATER_BASE_URL, never the Host header.
     //

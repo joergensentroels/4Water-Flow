@@ -169,6 +169,32 @@ test("creating an invite shows the link exactly once, and it works", withAdmin({
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("newcomer@example.org").n, 1);
 }));
 
+// An empty address used to redirect with no `?r=` at all, so the Administration page reloaded unchanged and said
+// nothing: no invitation, no message, no way to tell whether the app had done something. Every other outcome on
+// this screen reports itself, which is what made this the odd path out rather than a deliberate quiet success — and
+// silence is the failure mode this project keeps closing.
+test("an invitation with no address says so instead of reloading the page unchanged", withAdmin({}, async (w) => {
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const before = w.db.prepare("SELECT COUNT(*) n FROM invitations").get().n;
+
+  for (const email of ["", "   ", "\t"]) {
+    const r = await w.post("/admin/invite", admin, new URLSearchParams({ csrf: token, email }));
+    assert.equal(reasonOf(r), "no_email", `${JSON.stringify(email)} must be reported, not swallowed`);
+  }
+  // A missing field entirely, not just an empty one.
+  assert.equal(reasonOf(await w.post("/admin/invite", admin, new URLSearchParams({ csrf: token }))), "no_email");
+
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM invitations").get().n, before,
+    "and nothing may be created — the message would otherwise be the lie");
+
+  // The message reaches the screen in the reader's language rather than rendering as a key, which is what a
+  // missing translation looks like: t() returns the key itself.
+  const body = await (await w.get("/admin?r=no_email", admin)).text();
+  assert.ok(!body.includes("admin.noEmail"), "an untranslated outcome renders its own key on the page");
+  assert.match(body, /Enter an address|Skriv en adresse/);
+}));
+
 test("a revoked invite cannot be redeemed afterwards", withAdmin({}, async (w) => {
   const admin = await w.signIn(w.people[0]);
   const { token } = await w.csrfFrom("/admin", admin);
