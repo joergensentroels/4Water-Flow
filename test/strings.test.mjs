@@ -180,6 +180,39 @@ test("the two locales carry the same placeholders in the same strings", () => {
   }
 });
 
+// Equal placeholders do not make two strings say the same thing, and most of the difference is a matter of language
+// that no test should have an opinion about. Part of it is not: a number, a path and an environment variable are
+// facts about the CODE, so both locales have to agree about them. "kept for 24 hours" against "beholdes i 48 timer"
+// means one of them is wrong, and nothing here would have noticed.
+//
+// Nothing was wrong when this was written — 268 strings compared, zero divergences. It exists because editing one
+// locale and forgetting the other is the ordinary way a number goes stale, and because the check costs nothing.
+test("the two locales agree about numbers, paths and environment variables", () => {
+  const da = loadStrings("da");
+  const en = loadStrings("en");
+  // Sorted, because word order differs between the languages and only the SET of facts has to match. Placeholders
+  // are blanked first: {n} is a number at runtime, not in the string.
+  const numbers = (s) => (s.replace(/\{\w+\}/g, " ").match(/\b\d+(?:[.,]\d+)?\b/g) ?? []).sort();
+  const paths = (s) => (s.match(/\/[a-z][\w./-]*/gi) ?? []).map((p) => p.replace(/[.,)]$/, "")).sort();
+  const idents = (s) => (s.match(/\b(?:FOURWATER|OIDC|MATTERMOST)_[A-Z_]+\b/g) ?? []).sort();
+
+  // Each extractor is shown capable of failing here, because a clean sweep and a broken extractor read identically
+  // — and one shown NOT to cry wolf, because a check that reports every string is as useless as one that reports none.
+  assert.notDeepEqual(numbers("kept for 24 hours"), numbers("beholdes i 48 timer"), "the number extractor is blind");
+  assert.notDeepEqual(paths("go to /me"), paths("gå til /mig"), "the path extractor is blind");
+  assert.notDeepEqual(idents("set FOURWATER_SECRET"), idents("sæt FOURWATER_SECRETS"), "the variable extractor is blind");
+  assert.deepEqual(numbers("after 2 seasons"), numbers("efter 2 sæsoner"), "the same number in two languages must not be reported");
+
+  for (const key of Object.keys(en)) {
+    if (typeof en[key] !== "string" || typeof da[key] !== "string") continue;
+    for (const [what, fn] of [["numbers", numbers], ["paths", paths], ["variables", idents]]) {
+      assert.deepEqual(fn(da[key]), fn(en[key]),
+        `"${key}" states different ${what} in the two locales — one of them is wrong about the app:\n` +
+        `  en: ${en[key]}\n  da: ${da[key]}`);
+    }
+  }
+});
+
 test("no locale file contains an unreplaced English fallback marker or stray HTML", () => {
   for (const locale of ["da", "en"]) {
     for (const [key, value] of Object.entries(loadStrings(locale))) {
