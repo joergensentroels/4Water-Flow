@@ -206,10 +206,13 @@ up, add it there too.**
   one weekday.
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
-- **Three placeholders remain in `config/pattern.json`:** the clock times (the Wed/Sun rhythm is from the real
-  export; the times were never stated), `board.cutoffDays` (spec Q18), and `calendar.eventMinutes` — no shift
-  length was ever stated, so 90 minutes is invented. `calendar.timezone` is **not** a placeholder: it is what
-  puts a 19:00 shift at 19:00 in a subscriber's calendar, and getting it wrong shifts every event silently.
+- **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
+  The clock times (the Wed/Sun rhythm is from the real export; the times were never stated), `board.cutoffDays`
+  (spec Q18), `calendar.eventMinutes` — no shift length was ever stated, so 90 minutes is invented — and `locale`.
+  `calendar.timezone` is **not** a placeholder: it is what puts a 19:00 shift at 19:00 in a subscriber's calendar,
+  and getting it wrong shifts every event silently.
+  Not counted here on purpose. This said "three" in three documents while the config comment listed four, within
+  one commit of a gate being added that checks the config comment's own count and not its readers'.
 - **Retention runs only if the operator installed the cron line.** Deliberate — a container that deletes data on
   a schedule nobody configured is worse — but it means "deleted automatically" is true of the software and
   conditional on the deployment. `/status` shows backup age; if backups are not running, neither is retention.

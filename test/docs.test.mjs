@@ -146,6 +146,33 @@ test("the config comment's own count of its placeholders is true", () => {
     assert.ok(!/\bboth\b/i.test(text),
       `the comment says "both" while listing ${numbered.length} placeholders — that is a count of two in disguise`);
   }
+
+  // And the DOCUMENTS that point at this list must not count it either. The gate above shipped checking the
+  // comment's internal consistency and nothing else, and within one commit three documents said "three
+  // placeholders" while the comment listed four — because a fourth was added to the comment and the readers were
+  // not touched. One fact, one home: the config file is the list, and prose describes it.
+  // Narrowly: a count of "placeholders", or a count of "values" that the same sentence calls invented. The first
+  // version of this matched any count of values and flagged "Only one value is mandatory" in the .env setup, which
+  // is the second over-greedy count rule I have written in two commits — both caught by running the rule against
+  // the real documents rather than by reasoning about it.
+  const COUNT = "(?:one|two|three|four|five|six|\\d+)";
+  const counting = [];
+  for (const doc of DOCS) {
+    const text = read(doc);
+    for (const m of text.matchAll(new RegExp(`\\b${COUNT}\\s+placeholders?\\b`, "gi"))) counting.push(`${doc}: "${m[0]}"`);
+    // The gap between the count and the word "invented" may cross a filename but not a sentence boundary, so a dot
+    // is allowed only when the next character is not whitespace. `[^.]` alone could not span `config/pattern.json`,
+    // which is precisely where these sentences point — third iteration on this expression, each failure found by
+    // running it against the real documents rather than by reading it.
+    const NEAR = "(?:[^.\\n]|\\.(?=\\S)){0,60}?";
+    for (const m of text.matchAll(new RegExp(`\\b${COUNT}\\s+(?:configuration\\s+)?values?\\b${NEAR}\\b(?:invented|placeholder)`, "gi"))) {
+      counting.push(`${doc}: "${m[0].slice(0, 60)}…"`);
+    }
+  }
+  assert.deepEqual(counting, [],
+    "these documents count the placeholders instead of pointing at the file that lists them, which is how the " +
+    "number goes stale — describe them, or say \"the values marked as placeholders in config/pattern.json\":\n  " +
+    counting.join("\n  "));
 });
 
 // One place may state the test count, and it is PLAN.md.

@@ -213,8 +213,9 @@ nice-to-have:
 2. **Sign-in has never spoken to 4water's NextCloud.** It runs end to end against a conforming provider. Work
    through `docs/OIDC.md` on the real instance; invite links need none of this and work today.
 3. **No volunteer has used it.** Every usability judgement is reasoned from the reported pain, not observed.
-4. **Three configuration values are invented** — the clock times, the hand-back cutoff, and the shift length.
-   They are marked as placeholders in `config/pattern.json` and only 4water can answer them.
+4. **Several configuration values are invented** — the clock times, the hand-back cutoff, the shift length, and
+   whether volunteers read Danish or English. Each is marked as a placeholder where it is set in
+   `config/pattern.json`, which is the list; only 4water can answer them. `README.md` says what each one costs.
 
 Call it 1.0.0 when a season has actually been planned in it. Until then the suffix is telling whoever inherits
 this the truth, and the truth is useful: it says which parts to be suspicious of first.

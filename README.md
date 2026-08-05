@@ -95,13 +95,19 @@ page. `PLAN.md` lists all thirty-four increments.
 
 ## Still to confirm with 4water
 
-Three values in `config/pattern.json` are invented, and only 4water can settle them. They are marked as
-placeholders in the file itself.
+Some values in `config/pattern.json` are invented, and only 4water can settle them. **That file is the list** —
+each is marked as a placeholder where it is set, with the reasoning beside it. Described here rather than counted,
+because the count went stale the moment a fourth was added: three documents said "three" while the file listed four.
 
 - **Clock times.** The Wednesday/Sunday rhythm is from the real export; the times were never stated anywhere.
 - **`board.cutoffDays`** — how late a shift may be handed back. Spec question Q18, unanswered; `2` is a guess.
   Without a sensible value the shift exchange becomes the no-show channel.
 - **`calendar.eventMinutes`** — how long a shift runs. 90 is invented.
+- **`locale`** — `"en"`, while a complete Danish translation ships beside it. One word switches every
+  volunteer-facing string and the page's declared language. `export.csvDelimiter` is set for a Danish spreadsheet
+  in the same file, so the two currently point in different directions. Either answer is fine; it should be one.
+- **One timeslot per day** is a modelling guess, not a limit. The real export has four parallel schedules, and
+  several times on one day is normal and fully supported — add them on the Administration screen.
 
 And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
 current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.
