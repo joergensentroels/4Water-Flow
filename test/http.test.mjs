@@ -59,6 +59,35 @@ test("a wrong verb is 405, a genuinely unknown path is 404", async () => {
   assert.equal((await fetch(`${base}/only-post`, { method: "POST" })).status, 200);
 });
 
+// `GET /%` is a client typo, and it used to be a 500 with a stack trace in the log. `decodeURIComponent` throws
+// URIError on a malformed escape, and it was called outside any try of its own, so it fell into the generic catch
+// — which reads `e?.status`, finds none on a URIError, and calls it a server error. Bots probe with bad escapes
+// constantly, so that was an unbounded stream of 500-level log lines describing nothing wrong with the server.
+test("a malformed percent-escape is the client's mistake, not a server error", async () => {
+  const logged = [];
+  const realError = console.error;
+  console.error = (...a) => logged.push(a.join(" "));
+  try {
+    for (const bad of ["/%", "/%zz", "/echo/%E0%A4%A", "/%C3"]) {
+      const r = await fetch(`${base}${bad}`);
+      assert.equal(r.status, 400, `${bad} must be a 400`);
+      // Still a real page through the layout, not a bare status — the same reason 404 and 405 were fixed.
+      const body = await r.text();
+      assert.ok(body.length > 0, `${bad} returned an empty body`);
+    }
+  } finally { console.error = realError; }
+  assert.deepEqual(logged, [],
+    "a malformed URL must not write a server-error line; that is how a log stops being worth reading");
+
+  // The control: a genuine server fault must STILL log, or this fix has just made the app quieter about real
+  // problems. Without this the assertion above would pass on an app that logs nothing at all.
+  const logged2 = [];
+  const realError2 = console.error;
+  console.error = (...a) => logged2.push(a.join(" "));
+  try { await fetch(`${base}/boom`); } finally { console.error = realError2; }
+  assert.equal(logged2.length, 1, "a real 500 must still be logged");
+});
+
 test("an internal error leaks nothing, and an explicit status is honoured", async () => {
   const r = await fetch(`${base}/boom`);
   assert.equal(r.status, 500);

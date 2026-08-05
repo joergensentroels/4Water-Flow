@@ -83,7 +83,14 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
     handler: async (req, res) => {
       try {
         const url = new URL(req.url, "http://localhost");
-        const pathname = decodeURIComponent(url.pathname);
+        // decodeURIComponent throws URIError on a malformed escape, and `GET /%` is enough to do it. Decoded in
+        // its own try so that is a 400: it fell into the generic catch below, which has no `.status` to read, so
+        // it called a client's typo a 500 AND logged a stack trace for it. Bots probe with bad escapes
+        // constantly, so that is an unbounded stream of server-error logs describing nothing wrong with the
+        // server — the same noise `ratelimit.mjs` goes out of its way to bound.
+        let pathname;
+        try { pathname = decodeURIComponent(url.pathname); }
+        catch { return send(res, 400, renderError(400)); }
 
         if (req.method === "GET" && pathname.startsWith("/static/")) return serveStatic(pathname, res, renderError);
 

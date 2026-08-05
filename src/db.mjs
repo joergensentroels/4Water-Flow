@@ -10,18 +10,38 @@
 // this module carries a top-level await.
 export const MIN_NODE = [22, 13, 0];
 
+// EACH RELEASE LINE HAD ITS OWN CUTOFF, and treating the floor as one number is what let a whole range through.
+// The comment above already said it — unflagged in 22.13.0 on the 22 line "and 23.4.0 on the other line" — and
+// the code did not implement the second half. It compared major first and returned `maj < 22` for anything off
+// the 22 line, so 23.0 through 23.3 were ACCEPTED and then died at the `node:sqlite` import with "No such
+// built-in module", which is precisely the cryptic failure this guard exists to replace with a sentence.
+//
+// The old test could not have caught it: its refused list was 22.5.0, 22.9.1, 22.12.99, 21.7.3, 20.11.0 and its
+// accepted list included 23.4.0 — so it exercised the correct boundary on the pass side and never asked about the
+// fail side. A hand-kept list of examples cannot notice the case nobody thought of, which is why the test now
+// derives its cases from this table instead.
+//
+// Majors absent from the table shipped node:sqlite unflagged from `.0`, so they need no floor.
+export const MIN_BY_MAJOR = { 22: [22, 13, 0], 23: [23, 4, 0] };
+
 export function nodeTooOld(version = process.versions.node) {
   const [maj, min, pat] = version.split(".").map((n) => parseInt(n, 10) || 0);
-  const [rMaj, rMin, rPat] = MIN_NODE;
-  if (maj !== rMaj) return maj < rMaj;      // 23.x and 24.x are fine; only the 22 line has the flag cutoff
-  if (min !== rMin) return min < rMin;
-  return pat < rPat;
+  if (maj < MIN_NODE[0]) return true;          // 21 and earlier never had the module at all
+  const floor = MIN_BY_MAJOR[maj];
+  if (!floor) return false;                    // 24 and later: no flag cutoff ever existed
+  if (min !== floor[1]) return min < floor[1];
+  return pat < floor[2];
 }
 
 if (nodeTooOld()) {
+  const running = Number(process.versions.node.split(".")[0]);
+  // Name the floor for the line they are ACTUALLY on. Telling somebody on 23.2 that they need 22.13 invites them
+  // to conclude they already satisfy it.
+  const floor = (MIN_BY_MAJOR[running] ?? MIN_NODE).join(".");
   throw new Error(
-    `4water Flow needs Node ${MIN_NODE.join(".")} or newer; this is ${process.versions.node}.\n` +
-    `node:sqlite exists from 22.5.0 but was behind --experimental-sqlite until 22.13.0, so it cannot be used here.`,
+    `4water Flow needs Node ${floor} or newer; this is ${process.versions.node}.\n` +
+    `node:sqlite exists from 22.5.0 but was behind --experimental-sqlite until 22.13.0 on the 22 line and ` +
+    `23.4.0 on the 23 line, so it cannot be used here.`,
   );
 }
 const { DatabaseSync } = await import("node:sqlite");

@@ -193,13 +193,52 @@ test("every declared Node floor agrees with what node:sqlite actually needs", as
 });
 
 test("the version guard rejects what it should and accepts what it should", async () => {
-  const { nodeTooOld } = await import("../src/db.mjs");
-  for (const v of ["22.5.0", "22.9.1", "22.12.99", "21.7.3", "20.11.0"]) {
-    assert.equal(nodeTooOld(v), true, `${v} cannot run node:sqlite unflagged and must be refused`);
+  const { nodeTooOld, MIN_NODE, MIN_BY_MAJOR } = await import("../src/db.mjs");
+
+  // DERIVED from the floor table, not hand-listed. The hand-listed version of this test refused 22.5.0, 22.9.1,
+  // 22.12.99, 21.7.3 and 20.11.0 and accepted 23.4.0 — so it checked the 23-line boundary on the pass side and
+  // never asked about the fail side, while 23.0 through 23.3 were being accepted and would have died at the
+  // node:sqlite import. A list of examples cannot notice the case nobody thought of; walking the table can.
+  for (const [maj, [, min, pat]] of Object.entries(MIN_BY_MAJOR)) {
+    assert.equal(nodeTooOld(`${maj}.${min}.${pat}`), false, `${maj}.${min}.${pat} is the floor and must be accepted`);
+    // Just below it, both one patch and one minor down, must be refused.
+    if (pat > 0) assert.equal(nodeTooOld(`${maj}.${min}.${pat - 1}`), true, `${maj}.${min}.${pat - 1} is below the floor`);
+    assert.equal(nodeTooOld(`${maj}.${min - 1}.99`), true, `${maj}.${min - 1}.99 is below the ${maj}-line floor`);
+    assert.equal(nodeTooOld(`${maj}.0.0`), true, `${maj}.0.0 predates the flag being lifted on that line`);
+    // And comfortably above it must be fine.
+    assert.equal(nodeTooOld(`${maj}.${min + 1}.0`), false, `${maj}.${min + 1}.0 is above the ${maj}-line floor`);
   }
-  for (const v of ["22.13.0", "22.14.0", "23.4.0", "24.18.0", "25.0.0"]) {
-    assert.equal(nodeTooOld(v), false, `${v} is fine and must not be refused`);
+
+  // Below every line: no floor entry can rescue these.
+  for (const v of ["21.7.3", "20.11.0", "18.20.4"]) {
+    assert.equal(nodeTooOld(v), true, `${v} never had node:sqlite at all and must be refused`);
   }
+  // Above every line with a cutoff: majors absent from the table shipped it unflagged from .0.
+  const beyond = Math.max(...Object.keys(MIN_BY_MAJOR).map(Number)) + 1;
+  for (const v of [`${beyond}.0.0`, `${beyond + 1}.7.2`, "99.0.0"]) {
+    assert.equal(nodeTooOld(v), false, `${v} is past every flag cutoff and must not be refused`);
+  }
+
+  // The floor table and the headline constant must agree, or documents quoting MIN_NODE describe a different rule
+  // from the one enforced.
+  assert.deepEqual(MIN_BY_MAJOR[MIN_NODE[0]], MIN_NODE, "MIN_NODE must be the entry for its own major");
+
+  // ⚠ WHAT THE LOOP ABOVE CANNOT DO, stated because it looks stronger than it is. It derives its cases from the
+  // table, so it verifies the COMPARISON against the table — not the table against reality. Removing the 23 entry
+  // was probed: the loop simply stops asking about 23 and everything stays green. A derived test cannot notice a
+  // release line nobody declared, and no test inside this process can, because which Node minor unflagged
+  // node:sqlite is a fact about Node's history rather than about this code.
+  //
+  // So the table is cross-checked against README, which states both floors in prose. Two places that must agree
+  // beats one nobody re-reads — the same reason the Dockerfile tag, package.json's engines and the CI matrix are
+  // all checked against it in test/image.test.mjs.
+  const readme = read("README.md");
+  for (const [maj, [, min]] of Object.entries(MIN_BY_MAJOR)) {
+    assert.match(readme, new RegExp(`\\b${maj}\\.${min}\\b`),
+      `README states no ${maj}-line floor of ${maj}.${min}. Either the table gained a line the documents do not ` +
+      `mention, or a document was reworded — and an operator on the ${maj} line now has nothing to check against.`);
+  }
+
   // The version this suite is running on, whatever it is, must be acceptable — otherwise the guard is lying.
   assert.equal(nodeTooOld(process.versions.node), false);
 });
