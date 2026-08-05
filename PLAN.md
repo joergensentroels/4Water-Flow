@@ -167,6 +167,32 @@ organisation, and anyone optimising them here is guessing.
 | a volunteer's board | 1 query, 1 ms | unchanged |
 | `autoRoster`, whole season | 276 ms, 414 queries | unchanged |
 
+**Measured a third time, because attendance, the audit log and public holidays had never been measured at all.**
+200 volunteers, a busier week than Copenhagen's, **692 sessions, 1,211 slots, 34,600 availability rows**, an audit
+log of **5,000 rows** spread over three years, and a season with 401 past shifts left unmarked — which is the state
+a planner reaches after a term of not quite keeping up.
+
+| | time | queries | note |
+|---|---|---|---|
+| `/audit`, one page | 6 ms | **4** | 43 KB of HTML. Constant in the size of the log: 100 rows, two lookups to resolve every `person:`/`assignment:` reference on the page, one count |
+| `holidaysBetween` over a season | 0.2 ms | **0** | pure arithmetic; no table is consulted to know what a holiday is |
+| the Administration holiday section | 0.4 ms | **3** | one lookup per holiday IN THE SEASON, not per session — three for this window, at most eleven for a Danish year |
+| `unmarkedShifts`, the backlog card | 0.5 ms | 1 | 401 unmarked, **50 returned**: the cap holds |
+| `rosterReview` | **27 ms** | 2 | the slowest single operation in the app, and pre-existing — the `attended` sum added no query |
+| `pruneAudit`, nightly | 4 ms | 2 | removed 1,662 of 5,000 |
+
+**Nothing new is a bottleneck, and the shape is the point rather than the milliseconds:** every new screen is
+constant or bounded in queries, not linear in the thing it displays. The audit page costs four queries whether the
+log holds fifty rows or fifty thousand.
+
+**Three of the seven figures were measurements of nothing on the first run, which is worth more than the figures.**
+The backlog card read 0 rows because the fixture had marked every past shift; `pruneAudit` reported "removed 0"
+because all 5,000 rows sat inside the 730-day window; and the holiday lookups found 0 slots on every date because
+the season had been seeded with suppression already on. The third was the instructive one: the fixture said
+`{ ...loadPattern(), season: {...} }` under a comment claiming "seeded with NO country" — and the repository's
+config now HAS one, so the spread quietly carried `holidays.country: "DK"` in. **Omitting a key from a spread does
+not remove it.** A fast measurement of an empty input reads exactly like a fast measurement.
+
 `/admin` carried twelve small forms per person — three roles, six capabilities, status, export, two erase modes
 — each with its own CSRF token, so 200 people was about 2,400 forms. Identical defect to the planner's, fixed
 there first, written up there first, and not looked for one file away. The aggravating detail: `/planner?weeks=all`

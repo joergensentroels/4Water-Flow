@@ -26,9 +26,13 @@ config/*.tmp
 # script ships, anything else does not. season-fixture.mjs was added here after that test caught it — it is a
 # fixture three tests use to write a pattern file, and it had gone straight into the image unnoticed, which is
 # what the testkit line below has always been about.
+# measure.mjs was caught by the same test on the commit that added it: a harness that seeds 200 volunteers and
+# 5,000 audit rows to print timings has no business in a production image, and it was not going to be noticed by
+# anybody reading the Dockerfile.
 test/
 tools/testkit.mjs
 tools/season-fixture.mjs
+tools/measure.mjs
 node_modules/
 .git/
 .gitignore
