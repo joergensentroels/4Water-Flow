@@ -20,10 +20,11 @@ before(async () => {
   app.get("/boom", () => { throw new Error("secret path C:\\Users\\somebody\\thing"); });
   app.get("/teapot", () => { throw Object.assign(new Error("nope"), { status: 418 }); });
   app.get("/go", ({ res }) => redirect(res, "/ok"));
-  // For the comment-stripping check below. A string body rather than html``, because the point is what leaves
-  // `send`, and html`` has no way to produce a comment anyway — the templates write them literally.
-  app.get("/withcomment", ({ res }) => send(res, 200, "<p>before</p><!-- developer prose -->\n<p>after</p>"));
-  app.get("/plain", ({ res }) => send(res, 200, "<p>nothing to strip</p>"));
+  // For the comment checks below: one page built with html``, and one plain-string body that must NOT be touched.
+  // The difference is the point — html`` is HTML by construction, a string body might be JSON.
+  app.get("/withcomment", ({ res }) => send(res, 200, html`<p>before</p>${raw("<!-- developer prose -->")}<p>after</p>`));
+  app.get("/notHtml", ({ res }) => send(res, 200, JSON.stringify({ name: "Ann <!-- note --> Berg" }),
+                                        { "Content-Type": "application/json; charset=utf-8" }));
   server = app.listen(0);
   await new Promise((r) => server.once("listening", r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -159,27 +160,28 @@ test("static serving allows only known extensions and cannot traverse", async ()
   }
 });
 
-// ---- comments do not reach the wire ---------------------------------------------------------------------------
+// ---- comments do not reach the wire, and only HTML is touched --------------------------------------------------
 //
 // Measured across six pages before this: 55% of the served bytes were HTML comments, and /plan was 264 KB of which
 // 195 KB was comment — the one comment in that template sits inside a per-row map, so it shipped once per row, 223
 // times over a season. The comments are worth keeping in the source and are not worth sending.
 //
-// Checked at `send`, which every response passes through, and with a positive control: the visible content either
-// side of the comment must survive, or "no comment in the output" would also be satisfied by an empty response.
-test("send strips HTML comments, and Content-Length describes what was actually sent", async () => {
+// The SECOND assertion is a regression I shipped and then measured. Stripping in send() touched every payload,
+// including the JSON export — which is a data-protection right. A volunteer named "Ann <!-- note --> Berg" came out
+// as "Ann  Berg": valid JSON, silently not their record. Doing it in html`` means only HTML is ever affected.
+test("html`` drops comments; a non-HTML body is sent byte for byte", async () => {
   const res = await fetch(`${base}/withcomment`);
   const body = await res.text();
   assert.ok(!body.includes("<!--"), `a comment survived: ${body}`);
   assert.ok(!body.includes("developer prose"), "and its text must be gone, not merely its delimiters");
+  // The control: the content either side must survive, or "no comment" is also satisfied by an empty response.
   assert.match(body, /<p>before<\/p>/, "content before the comment must survive");
   assert.match(body, /<p>after<\/p>/, "and content after it — otherwise this passes on a truncated page");
-
-  // A stripped body with the pre-strip length would make every page a truncated response, which costs more than
-  // the bytes it saves. This is the assertion that would catch stripping in the wrong place.
   assert.equal(Number(res.headers.get("content-length")), Buffer.byteLength(body, "utf8"),
-    "Content-Length must match the stripped payload");
+    "Content-Length must describe what was actually sent");
 
-  const plain = await (await fetch(`${base}/plain`)).text();
-  assert.equal(plain, "<p>nothing to strip</p>", "a body with no comment must come back byte-identical");
+  // A body that is NOT HTML keeps every byte, including something that looks like a comment inside a value.
+  const json = await (await fetch(`${base}/notHtml`)).text();
+  assert.equal(JSON.parse(json).name, "Ann <!-- note --> Berg",
+    "an export must match the record — this is the regression that stripping in send() caused");
 });
