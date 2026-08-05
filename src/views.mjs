@@ -91,7 +91,12 @@ export function navFor(t, roles, current) {
     items.push({ href: "/planner", label: t("nav.planner"), key: "planner" });
     items.push({ href: "/status", label: t("nav.status"), key: "status" });
   }
-  if (roles.includes("admin")) items.push({ href: "/admin", label: t("nav.admin"), key: "admin" });
+  if (roles.includes("admin")) {
+    items.push({ href: "/admin", label: t("nav.admin"), key: "admin" });
+    // The audit trail. In the nav rather than tucked inside Administration because a screen reachable only from
+    // another screen's small print is how the outbox stayed unread — and this one exists to be looked at.
+    items.push({ href: "/audit", label: t("nav.audit"), key: "audit" });
+  }
   return items.map((i) => ({ ...i, current: i.key === current }));
 }
 

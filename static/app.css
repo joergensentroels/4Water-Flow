@@ -203,6 +203,19 @@ li.outboxitem.bad  { border-left-color: var(--no); }
    what would actually be posted. Wrapped, not scrolled: this must stay readable on a phone. */
 .outboxbody { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
 
+/* The change log. Same card-in-a-list shape as the outbox, with no left-rule colour: an audit entry has no state
+   to signal, and colouring "somebody was erased" red would editorialise about an action that is often correct.
+   The action identifier is shown small and monospaced because it is there to be quoted in a question, not read. */
+ul.audit { list-style: none; margin: 0; padding: 0; }
+ul.audit > li { background: var(--card); border: 1px solid var(--line); border-radius: .3rem;
+  padding: .6rem .8rem; margin: 0 0 .6rem; }
+.auditmeta { margin: 0 0 .3rem; color: var(--muted); font-size: .82rem; }
+.auditmeta b { color: var(--fg); }
+.auditwho { color: var(--fg); }
+.auditsubject { margin: 0 0 .2rem; overflow-wrap: break-word; }
+.auditaction { margin: .35rem 0 0; }
+.auditaction code { font-size: .74rem; color: var(--muted); }
+
 /* Filter chips (the planner's horizon). Separate from nav.tabs because these are filters within a page, not
    navigation between pages — but the sizing rule is the same one: WCAG 2.2 SC 2.5.8 wants at least 24x24 CSS
    px per target, and these were 17px-tall inline links a single space apart. 40px with a .5rem gap clears it

@@ -22,8 +22,9 @@ import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapabilit
          addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "./admin.mjs";
 import { seedSeason } from "./seed.mjs";
 import { makeLimiter, clientKey } from "./ratelimit.mjs";
-import { recordAudit, listAudit, AUDIT_PAGE } from "./audit.mjs";
-import { erasePerson, exportPerson, exportSeasonCsv, runRetention } from "./retention.mjs";
+import { recordAudit, listAudit, countAudit, describeAudit, hasOlderAudit } from "./audit.mjs";
+import { erasePerson, exportPerson, exportSeasonCsv, runRetention, retentionConfig } from "./retention.mjs";
+import { renderAudit } from "./pages/audit.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
@@ -694,6 +695,33 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // The outbox. Without this, every message the app composes with no webhook configured â€” which is the default
   // â€” went into a table nobody could read, and /status could only report the count.
+  // Reading the audit trail. Admin only, and the reason is in src/pages/audit.mjs.
+  app.get("/audit", ({ req, res, query }) => {
+    const c = gate({ req, res }, "admin");
+    if (!c) return;
+    // A cursor needs BOTH halves to be a cursor. Half of one would page from the wrong place, and on this screen
+    // that means quietly skipping rows — so an incomplete pair is treated as no cursor at all.
+    //
+    // Tested against `Number(query.get(...))`, which looked right and was not: a MISSING parameter is null,
+    // Number(null) is 0, and Number.isInteger(0) is true. So `?before=<a date>` with no id built a cursor at id 0
+    // and rendered an empty page that looked like an empty log. The raw string has to be checked, not its cast.
+    const bAt = query.get("before");
+    const rawId = query.get("beforeId") ?? "";
+    const before = bAt && /^\d+$/.test(rawId) ? { at: bAt, id: Number(rawId) } : null;
+
+    const rows = listAudit(db, { before });
+    const last = rows.at(-1);
+    const older = last && hasOlderAudit(db, last) ? { at: last.at, id: last.id } : null;
+
+    send(res, 200, renderAudit({
+      t, session: c.session, roles: c.roles, who: c.who, rows,
+      labels: describeAudit(db, rows),
+      total: countAudit(db),
+      retentionDays: retentionConfig(pattern).auditDays,
+      older, newest: before === null,
+    }));
+  });
+
   app.get("/outbox", ({ req, res, query }) => {
     const c = gate({ req, res }, "planner");
     if (!c) return;

@@ -28,6 +28,22 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null, noti
     facts.push({ key: "season", level: "bad", value: pattern.season.key, note: "ended", detail: seasonRow.to_ });
   } else if (seasonRow.from_ > today) {
     facts.push({ key: "season", level: "warn", value: pattern.season.key, note: "future", detail: seasonRow.from_ });
+  } else if (db.prepare("SELECT COUNT(*) n FROM sessions WHERE season_id=?").get(seasonRow.id).n === 0) {
+    // A season row that exists, covers today, and HAS NO SESSIONS. Found on the live demo instance, where this
+    // page showed two green ticks — "Season demo-2026-06-24 is running" and "0 of 0 slots in the next month are
+    // unfilled" — while every planning screen was empty. Both statements were true. Together they read as health.
+    //
+    // The gaps fact cannot catch it: `upcoming === 0 ? "ok"` is a deliberate and correct decision for a season in
+    // its last weeks, and it looks 30 days out, so it cannot tell "nothing left this month" from "nothing, ever".
+    // Only the season fact sees the whole season, so the check belongs here.
+    //
+    // How a real deployment reaches this: a rollover that created the season but never seeded it, a pattern file
+    // edited by hand, or a seeding run interrupted between writing the config and filling the database. The detail
+    // names the season key that DOES have sessions, because that — not the count — is what tells an operator what
+    // went wrong and which of the two to change.
+    const seeded = db.prepare(`SELECT se.key, COUNT(*) n FROM sessions s JOIN seasons se ON se.id = s.season_id
+                               GROUP BY se.id ORDER BY n DESC LIMIT 1`).get();
+    facts.push({ key: "season", level: "bad", value: pattern.season.key, note: "empty", detail: seeded?.key ?? null });
   } else {
     facts.push({ key: "season", level: "ok", value: pattern.season.key, note: "current", detail: seasonRow.to_ });
   }
@@ -161,6 +177,11 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
       season: () => f.note === "current" ? t("status.seasonCurrent", { key: f.value, until: f.detail })
                   : f.note === "ended" ? t("status.seasonEnded", { key: f.value, ended: f.detail })
                   : f.note === "future" ? t("status.seasonFuture", { key: f.value, starts: f.detail })
+                  // Two sentences, because there are two different situations and the fix differs: another season
+                  // holds the sessions (change the config key, or reseed), or nothing has been seeded at all.
+                  : f.note === "empty" ? (f.detail
+                      ? t("status.seasonEmptyElsewhere", { key: f.value, other: f.detail })
+                      : t("status.seasonEmpty", { key: f.value }))
                   : t("status.seasonMissing", { key: f.value }),
       gaps: () => t("status.gaps", { n: f.value, of: f.detail }),
       // The names are the actionable part, so they go in the same sentence rather than a separate line a

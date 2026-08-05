@@ -78,6 +78,14 @@ test("every dynamically-built key family is complete in both locales", () => {
     // put a raw key on a volunteer's screen. Same defect as the hand-kept outbox.kind list above.
     "board.why": Object.values(BOARD_EMPTY_REASONS),
     "planner.why": Object.values(SLOT_EMPTY_REASONS),
+    // Every action the audit log can record, READ FROM THE CALL SITES rather than listed. A new logAudit(...) with
+    // no string here would put `audit.action.admin.whatever` on the change-log page — and that page is read by
+    // somebody trying to answer a question about a person, which is the worst moment to show them a raw key.
+    //
+    // Note the nested dots: the family prefix is `audit.action` and the suffix is `planner.assign`, so the suffix
+    // itself contains a dot. That is why this reads whole action names out of the source instead of splitting keys.
+    "audit.action": [...new Set(sourceFiles().flatMap((f) =>
+      [...readFileSync(f, "utf8").matchAll(/\blogAudit\(\s*\w+\s*,\s*["']([\w.]+)["']/g)].map((m) => m[1])))],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 

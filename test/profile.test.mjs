@@ -116,6 +116,51 @@ test("a season named in config but absent from the database is reported as missi
   assert.ok(!/status\.season/.test(page), "the seasonMissing string must exist and be used");
 }));
 
+// FOUND ON THE RUNNING DEMO, not here. The status page showed two green ticks — "Season demo-2026-06-24 is
+// running and ends 2026-12-03" and "0 of 0 slots in the next month are unfilled" — over a database whose sessions
+// all belonged to a DIFFERENT season key. Both sentences were true; together they read as a healthy app while
+// every planning screen was empty. That is the exact failure this page was written to prevent, arriving by a
+// route the page could not see: the season fact checked dates and the gaps fact checked a 30-day window, so
+// nothing ever asked whether the season had any sessions at all.
+test("a season that exists and covers today but holds no sessions is a fault, not a quiet ✓", withWorld({}, async (w) => {
+  // Exactly the live shape: config names a season row that exists, is current, and was never seeded, while the
+  // sessions sit under another key.
+  w.db.prepare("INSERT INTO seasons (key, from_date, to_date) VALUES (?,?,?)")
+    .run("2026-empty", w.pattern.season.from, w.pattern.season.to);
+  const pattern = { ...w.pattern, season: { ...w.pattern.season, key: "2026-empty" } };
+
+  const status = collectStatus(w.db, { pattern, today: w.pattern.season.from, backupDir: null });
+  const season = factFor(status, "season");
+  assert.equal(season.note, "empty", "a seasonless season is its own situation, not 'current'");
+  assert.equal(season.level, "bad", "an app serving a season with nothing in it is broken, not idle");
+  assert.equal(season.detail, w.pattern.season.key,
+    "and it must name the key that DOES have the sessions — that is the actionable half");
+
+  // The gaps fact stays ✓, and that is correct rather than a second bug: "nothing upcoming" is fine in the last
+  // weeks of a season. It is only misleading WITHOUT the fault above, which is the point of putting it there.
+  assert.equal(factFor(status, "gaps").level, "ok",
+    "the gaps fact cannot tell 'nothing this month' from 'nothing ever' — which is why the season fact must");
+
+  const page = renderStatus({ t: makeT("en"), session: { csrf: "x" }, roles: ["planner"], who: "P", status }).__raw;
+  assert.match(page, /no sessions at all/, "the page must say what is wrong in words");
+  assert.match(page, new RegExp(w.pattern.season.key), "and name the season that has them");
+  assert.ok(!/status\.season/.test(page), "the string must exist in both locales and be used");
+}));
+
+test("a season with no sessions anywhere says so without inventing another key", withWorld({}, async (w) => {
+  // The other half: nothing has been seeded at all, so there is no 'they belong to X instead' to report. A
+  // template that assumed one would render "belong to null", which is how a fix becomes its own defect.
+  w.db.prepare("DELETE FROM sessions").run();
+  const status = collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null });
+  const season = factFor(status, "season");
+  assert.equal(season.note, "empty");
+  assert.equal(season.detail, null, "there is no other season to point at");
+
+  const page = renderStatus({ t: makeT("en"), session: { csrf: "x" }, roles: ["planner"], who: "P", status }).__raw;
+  assert.match(page, /no sessions at all/);
+  assert.ok(!/null|undefined/.test(page), "an absent detail must not reach the page as a word");
+}));
+
 test("a current and a future season are distinguished", withWorld({}, async (w) => {
   const during = collectStatus(w.db, { pattern: w.pattern, today: w.pattern.season.from, backupDir: null });
   assert.equal(factFor(during, "season").level, "ok");

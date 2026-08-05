@@ -77,11 +77,71 @@ export function recordAudit(db, { actorId = null, actorName, action, subject = n
 // planner grid that rendered half a megabyte, so the cap is here rather than left to the caller.
 export const AUDIT_PAGE = 100;
 
-export const listAudit = (db, { limit = AUDIT_PAGE } = {}) =>
+// `before` is a KEYSET cursor — the (at, id) of the last row on the previous page — not an offset. An audit log
+// grows at the front, so OFFSET 100 shifts by however many rows arrived while somebody was reading: the same row
+// can appear twice, and worse, a row can be skipped entirely. Skipping a row is the one failure an audit page must
+// not have, and it is invisible: the page still looks like a complete list.
+export const listAudit = (db, { limit = AUDIT_PAGE, before = null } = {}) =>
   db.prepare(`SELECT id, at, actor_id AS actorId, actor_name AS actorName, action, subject, detail
-                FROM audit ORDER BY at DESC, id DESC LIMIT :n`).all({ n: Math.min(limit, AUDIT_PAGE) });
+                FROM audit
+               ${before ? "WHERE (at < :bAt) OR (at = :bAt AND id < :bId)" : ""}
+               ORDER BY at DESC, id DESC LIMIT :n`)
+    .all(before ? { n: Math.min(limit, AUDIT_PAGE), bAt: before.at, bId: before.id }
+                : { n: Math.min(limit, AUDIT_PAGE) });
 
 export const countAudit = (db) => db.prepare("SELECT COUNT(*) n FROM audit").get().n;
+
+// Is there anything past this page? Asked as its own question because the usual trick — fetch one more row than
+// you show — cannot work here: listAudit caps at AUDIT_PAGE on purpose and does not trust its caller, so asking it
+// for AUDIT_PAGE + 1 silently returns AUDIT_PAGE and the "older" link never appears. Which is exactly what
+// happened, and what the paging test caught.
+export const hasOlderAudit = (db, { at, id }) =>
+  db.prepare("SELECT 1 FROM audit WHERE (at < :at) OR (at = :at AND id < :id) LIMIT 1").get({ at, id }) != null;
+
+// Turn `person:3` into "Anna", `assignment:55` into a date and an activity, and so on — for the page, at render
+// time, from the tables those ids point at.
+//
+// Render time is the whole point rather than an implementation detail. The audit stores ids precisely so that
+// erasing somebody empties the reference without anything having to sweep this table: an anonymised person resolves
+// to their `#id` label, a removed one to "no longer in the system", and a season pruned by retention the same. A
+// label copied in at write time would have outlived all three.
+//
+// `detail` is scanned as well as `subject`, because details say things like "to person:3" and an admin reading
+// "who did somebody put on that shift" should not have to go and look up an integer.
+const REF = /\b(person|assignment|season|invitation):(\d+)\b/g;
+
+export function describeAudit(db, rows) {
+  const byKind = { person: new Set(), assignment: new Set(), season: new Set(), invitation: new Set() };
+  for (const r of rows) {
+    for (const field of [r.subject, r.detail]) {
+      for (const m of String(field ?? "").matchAll(REF)) byKind[m[1]].add(Number(m[2]));
+    }
+  }
+  const labels = new Map();
+  const lookup = (kind, sql, label) => {
+    const ids = [...byKind[kind]];
+    if (ids.length === 0) return;
+    const rowsFound = db.prepare(sql.replace("?IN?", ids.map(() => "?").join(","))).all(...ids);
+    for (const row of rowsFound) labels.set(`${kind}:${row.id}`, label(row));
+  };
+  lookup("person", "SELECT id, name FROM people WHERE id IN (?IN?)", (p) => p.name);
+  lookup("season", "SELECT id, key FROM seasons WHERE id IN (?IN?)", (s) => s.key);
+  lookup("invitation", "SELECT id, email FROM invitations WHERE id IN (?IN?)", (i) => i.email);
+  lookup("assignment", `SELECT a.id, s.date, t.hour, t.minute, act.label
+                          FROM assignments a
+                          JOIN sessions s ON s.id = a.session_id
+                          JOIN timeslots t ON t.id = s.timeslot_id
+                          JOIN activities act ON act.id = s.activity_id
+                         WHERE a.id IN (?IN?)`,
+         (a) => `${a.date} ${String(a.hour).padStart(2, "0")}:${String(a.minute).padStart(2, "0")} ${a.label}`);
+  return labels;
+}
+
+// Substitute what resolved and leave the rest recognisable. A reference with no label is not a bug to hide: the
+// thing it pointed at is gone, which is usually retention or an erasure doing its job, and saying so is more use
+// than showing a bare id.
+export const describeRef = (labels, text, goneLabel) =>
+  text == null ? null : String(text).replace(REF, (whole, kind, id) => labels.get(`${kind}:${id}`) ?? goneLabel);
 
 // Erasure's half of the bargain. The rows stay — that is the point of an audit — but the name goes, replaced by
 // the same #id label `people` uses, so "who did this" remains answerable as a person without naming them.

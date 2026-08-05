@@ -129,6 +129,11 @@ const JUSTIFIED = {
     "asserts auditDays > notificationDays and a test fails if that inverts. 'Your name comes out of it': " +
     "erasePerson calls pseudonymiseAuditActor AND scrubAuditDetail in both modes, checked in both directions — " +
     "the rows survive and the name does not.",
+  "status.seasonEmpty":
+    "Reached only when the season row EXISTS, covers today, and COUNT(*) over its sessions is 0 — all three " +
+    "counted in collectStatus, none assumed. 'That is why every screen is empty' is then a fact about this app " +
+    "rather than a guess: every plan view scopes by season_id, so a season with no sessions can only render " +
+    "empty. Found on the running demo, where this state showed a green tick and '0 of 0 slots unfilled'.",
   "status.queued":
     "Chosen only when notify.channel === 'outbox', i.e. when MATTERMOST_WEBHOOK really is unset. The " +
     "unconditional version of this sentence is the bug this file exists to prevent.",
