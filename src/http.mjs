@@ -60,6 +60,21 @@ export function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Length": Buffer.byteLength(payload),
+    // NOT CACHED by default, because the default response here carries somebody's name.
+    //
+    // Every gated page shows personal data — who is teaching on which evening, contact details on the admin
+    // screen, one volunteer's whole record in an export — and this is a nonprofit where people share whatever
+    // laptop is to hand. With no Cache-Control the browser applies its own heuristic, so the back button after a
+    // sign-out can render the roster from cache. `no-store` is the standard answer for an authenticated app and
+    // costs a re-fetch of a page that is under two kilobytes on every screen except the plan.
+    //
+    // In `send` rather than SECURITY_HEADERS, and that placement is the whole care in this change. serveStatic
+    // spreads SECURITY_HEADERS AFTER its own `public, max-age=3600`, so putting it there would have silently
+    // un-cached the stylesheet — the one response that deliberately wants caching. Here, a route's own headers win
+    // (they spread last), which is how the calendar feed keeps `private, max-age=300`, and serveStatic's 200 path
+    // does not come through this function at all. Two increments ago a transformation went into the universal
+    // boundary and corrupted the JSON export; this is the same shape, checked before rather than after.
+    "Cache-Control": "no-store",
     ...SECURITY_HEADERS,
     ...headers,
   });

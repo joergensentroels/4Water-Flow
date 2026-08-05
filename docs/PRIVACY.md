@@ -168,6 +168,8 @@ a confident claim nobody checked. What follows is the current state.
 
 Server-rendered pages with a strict CSP and no third-party requests; sessions in an HMAC-signed
 `HttpOnly; SameSite=Lax; Secure` cookie with no server-side store; CSRF token on every state-changing request;
+every page and export that carries personal data is sent `Cache-Control: no-store`, so a shared computer's
+browser cannot re-display the roster from cache after somebody signs out;
 invite tokens stored only as SHA-256 hashes; the container runs unprivileged with memory and CPU limits;
 backups refuse to be written into a git work tree or a cloud-sync folder, because the file is the whole
 roster. Details in `../RUNBOOK.md` and the code.

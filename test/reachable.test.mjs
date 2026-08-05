@@ -301,3 +301,52 @@ test("every route whose path promises a file type serves that type", async () =>
       "the reader must see a real header, or the assertions above are comparing nothing");
   } finally { w.close(); }
 });
+
+// ---- what may be cached, and what may not ----------------------------------------------------------------------
+//
+// Every gated page shows personal data — who teaches which evening, contact details on the admin screen, one
+// volunteer's whole record in an export — and this is a nonprofit where people use whatever laptop is to hand. With
+// no Cache-Control the browser applies its own heuristic, so the back button after a sign-out can render the roster
+// from cache. `send` therefore defaults to no-store.
+//
+// The THREE exceptions are the point of this test, because each is a deliberate decision that the default would
+// otherwise have silently reversed:
+//   - the stylesheet is public and cached for an hour, and serveStatic spreads SECURITY_HEADERS after its own
+//     Cache-Control — so putting no-store there instead of in `send` would have un-cached the one response that
+//     wants caching, on every page load, for every volunteer;
+//   - the calendar feed is private with a short window, because a client polls it and the URL is the credential;
+//   - the ETag path must still answer 304, which is what makes the cached stylesheet cheap rather than merely
+//     allowed.
+test("personal pages are not cached, the stylesheet is, and the ETag path still answers 304", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const cookie = await w.signIn(w.people[0]);
+    await w.post("/me/calendar", cookie, new URLSearchParams({ csrf: csrfFromCookie(cookie) }));
+    const me = await (await w.get("/me", cookie)).text();
+    const token = me.match(/\/calendar\/([A-Za-z0-9_-]+)\.ics/)?.[1];
+    const href = (await (await w.get("/", cookie)).text()).match(/href="(\/static\/[^"]+)"/)?.[1];
+    assert.ok(token && href, "the fixture must produce a calendar token and a stylesheet link");
+
+    // Anything carrying a person's data must not be stored.
+    for (const p of ["/", "/plan", "/board", "/me", "/admin", "/me/export.json", "/planner/season.csv"]) {
+      const res = await w.get(p, cookie);
+      assert.equal(res.status, 200, `${p} answered ${res.status}; a non-200 would make this assertion vacuous`);
+      assert.match(res.headers.get("cache-control") ?? "", /no-store/,
+        `${p} may be held in a shared browser's cache and shown after sign-out`);
+    }
+
+    // And the deliberate exceptions, which is the half that catches putting the default in the wrong place.
+    const feed = await w.get(`/calendar/${token}.ics`, cookie);
+    assert.match(feed.headers.get("cache-control") ?? "", /private/,
+      "a calendar client polls this; private with a short window is the decision, and no-store would defeat it");
+    assert.doesNotMatch(feed.headers.get("cache-control") ?? "", /no-store/);
+
+    const css = await w.get(href, cookie);
+    assert.match(css.headers.get("cache-control") ?? "", /public, max-age=\d+/,
+      "the stylesheet is the one response that wants caching, and it is fetched on every page");
+    const etag = css.headers.get("etag");
+    assert.ok(etag, "and it must carry an ETag");
+    const revalidated = await fetch(`${w.base}${href}`, { headers: { "If-None-Match": etag } });
+    assert.equal(revalidated.status, 304, "the ETag path is what makes the cache cheap rather than merely permitted");
+  } finally { w.close(); }
+});
