@@ -157,6 +157,83 @@ test("and that scan genuinely fires — a BOM built at runtime is caught", () =>
     "the escape sequence is six ASCII characters and must be legal");
 });
 
+// Escaping is the DEFAULT and `raw()` is the documented opt-out, which makes every raw() call site the whole of
+// this app's XSS surface. The browser and accessibility passes cannot see this: they measured contrast, target
+// size and whether pages render, none of which changes if a volunteer's name arrives unescaped.
+//
+// Audited by hand first, and every one of the four is a static literal — three `raw(' aria-current="true"')`
+// attributes and one hardcoded SVG droplet. Nothing takes user-controlled input. So this test does not fix a
+// defect; it holds a property that is currently true and would be silent if broken, which is the same reason the
+// seams scanner above exists. `raw(person.name)` would render exactly as well as `${person.name}` right up to the
+// first volunteer who puts a bracket in their name.
+//
+// The other bypass worth naming, and why it is not one: `send()` does not escape a plain string. The routes that
+// pass one are /healthz ("ok"), the ICS feed, the JSON exports and the season CSV — each with its own
+// Content-Type and, because SECURITY_HEADERS sets `X-Content-Type-Options: nosniff`, no chance of being sniffed
+// as HTML. Every HTML response goes through `html`, which escapes.
+test("every escaping opt-out is a literal — raw() never receives user input", () => {
+  const offenders = [];
+  let sites = 0;
+
+  // `src/` ONLY, and that is the right scope rather than a convenience. The claim is about what the application
+  // renders into a response; `test/http.test.mjs` passes dynamic values to raw() deliberately, because proving the
+  // opt-out works is its job. Scanning tests flagged that, plus this file's own fixtures — the first run reported
+  // six offenders and not one was in src/.
+  //
+  // Worth noting for the next person: assembling a fixture at runtime does NOT hide it from a scanner that reads
+  // string contents rather than parsing, which is what this one does. `["raw(", …].join("")` still leaves the text
+  // in the file. That trick works against the seams extractor above, which skips comments and reads literals as
+  // values, and not against this.
+  for (const file of sourceFiles().filter((f) => f.includes(`${path.sep}src${path.sep}`))) {
+    if (file.endsWith(`${path.sep}http.mjs`)) continue;      // where raw() is DEFINED, not used
+    const src = readFileSync(file, "utf8");
+    // Walk to the balanced closing paren so a multi-line SVG argument is read whole.
+    for (const m of src.matchAll(/\braw\(/g)) {
+      sites++;
+      let i = m.index + m[0].length, depth = 1, arg = "";
+      while (i < src.length && depth > 0) {
+        const c = src[i];
+        if (c === "(") depth++;
+        else if (c === ")") { depth--; if (depth === 0) break; }
+        arg += c;
+        i++;
+      }
+      const trimmed = arg.trim();
+      const quoted = /^["'`]/.test(trimmed);
+      // A template literal is fine only if nothing is interpolated into it.
+      const interpolated = trimmed.startsWith("`") && trimmed.includes("${");
+      if (!quoted || interpolated) {
+        offenders.push(`${path.relative(ROOT, file)}: raw(${trimmed.slice(0, 60).replace(/\s+/g, " ")}…)`);
+      }
+    }
+  }
+
+  assert.ok(sites >= 3, `only found ${sites} raw() call sites — this check is not looking properly`);
+  assert.deepEqual(offenders, [],
+    `raw() bypasses escaping, so its argument must be a literal with nothing interpolated into it:\n  ` +
+    `${offenders.join("\n  ")}\n  If you need dynamic markup, build it from html\`\` so the values are escaped.`);
+});
+
+test("and that audit fires on an interpolated raw(), which is the case that matters", () => {
+  // Assembled at runtime, so this file contains no offending call of its own — the same reason the planted-name
+  // and invisible-character tests above build their fixtures rather than writing them.
+  const bad = ["raw(", "person.name", ")"].join("");
+  const alsoBad = "raw(" + "`<b>${" + "name}</b>`" + ")";
+  const good = "raw(' aria-current=\"true\"')";
+
+  const judge = (text) => {
+    const m = /\braw\(/.exec(text);
+    if (!m) return "no call";
+    const arg = text.slice(m.index + m[0].length, text.lastIndexOf(")")).trim();
+    if (!/^["'`]/.test(arg)) return "offends";
+    return arg.startsWith("`") && arg.includes("${") ? "offends" : "fine";
+  };
+
+  assert.equal(judge(bad), "offends", "a bare identifier must be caught");
+  assert.equal(judge(alsoBad), "offends", "and so must an interpolated template literal");
+  assert.equal(judge(good), "fine", "while a constant attribute is exactly what raw() is for");
+});
+
 test("every string the UI asks for exists in the primary locale", () => {
   const da = loadStrings("da");
   const en = loadStrings("en");
