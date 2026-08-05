@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
-import { migrate } from "../src/db.mjs";
+import { migrate, ADDED_COLUMNS } from "../src/db.mjs";
 import { ROOT, loadPattern } from "../src/config.mjs";
 import { seedSeason, seedPeople } from "../src/seed.mjs";
 import { makeBackup, verifyBackup } from "../tools/backup.mjs";
@@ -27,12 +27,17 @@ import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
 import { calendarTokenFor, personByCalendarToken } from "../src/calendar.mjs";
 
-// The columns ADDED_COLUMNS is responsible for, named here so this test states what it is covering rather than
-// silently covering whatever happens to be in the list.
-const LATER_COLUMNS = [
-  ["assignments", "role"],
-  ["people", "calendar_token_hash"],
-];
+// DERIVED from ADDED_COLUMNS, the decision list in src/db.mjs.
+//
+// This was two pairs written by hand, with a comment arguing that naming them stated the coverage rather than
+// silently covering whatever happened to be in the list. The argument was wrong in the way this project keeps
+// finding: `attended` was added to ADDED_COLUMNS for the attendance feature, this list was not touched, and the
+// test went on passing. The single column the upgrade path had never altered was the one the newest feature reads.
+// A list of what to check cannot notice something absent from itself — the fourth time that sentence is earned here.
+//
+// "Stating the coverage" is kept by the assertion below rather than by the literal: a shrunken ADDED_COLUMNS now
+// fails instead of quietly reducing what this test does.
+const LATER_COLUMNS = ADDED_COLUMNS.map((c) => [c.table, c.column]);
 
 const columnsOf = (db, table) =>
   db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map((r) => r.name);
@@ -281,4 +286,52 @@ test("every later-added column is also in the schema a fresh install creates", (
       `upgraded one would have different schemas`);
   }
   db.close();
+});
+
+// What the derived list is actually covering, stated as an assertion rather than as a literal. The hand-written
+// version of LATER_COLUMNS silently covered two of three; this fails if ADDED_COLUMNS shrinks, so the coverage
+// cannot quietly narrow again. The named pairs are the ones already shipped to a real schema — a future column
+// needs no edit here, which is the whole point.
+test("the upgrade path covers every column the migration is responsible for", () => {
+  assert.ok(LATER_COLUMNS.length >= 3,
+    `only ${LATER_COLUMNS.length} added columns — if ADDED_COLUMNS shrank, the upgrade path is now covering less`);
+  for (const pair of [["assignments", "role"], ["assignments", "attended"], ["people", "calendar_token_hash"]]) {
+    assert.ok(LATER_COLUMNS.some(([t, c]) => t === pair[0] && c === pair[1]),
+      `${pair.join(".")} has shipped and must stay on the migration list: dropping it from ADDED_COLUMNS would ` +
+      `leave any database created before it without the column and no way to gain it`);
+  }
+});
+
+// A whole TABLE added after the first release, which is how `audit` arrived. The fixture above makes a database
+// "old" by dropping COLUMNS, so a deployment that predates an entire table was never simulated: migrate() creates
+// tables with IF NOT EXISTS, and whether that is reached on an existing database is exactly the sort of thing this
+// project has been wrong about before.
+//
+// Derived from the live schema rather than from a list of "tables added later", so a table added next year is
+// covered without anybody remembering this test exists.
+test("a database missing a whole table gains it, with the columns a fresh install has", () => {
+  const fresh = new DatabaseSync(":memory:");
+  migrate(fresh);
+  const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type = ?").all("table").map((r) => r.name);
+  const expected = new Map(tables.map((t) => [t, columnsOf(fresh, t).sort()]));
+  fresh.close();
+  assert.ok(tables.length >= 10, `only ${tables.length} tables found — this check is not looking`);
+
+  for (const table of tables) {
+    const db = new DatabaseSync(":memory:");
+    migrate(db);
+    // Foreign keys are off by default in node:sqlite, so dropping a parent leaves dangling references rather than
+    // refusing — which is what makes this simulation possible at all. It is structural: the point is that migrate()
+    // brings the table back, not that anything survives.
+    db.exec(`DROP TABLE ${table}`);
+    assert.ok(!db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name=?").get(table).n,
+      `${table} did not actually drop — the mutation has to land or the assertion below proves nothing`);
+
+    migrate(db);
+    const after = columnsOf(db, table).sort();
+    assert.deepEqual(after, expected.get(table),
+      `migrate() did not restore ${table} as a fresh install has it. An existing deployment upgrading to a version ` +
+      `that adds this table would start without it, and every query touching it would throw`);
+    db.close();
+  }
 });

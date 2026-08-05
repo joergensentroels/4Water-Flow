@@ -83,9 +83,13 @@ test("every database reader is reachable from a route, or listed as deliberately
   const readers = [];
   for (const file of modules) {
     for (const part of stripComments(read(file)).split(/^(?=export\s)/m)) {
-      const m = /^export\s+(?:async\s+)?(?:function|const)\s+(\w+)/.exec(part);
+      // A FUNCTION, not a data literal. `export const ADDED_COLUMNS = [...]` is a list of DDL strings, and it was
+      // flagged the moment it was exported — because the chunk between it and the next top-level export happens to
+      // contain a non-exported helper that queries. Splitting a file at top-level exports is crude enough that the
+      // discriminator has to be the declaration itself: `function x`, or `const x = (` for an arrow.
+      const m = /^export\s+(?:async\s+)?(?:function\s+(\w+)|const\s+(\w+)\s*=\s*(?:async\s*)?\()/.exec(part);
       if (m && /db\.prepare\(/.test(part) && /\b(FROM|JOIN)\s+\w+/.test(part)) {
-        readers.push({ file, name: m[1], body: part });
+        readers.push({ file, name: m[1] ?? m[2], body: part });
       }
     }
   }

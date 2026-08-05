@@ -96,7 +96,12 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
 //
 // This is why test/upgrade.test.mjs puts real rows in the fixture before simulating the old schema: the ALTER has
 // to run against a populated table, exactly as it will on the real one.
-const ADDED_COLUMNS = [
+//
+// EXPORTED so that test can drop every column on this list rather than a copy of it. It used to name two of them by
+// hand, with a comment arguing that stating the coverage was clearer than deriving it — and then `attended` was
+// added here, and the upgrade test went on passing without ever altering a table for it. The column the newest
+// feature depends on was the one column the upgrade path had never touched.
+export const ADDED_COLUMNS = [
   { table: "assignments", column: "role", ddl: "ALTER TABLE assignments ADD COLUMN role TEXT" },
   // Did they turn up? NULL means nobody has said — which is the honest majority state, because a planner marks
   // this after the fact and most shifts will never be marked at all. 1 attended, 0 did not.
