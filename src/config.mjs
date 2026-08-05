@@ -28,6 +28,10 @@ export const VERSION = (() => {
   catch { return "unknown"; }        // a version nobody can read must not stop the app serving a schedule
 })();
 
+// The permission roles the application itself refers to by name. Declared here, beside the validation that
+// enforces them, so there is one answer to "which roles must exist".
+export const REQUIRED_ROLES = ["admin", "planner", "volunteer"];
+
 // One validator, used both when loading the file and when the admin screen writes it back. Two copies would
 // let the admin save a file that the next boot refuses to load — a self-inflicted outage.
 export function validatePattern(p) {
@@ -70,7 +74,21 @@ export function validatePattern(p) {
     if (!Array.isArray(w.activities) || w.activities.length === 0) err("a weekly entry needs at least one activity");
     for (const k of w.activities) if (!keys.has(k)) err(`weekly references unknown activity "${k}"`);
   }
-  if (!Array.isArray(p.roles) || !p.roles.includes("volunteer")) err("roles must include volunteer");
+  // Every role the CODE depends on, not just the one it was checking.
+  //
+  // This required only `volunteer`, while eleven gated routes, `IMPLIES` and the last-admin guard all name
+  // `admin` or `planner` as string literals. Measured on a config declaring `roles: ["volunteer"]`: it validated,
+  // seeded that one role, and then `setRole(…, "admin", true)` returned `no_such_role`, `requireRole` gave 403,
+  // and the boot warning "there is no administrator yet" became permanently true with no remedy inside the app.
+  // A locked-out instance from a config the validator approved — precisely the self-inflicted outage this
+  // function's own header says it exists to prevent.
+  //
+  // `roles` is therefore not a seam. Which roles EXIST is fixed by the code; config only gets to list them, and
+  // test/deploy.test.mjs checks this constant against the names the source actually gates on, so a fourth role
+  // added in code cannot be left out of here.
+  if (!Array.isArray(p.roles)) err("roles must be an array");
+  const missing = REQUIRED_ROLES.filter((r) => !p.roles.includes(r));
+  if (missing.length) err(`roles must include ${missing.join(", ")} — the app gates routes on ${missing.length > 1 ? "these names" : "this name"} and cannot grant a role that does not exist`);
 
   // The calendar feed needs to know when "19:00" actually is, and how long a shift runs — neither of which the
   // schema records. Absent means the defaults below, so an older config keeps working.

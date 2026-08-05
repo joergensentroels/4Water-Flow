@@ -192,6 +192,47 @@ test("every declared Node floor agrees with what node:sqlite actually needs", as
   }
 });
 
+// `roles` looks like a seam and is not: which roles EXIST is fixed by the code, and config only lists them. The
+// validator required just `volunteer`, so a config declaring only that validated, seeded one role, and left an
+// instance where `setRole(…, "admin", true)` answers `no_such_role`, every admin route 403s, and the boot warning
+// "there is no administrator yet" is permanently true. Locked out by a config the validator approved.
+//
+// Both halves matter. The first is that each required role is actually required. The second is that the constant
+// covers what the source gates on — a fourth role introduced in code would otherwise be missing from config with
+// nothing to notice, which is the same shape as the gate added to GATE and missed in assignSlot.
+test("every role the code gates on is required by the validator, and each one really is", async () => {
+  const { REQUIRED_ROLES, loadPattern, validatePattern } = await import("../src/config.mjs");
+  const base = loadPattern();
+
+  assert.doesNotThrow(() => validatePattern({ ...base, roles: [...REQUIRED_ROLES] }));
+  for (const role of REQUIRED_ROLES) {
+    const roles = REQUIRED_ROLES.filter((r) => r !== role);
+    assert.throws(() => validatePattern({ ...base, roles }), new RegExp(role),
+      `a config without "${role}" must be refused, and the message must name it`);
+  }
+  assert.throws(() => validatePattern({ ...base, roles: "admin" }), /roles must be an array/);
+
+  // Which names the source actually gates on. Read from the code rather than restated, so this cannot agree with
+  // a stale copy of itself.
+  const used = new Set();
+  for (const f of ["src/server.mjs", "src/auth.mjs", "src/admin.mjs"]) {
+    const text = read(f);
+    // gate({...}, "planner") / postGate({...}, "admin")
+    for (const m of text.matchAll(/\b(?:post)?[gG]ate\([^)]*,\s*"(\w+)"\s*\)/g)) used.add(m[1]);
+    // SQL that names a role: WHERE r.name='admin'
+    for (const m of text.matchAll(/r\.name\s*=\s*'(\w+)'/g)) used.add(m[1]);
+    // The implication table, and the two roleName literals.
+    for (const m of text.matchAll(/IMPLIES\s*=\s*\{\s*(\w+):\s*\[\s*"(\w+)"/g)) { used.add(m[1]); used.add(m[2]); }
+    for (const m of text.matchAll(/roleName\s*(?:===|=)\s*"(\w+)"/g)) used.add(m[1]);
+  }
+  assert.ok(used.size >= 3, `only found ${used.size} role names in the source — this check is not looking properly`);
+
+  const ungoverned = [...used].filter((r) => !REQUIRED_ROLES.includes(r));
+  assert.deepEqual(ungoverned, [],
+    `the code gates on ${ungoverned.join(", ")}, which REQUIRED_ROLES does not list — a config need not declare ` +
+    `it, and the app would refuse to grant a role it depends on.`);
+});
+
 test("the version guard rejects what it should and accepts what it should", async () => {
   const { nodeTooOld, MIN_NODE, MIN_BY_MAJOR } = await import("../src/db.mjs");
 

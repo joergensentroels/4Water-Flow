@@ -223,7 +223,13 @@ test("the validator rejects every way of breaking the config", () => {
     [{ ...good, weekly: [{ dayOfWeek: 3, hour: 19, activities: ["ghost"] }] }, /unknown activity "ghost"/],
     [{ ...good, activities: [{ key: "Bad Key", label: "x" }, ...good.activities] }, /lowercase letters/],
     [{ ...good, activities: [...good.activities, good.activities[0]] }, /duplicate activity key/],
-    [{ ...good, roles: ["admin"] }, /must include volunteer/],
+    // Names EVERY missing role, not just the first. The validator used to require only `volunteer`, so a config
+    // declaring `["volunteer"]` alone passed and left an instance where nobody could be made an administrator —
+    // see test/deploy.test.mjs for the measurement and for the check that this list matches what the code gates on.
+    [{ ...good, roles: ["admin"] }, /must include planner, volunteer/],
+    [{ ...good, roles: ["volunteer"] }, /must include admin, planner/],
+    [{ ...good, roles: ["admin", "volunteer"] }, /must include planner/],
+    [{ ...good, roles: "admin" }, /roles must be an array/],
   ];
   for (const [obj, re] of bad) assert.throws(() => validatePattern(obj), re, `should have rejected: ${JSON.stringify(obj).slice(0, 80)}`);
   assert.ok(validatePattern(good));
