@@ -38,8 +38,64 @@ test("every POST that changes the plan, a person or the config is accounted for"
   } finally { w.close(); }
 });
 
+// Minimal parameters that make a route ACT rather than bounce off its own validation. Seventeen of the twenty
+// audited routes record something from a bare POST; these three validate an input first and redirect without
+// logging, which is correct — a malformed request changed nothing, so there is nothing to record. Supplying the
+// input is what turns "the route refused me" into "the route did the thing and wrote it down".
+const ACTING_FORM = {
+  "/admin/invite": { email: "invited@example.invalid", name: "Invited Person" },
+  "/admin/weekly/add": { time: "19:00", dayOfWeek: "3", activities: "salsa" },
+  "/admin/holiday": { date: "2026-12-25", on: "1" },
+};
+
+// THE RUNTIME VERSION OF THE TEST BELOW, and the reason both exist.
+//
+// The static one greps each handler's body for `logAudit(`. That is a proxy: the text being present is not the call
+// happening. Measured — wrapping the `/board/:id/claim` call as `if (false) logAudit(...)` left the ENTIRE suite
+// green, so a route could silently stop recording and the gate named for exactly that would still pass. (No figure
+// here: test/docs.test.mjs forbids a test count in a source comment, and it caught the first draft of this
+// paragraph, which had one.) The audit log is
+// the "what changed, when, who" the privacy notice promises, so a route that quietly stops writing to it is an
+// accountability defect, not a cosmetic one.
+//
+// This drives each audited route over HTTP and requires a row to appear with an actor on it. Fully derived from
+// AUDITED — no list of routes to probe, so a new audited route is covered the moment it is added to the decision.
+test("every audited route actually writes a row, with an actor, when it acts", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const admin = await w.signIn(w.people[0]);
+    const token = csrfFromCookie(admin);
+    const routes = Object.keys(AUDITED);
+    assert.ok(routes.length >= 15, `AUDITED lists only ${routes.length} routes — this test is barely looking`);
+
+    const silent = [];
+    const actorless = [];
+    for (const pattern of routes) {
+      const path = pattern.replace(/:(\w+)/g, () => "1");
+      const before = countAudit(w.db);
+      await w.post(path, admin, new URLSearchParams({ csrf: token, ...(ACTING_FORM[pattern] ?? {}) }));
+      const written = countAudit(w.db) - before;
+      if (written === 0) { silent.push(pattern); continue; }
+      const row = w.db.prepare(
+        "SELECT action, actor_id AS actorId, actor_name AS actorName FROM audit ORDER BY id DESC LIMIT 1").get();
+      // An audit row naming nobody answers "what changed" and not "who", which is half the point of having one.
+      if (!row.actorName || row.actorId == null) actorless.push(`${pattern} -> ${row.action} (actor ${row.actorName})`);
+    }
+
+    assert.deepEqual(silent, [],
+      `these routes are listed in AUDITED but wrote no audit row when driven over HTTP: ${silent.join(", ")}. ` +
+      `Either the handler does not reach its logAudit call, or the route needs an entry in ACTING_FORM so that it ` +
+      `acts instead of failing validation`);
+    assert.deepEqual(actorless, [], `these routes recorded a row with no actor: ${actorless.join("; ")}`);
+  } finally { w.close(); }
+});
+
 // The list above says what SHOULD be logged. This says the handler actually calls the writer — the two are
 // different claims, and the gap between them is where a route quietly stops recording.
+//
+// Kept alongside the runtime test rather than replaced by it: this one fails when a route is added to AUDITED with
+// no writer call at all, which is the likelier mistake and gets a clearer message. The runtime test is what proves
+// the call happens.
 test("every audited route's handler calls the audit writer", () => {
   const src = readFileSync(path.join(ROOT, "src", "server.mjs"), "utf8");
   const parts = src.split(/\bapp\.(get|post)\(\s*"([^"]+)"/);
