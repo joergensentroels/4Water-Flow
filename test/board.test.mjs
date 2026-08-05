@@ -21,7 +21,8 @@ const reasonOf = (res) => new URL(res.headers.get("location"), "http://x").searc
 test("the board requires a session", withWorld({}, async ({ get }) => {
   const r = await get("/board");
   assert.equal(r.status, 303);
-  assert.equal(r.headers.get("location"), "/signin");
+  assert.equal(r.headers.get("location"), "/signin?next=%2Fboard",
+    "carrying the destination: every slot-open notification links here, and it is read on a phone with no session");
 }));
 
 test("with no availability entered, the board is empty and says so", withWorld({}, async ({ people, signIn, get }) => {

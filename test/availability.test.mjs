@@ -13,7 +13,8 @@ const withWorld = (opts, fn) => async () => {
 test("an anonymous visitor is sent to sign-in, not shown the form", withWorld({}, async ({ get }) => {
   const r = await get("/availability");
   assert.equal(r.status, 303);
-  assert.equal(r.headers.get("location"), "/signin");
+  assert.equal(r.headers.get("location"), "/signin?next=%2Favailability",
+    "and the page they wanted is carried through sign-in — a nudge links straight here");
 }));
 
 test("the form offers exactly the season's session dates and needs no JavaScript", withWorld({}, async ({ db, seasonId, people, signIn, get }) => {

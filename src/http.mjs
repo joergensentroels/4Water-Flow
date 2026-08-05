@@ -121,6 +121,12 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
     // Introspection, so a test can walk every route the app actually registers rather than a hand-kept list
     // that drifts. A CSRF audit against a list somebody has to remember to update is not an audit.
     routes: () => routes.map((r) => ({ method: r.method, pattern: r.pattern })),
+    // Would this app actually serve that? Asked by the post-sign-in redirect, and the reason it can be an
+    // ALLOWLIST instead of a filter: a destination is acceptable only if a registered route matches it, so
+    // `//evil.com`, `https://evil.com`, `/board/../admin` and every other spelling nobody thought of are refused
+    // by not being routes rather than by being recognised as attacks. A filter has to enumerate what is bad; this
+    // enumerates what is servable, and the router already knows.
+    canServe: (method, pathname) => routes.some((r) => r.method === method && r.rx.test(pathname)),
   };
   return app;
 }

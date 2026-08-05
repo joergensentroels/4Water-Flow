@@ -372,6 +372,13 @@ What that means in practice:
 - **The `dev` sign-in cannot run in production.** Two independent switches must both be set, and
   `NODE_ENV=production` refuses regardless. Verified by an automated test that boots the app with both flags
   set the wrong way and checks no session is issued.
+- **Sign-in only ever sends people to pages of this app.** A volunteer who taps a notification link without a
+  session is bounced to `/signin?next=/board`, and after signing in they land on the board rather than the home
+  page. The destination is accepted **only if it matches a route this app registered** — not filtered for anything
+  that looks dangerous, but checked against the real route table, so `//somewhere-else`, an absolute URL and
+  `/board/../admin` are all refused for the same reason. If somebody ever "improves" this into a pattern match, it
+  becomes an open redirect: a link that looks like your sign-in page and ends up somewhere else. Eighteen attempts
+  are in `test/nextdest.test.mjs`, alongside the control that proves a legitimate destination still works.
 
 ## Who to call
 

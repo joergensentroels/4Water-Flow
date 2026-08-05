@@ -101,11 +101,52 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // Guard used by every authenticated route: returns a response instead of a boolean, so a handler cannot
   // forget to stop after a failed check.
+  // WHERE TO GO AFTER SIGNING IN, and the only thing that decides whether a destination is allowed.
+  //
+  // Increment AI put a link in every notification, which created a journey nobody had walked: a volunteer taps
+  // "Open the shift exchange: https://…/board" in Mattermost, on a phone with no session, and the 401 below sent
+  // them to a bare /signin. Measured end to end — 303 to /signin, sign in, 303 to `/`. **They tapped a link to the
+  // shift exchange and arrived at the home page**, with nothing on either screen remembering where they had been
+  // going. Every part worked; the composition dropped them one step short of the thing they came for, which is the
+  // chasing the link exists to remove.
+  //
+  // An open redirect is the obvious hazard in fixing this, and it is a real one here: this app already refuses to
+  // build an origin from the `Host` header because a forged one would render a link to somebody else's server. So
+  // this is an ALLOWLIST, not a filter. A destination is acceptable only if the router would actually serve a GET
+  // for it — `//evil.com`, `https://evil.com`, `/board/../admin`, a percent-encoded authority and every spelling
+  // nobody has thought of are refused by not being routes, rather than by being recognised as attacks. A filter has
+  // to anticipate; this asks the router, which already knows.
+  //
+  // The auth routes are excluded because they are the only ones that would loop: /signin?next=/signin, or a
+  // /auth/oidc that starts a second round trip with the first one's state in the cookie. Derived from the path
+  // rather than listed, so a new /auth/* route is covered the day it is added.
+  const NEXT_LOOPS = /^\/(signin|signout|auth\/|invite\/)/;
+  const safeNext = (raw) => {
+    const value = String(raw ?? "");
+    if (!value || value.length > 200) return null;
+    // Belt and braces: neither of these could match a route anyway, but a destination that is not a plain
+    // same-origin path should be refused by something that says so, not only by failing to be found.
+    if (!value.startsWith("/") || value.startsWith("//") || /[\\\s]/.test(value)) return null;
+    const pathname = value.split("?")[0].split("#")[0];   // query dropped: nothing needs it, and it widens this
+    if (NEXT_LOOPS.test(pathname)) return null;
+    return app.canServe("GET", pathname) ? pathname : null;
+  };
+  // One place decides where a successful sign-in lands, so the three sign-in paths cannot drift apart.
+  const landing = (raw) => safeNext(raw) ?? "/";
+
   const gate = ({ req, res }, role = null) => {
     const { session, roles } = ctx(req);
     const g = requireRole(db, session, role);
     if (!g.ok) {
-      if (g.status === 401) { redirect(res, "/signin"); return null; }
+      // The path they were actually trying to reach, carried through sign-in. Only for 401 — a 403 means they are
+      // signed in and not allowed, and sending them back to a page they may not have is not help.
+      if (g.status === 401) {
+        // Not for "/" — that is where sign-in lands anyway, so ?next=%2F would be a parameter that says nothing.
+        // The redirect URL should carry a destination only when there is a destination worth carrying.
+        const want = safeNext(req.url);
+        redirect(res, want && want !== "/" ? `/signin?next=${encodeURIComponent(want)}` : "/signin");
+        return null;
+      }
       send(res, 403, renderErrorPage(t, 403));
       return null;
     }
@@ -139,17 +180,25 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // ---- sign in ----------------------------------------------------------------------------------------
   app.get("/signin", ({ req, res, query }) => {
     const { session } = ctx(req);
-    if (session?.personId) return redirect(res, "/");
+    const next = safeNext(query.get("next"));
+    // Already signed in and asked for a page: send them there rather than home. This is the case where somebody
+    // taps a notification link on a phone that DOES have a session but followed a stale /signin link.
+    if (session?.personId) return redirect(res, next ?? "/");
     const people = devAuth ? db.prepare("SELECT id, name FROM people ORDER BY name LIMIT 25").all() : [];
+    // Carried as a query parameter on the OIDC link and a hidden field on the dev form. Re-validated at both
+    // receiving ends: this value has been through the client, so arriving here safe says nothing about arriving
+    // back safe. `next` is only ever a path that app.canServe agreed to, so interpolating it is not a redirect
+    // vector — and it is escaped like everything else because html`` escapes unconditionally.
     const body = html`
       <h2>${t("signin.title")}</h2>
       ${query.get("unknown") ? html`<p class="flash bad">${t("signin.unknown")}</p>` : ""}
-      ${oidc.enabled ? html`<p><a class="btn" href="/auth/oidc">${t("signin.nextcloud")}</a></p>` : ""}
+      ${oidc.enabled ? html`<p><a class="btn" href="${next ? `/auth/oidc?next=${encodeURIComponent(next)}` : "/auth/oidc"}">${t("signin.nextcloud")}</a></p>` : ""}
       <p class="hint">${t("signin.invite")}</p>
       ${devAuth ? html`
         <div class="card">
           <h2>${t("signin.dev")}</h2>
           <form method="post" action="/auth/dev">
+            ${next ? html`<input type="hidden" name="next" value="${next}">` : ""}
             ${people.map((p) => html`<p><button type="submit" name="personId" value="${p.id}" class="secondary">${p.name}</button></p>`)}
           </form>
         </div>` : ""}`;
@@ -169,16 +218,23 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const form = await readForm(req);
     const who = devSignIn(db, form.personId, env);
     if (!who) return redirect(res, "/signin?unknown=1");
-    redirect(res, "/", { "Set-Cookie": setSession({ personId: who.personId }) });
+    // Re-validated, not trusted: the hidden field has been through the client.
+    redirect(res, landing(form.next), { "Set-Cookie": setSession({ personId: who.personId }) });
   });
 
   // async because the authorization endpoint now comes from the IdP's discovery document rather than a
   // hardcoded NextCloud path. The document is cached, so this is one request per issuer per 10 minutes.
-  app.get("/auth/oidc", async ({ res }) => {
+  app.get("/auth/oidc", async ({ res, query }) => {
     const { url, state, verifier } = await beginOidc(oidc);
     // state and verifier ride in the session cookie: no server-side store, and they are signed, so a
     // callback cannot be replayed with attacker-chosen values.
-    redirect(res, url, { "Set-Cookie": cookieHeader(sign({ oidcState: state, oidcVerifier: verifier, csrf: newCsrf() }, secret), { secure, maxAge: 600 }) });
+    //
+    // The destination rides in the SAME signed cookie, for the same reason and not as a query parameter on the
+    // callback URL. The provider echoes back only what OIDC defines; anything this app appended to its own
+    // redirect_uri would have to be accepted from the callback query, which is attacker-controlled. The cookie is
+    // signed, so a tampered destination fails the signature and the whole sign-in is refused rather than redirected.
+    const oidcNext = safeNext(query.get("next"));
+    redirect(res, url, { "Set-Cookie": cookieHeader(sign({ oidcState: state, oidcVerifier: verifier, oidcNext, csrf: newCsrf() }, secret), { secure, maxAge: 600 }) });
   });
 
   app.get("/auth/callback", async ({ req, res, query }) => {
@@ -196,7 +252,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const person = linkIdentity(db, "oidc", id.subject,
                                 { name: id.name, email: id.email, emailVerified: id.emailVerified });
     if (!person) return redirect(res, "/signin?unknown=1", { "Set-Cookie": clearCookieHeader({ secure }) });
-    redirect(res, "/", { "Set-Cookie": setSession({ personId: person.personId }) });
+    // From the signed cookie, and validated again anyway. The signature already proves this app wrote it, so the
+    // second check is belt and braces — but the route table can change between the two requests, and a destination
+    // that has stopped being servable should land on the home page rather than 404 at the end of a sign-in.
+    redirect(res, landing(session.oidcNext), { "Set-Cookie": setSession({ personId: person.personId }) });
   });
 
   // This GET asks; it does not accept. It used to redeem the invitation, and the link arrives BY EMAIL â€” mail

@@ -17,7 +17,7 @@ const firstOpen = (w) => w.db.prepare(`SELECT a.id FROM assignments a JOIN sessi
 test("the planner grid is planner-only: 403 for a volunteer, 303 for a stranger", withPlanner({}, async (w) => {
   const stranger = await w.get("/planner");
   assert.equal(stranger.status, 303);
-  assert.equal(stranger.headers.get("location"), "/signin");
+  assert.equal(stranger.headers.get("location"), "/signin?next=%2Fplanner");
 
   const volunteer = await w.signIn(w.people[1]);
   const r = await w.get("/planner", volunteer);

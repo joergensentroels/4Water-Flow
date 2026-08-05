@@ -117,7 +117,12 @@ test("the running server refuses everyone the declared rule excludes, and admits
       const cookie = who[label];
       const res = r.method === "GET" ? await w.get(fill(r.pattern), cookie)
         : await w.post(fill(r.pattern), cookie, new URLSearchParams(cookie ? { csrf: csrfFromCookie(cookie) } : {}));
-      return { status: res.status, signin: res.headers.get("location") === "/signin" };
+      // The PATH is what makes it a sign-in bounce; the query carries where they were going. Increment AJ added
+      // ?next=… so a volunteer who tapped a notification link arrives at the page they tapped rather than the home
+      // screen, and this equality check then failed for every gated route at once — correctly, because it was
+      // pinned to a spelling rather than to the property it was named for.
+      const to = res.headers.get("location") ?? "";
+      return { status: res.status, signin: to === "/signin" || to.startsWith("/signin?") };
     };
 
     const rules = declaredRules();

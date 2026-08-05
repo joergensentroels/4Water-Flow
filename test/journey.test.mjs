@@ -128,6 +128,19 @@ test("a real deployment can be set up and used end to end", async () => {
     assert.equal((await admin.post("/auth/dev", { personId: "1" })).status, 404,
       "the developer sign-in must not exist in production");
 
+    // Before anybody signs in: the hop a notification link produces. Every message the app sends now carries a URL,
+    // and it is read in a chat channel on a phone that may have no session — so this redirect is the FIRST thing
+    // that happens to a notification link, and it happens to a volunteer who is not signed in.
+    //
+    // Asserted here, against the real entry point under NODE_ENV=production, because test/nextdest.test.mjs walks
+    // the round trip through the developer sign-in and the developer sign-in does not exist in production. The
+    // mechanism has to be present on the door a real volunteer arrives at.
+    const cold = await client().get("/board");
+    assert.equal(cold.status, 303, "a signed-out volunteer must be sent to sign in, not shown the board");
+    assert.equal(cold.headers.get("location"), "/signin?next=%2Fboard",
+      "and the page they were trying to reach must survive the redirect — it used to be dropped, so tapping a link " +
+      "to the shift exchange landed them on the home page with nothing remembering why they were there");
+
     // Opening the link offers the invitation and spends nothing: the emailed link has to survive being fetched by
     // whatever scans mail on the way in, and this one is the bootstrap administrator's. Accepting is the POST
     // behind the button on that page, which nothing fetches on the recipient's behalf.

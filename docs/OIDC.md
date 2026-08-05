@@ -84,6 +84,8 @@ finding worth reporting, not a constant to change.
 | State round-trips | Complete a sign-in | Lands on `/` signed in |
 | A tampered state fails | Edit `state` in the callback URL | 400, no session issued |
 | A replayed callback fails | Reuse the same callback URL twice | Second attempt refused |
+| The page they wanted survives | Open `/board` signed out, then sign in with NextCloud | Lands on `/board`, not `/` |
+| The destination cannot be steered | Append `?next=/availability` to the callback URL | Ignored — lands on `/` |
 | Unknown users are refused | Sign in as someone not on the roster | Redirected to `/signin?unknown=1`, no account created |
 | A pre-registered person is adopted | Add them in Admin with their NextCloud email first, then sign in | Signed in, linked to that existing record |
 | **Does NextCloud send `email_verified`, and can a user edit their own address?** | Read the `userinfo` response during the sign-in above; then check whether a normal user can change their email in NextCloud's own settings | Ideally the claim is present. If it is absent **and** users can set their own address, see below — this is the one row that can turn the refusal above into nothing |

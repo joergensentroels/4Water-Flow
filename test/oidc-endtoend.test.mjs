@@ -308,3 +308,80 @@ test("a tampered state and a replayed code are both refused, over real HTTP", as
     try { rmSync(dir, { recursive: true, force: true }); } catch {}
   }
 });
+
+// ---- the destination through a real round trip (increment AJ) --------------------------------------------
+//
+// A volunteer taps "Open the shift exchange: https://…/board" in Mattermost, is sent to sign in, and chooses
+// NextCloud. That destination now has to survive a round trip through somebody else's server and come back — which
+// is the case unit tests cannot reach, because the interesting part is what the provider does and does not echo.
+//
+// It rides in the SIGNED session cookie, beside the state and verifier, and NOT as a query parameter on the
+// redirect_uri. The second half of this test is why: the callback URL is attacker-controlled — anyone can hand a
+// volunteer a link to /auth/callback with whatever query they like — so a destination read from there would be an
+// open redirect wearing a sign-in flow as a disguise.
+test("the page a volunteer was trying to reach survives a real OIDC round trip", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "4water-oidc-next-"));
+  const idp = startIdp();
+  await listen(idp.server, IDP_PORT);
+  {
+    const db = new DatabaseSync(path.join(dir, "app.db"));
+    migrate(db);
+    db.prepare("INSERT INTO people (name, contact, auth_provider, auth_subject) VALUES ('Volunteer One','vol@4water.org','oidc',NULL)").run();
+    db.close();
+  }
+
+  const app = startApp(dir);
+  try {
+    assert.ok(await healthy(app.child), `app never became healthy:\n${app.out()}`);
+
+    // The sign-in page must offer NextCloud with the destination attached, or the volunteer loses it at the click.
+    const signin = await (await fetch(`${APP}/signin?next=%2Fboard`)).text();
+    assert.match(signin, /href="\/auth\/oidc\?next=%2Fboard"/,
+      "the NextCloud button must carry the destination — this is the only place it can be picked up");
+
+    // 1. Start the flow WITH a destination.
+    const begin = await fetch(`${APP}/auth/oidc?next=%2Fboard`, { redirect: "manual" });
+    assert.equal(begin.status, 303);
+    const cookie = cookieOf(begin);
+    const authorizeUrl = new URL(begin.headers.get("location"));
+
+    // It must not be smuggled to the provider. redirect_uri is registered with NextCloud and a mismatch is the
+    // single most common OIDC failure — appending a query to it would break every real deployment.
+    assert.equal(authorizeUrl.searchParams.get("redirect_uri"), `${APP}/auth/callback`,
+      "the redirect_uri must stay exactly what is registered with the provider");
+    assert.ok(!authorizeUrl.search.includes("board"), "and the destination must not ride to the provider at all");
+
+    // 2. Back from the provider, 3. exchanged, and it lands where they were going.
+    const consent = await fetch(authorizeUrl, { redirect: "manual" });
+    const callbackUrl = new URL(consent.headers.get("location"));
+    const done = await fetch(callbackUrl, { headers: { cookie }, redirect: "manual" });
+    assert.equal(done.status, 303, `callback failed. app output:\n${app.out()}`);
+    assert.equal(done.headers.get("location"), "/board",
+      "a volunteer who tapped a link to the shift exchange and signed in with NextCloud must arrive at it");
+
+    // ---- and the same flow must not be steerable from the callback query ----
+    //
+    // A fresh flow, then the callback fetched with an attacker's destination appended. The app must ignore it: the
+    // only destination it will honour is the one in its own signed cookie.
+    const begin2 = await fetch(`${APP}/auth/oidc`, { redirect: "manual" });
+    const cookie2 = cookieOf(begin2);
+    const consent2 = await fetch(new URL(begin2.headers.get("location")), { redirect: "manual" });
+    const cb2 = new URL(consent2.headers.get("location"));
+    // A VALID in-app path, deliberately. The first version of this used "//evil.example" and the test passed even
+    // with the callback rewired to read query.get("next") — because safeNext refuses a protocol-relative value at a
+    // different layer, so both the safe and the unsafe build answered "/" and the assertion could not tell them
+    // apart. The question here is not "is a bad value filtered", it is "IS THE QUERY READ AT ALL", and only a value
+    // the validator would happily accept can answer it.
+    cb2.searchParams.set("next", "/availability");
+    const hijacked = await fetch(cb2, { headers: { cookie: cookie2 }, redirect: "manual" });
+    assert.equal(hijacked.status, 303);
+    assert.equal(hijacked.headers.get("location"), "/",
+      "this flow started with no destination, so the only way to reach /availability is by reading the callback " +
+      "query — which is attacker-controlled: anyone can hand a volunteer a /auth/callback link with any query on it");
+  } finally {
+    app.child.kill();
+    await new Promise((r) => app.child.once("exit", r));
+    await close(idp.server);
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});

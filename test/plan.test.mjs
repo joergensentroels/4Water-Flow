@@ -14,7 +14,8 @@ test("home and the plan both require a session", withWorld({}, async ({ get }) =
   for (const path of ["/", "/plan"]) {
     const r = await get(path);
     assert.equal(r.status, 303, path);
-    assert.equal(r.headers.get("location"), "/signin");
+    // "/" carries no destination, because that is where sign-in lands anyway; "/plan" carries one.
+    assert.equal(r.headers.get("location"), path === "/" ? "/signin" : `/signin?next=${encodeURIComponent(path)}`, path);
   }
 }));
 
