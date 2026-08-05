@@ -132,14 +132,20 @@ test("no translation is left unread by the source", () => {
   // t.weekday(dow) is a helper hung off t in config.mjs, not a t(`...`) call, so its family needs naming here.
   if (/t\.weekday\s*=/.test(source)) prefixes.push("weekday.");
 
-  const unread = Object.keys(en).filter((key) => {
-    if (staticRefs.has(key)) return false;
-    if (prefixes.some((p) => key.startsWith(p))) return false;
+  const isRead = (key) => {
+    if (staticRefs.has(key)) return true;
+    if (prefixes.some((p) => key.startsWith(p))) return true;
     // Some keys are referenced as bare strings in a lookup table rather than inside t() — the OUTCOME map in
     // pages/planner.mjs is one. An exact quoted occurrence counts, but a bare substring must not: "admin.status"
     // would otherwise be "found" inside the route path "/admin/status", because a regex dot matches a slash.
-    return !source.includes(`"${key}"`) && !source.includes(`'${key}'`);
-  });
+    return source.includes(`"${key}"`) || source.includes(`'${key}'`);
+  };
+  // `<key>.one` is chosen by makeT when n is 1 and is never written at a call site, so it is read exactly when its
+  // plural is — via ANY of the mechanisms above, which is why this recurses rather than checking staticRefs alone.
+  // The first version did check staticRefs alone and reported five singulars as dead weight: their plurals are
+  // named in an OUTCOME table, not in a t() call, so the exemption missed exactly the strings it was written for.
+  const unread = Object.keys(en).filter((key) =>
+    !isRead(key) && !(key.endsWith(".one") && isRead(key.slice(0, -4))));
 
   assert.ok(staticRefs.size > 100, `only ${staticRefs.size} t() calls found — this check is not looking properly`);
   assert.deepEqual(unread, [],
@@ -240,6 +246,88 @@ test("the two locales agree about numbers, paths and environment variables", () 
         `  en: ${en[key]}\n  da: ${da[key]}`);
     }
   }
+});
+
+// ONE is a different sentence. Every count string in this app said "1 proposals locked in as final", "1 dates
+// updated", "1 messages could not be sent" — twenty-nine strings interpolating {n}, about eighteen of which read
+// wrong at exactly the number a volunteer administrator sees most often, because most of these events happen once.
+//
+// The keys where a bare number is genuinely fine, each with the reason. Written out rather than pattern-matched:
+// whether "1 of 12 slots are unfilled" reads correctly is a judgement about English and Danish, not something a
+// regex can settle. An unlisted count string with no singular fails, which is the whole point.
+const NUMBER_INVARIANT = {
+  "planner.toMark": "the number trails the noun — 'Shifts that have happened and are not marked: 1' is correct.",
+  "planner.reviewAttended": "'turned up to 1 so far' — the count is the object, and it does not inflect.",
+  // No weekday name in the example: the seams gate forbids them in string literals under src/ and test/, and it
+  // caught this line. The string itself interpolates {day} from the weekday.* family, which is the point.
+  "planner.reviewSameDay": "'1 of 12 on a {day}' — an n-of-N ratio, correct at any n in both languages.",
+  "admin.showN": "'Show 1' is a button label with a bare quantity and no noun to agree with.",
+  "audit.intro": "'…newest first. 1 in total.' — the number trails, deliberately reworded so it reads at one.",
+  "profile.attended": "'Recorded as having turned up: 1 this season' — the number trails the colon.",
+  "profile.answered": "'You have answered 1 of 60 dates this season' — the plural belongs to the 60, not the 1.",
+  "status.gaps": "'1 of 20 slots in the next month are unfilled' — the noun agrees with the total, not the count.",
+  "status.silent": "'1 of 12 active volunteers have not answered' — same n-of-N shape.",
+  "status.silentMore": "'And 1 more.' — the noun is elided entirely, so there is nothing for it to agree with.",
+  "outbox.all": "'Everything (1)' — a filter chip carrying a bare count in brackets.",
+};
+
+test("every count string has a singular form, or is declared invariant", () => {
+  const en = loadStrings("en");
+  const da = loadStrings("da");
+  const counted = Object.keys(en).filter((k) => !k.endsWith(".one") && /\{n\}/.test(en[k]));
+  assert.ok(counted.length >= 20, `only ${counted.length} strings interpolate {n} — this check is not looking`);
+
+  const missing = counted.filter((k) => !(`${k}.one` in en) && !(k in NUMBER_INVARIANT));
+  assert.deepEqual(missing, [],
+    "these strings put {n} in front of a plural noun and have no singular form, so they will read '1 proposals' " +
+    "on the screen after somebody's own click. Add `<key>.one`, reword so the number trails the noun, or add it " +
+    "to NUMBER_INVARIANT with the reason:\n  " + missing.join("\n  "));
+
+  // BOTH locales, because the fallback inside makeT deliberately prefers the Danish plural over the English
+  // singular — right for a page nobody should read half in another language, and it means a missing da.one is
+  // invisible at runtime rather than loud.
+  const daMissing = counted.filter((k) => `${k}.one` in en && !(`${k}.one` in da));
+  assert.deepEqual(daMissing, [], `these have an English singular and no Danish one:\n  ${daMissing.join("\n  ")}`);
+
+  // Both directions: an invariant entry for a string that no longer counts anything, or that has since grown a
+  // singular, is a decision about a file that has changed.
+  const stale = Object.keys(NUMBER_INVARIANT).filter((k) => !counted.includes(k));
+  assert.deepEqual(stale, [], `declared invariant but no longer a count string — remove: ${stale}`);
+  const both = Object.keys(NUMBER_INVARIANT).filter((k) => `${k}.one` in en);
+  assert.deepEqual(both, [], `declared invariant AND given a singular — decide which: ${both}`);
+
+  for (const [k, why] of Object.entries(NUMBER_INVARIANT)) {
+    assert.ok(why.length >= 40, `${k}: say why a bare number reads correctly there, not just that it does`);
+  }
+});
+
+test("makeT picks the singular at exactly one, in the reader's own language", () => {
+  for (const locale of ["en", "da"]) {
+    const t = makeT(locale);
+    const strings = loadStrings(locale);
+    assert.notEqual(t("planner.locked", { n: 1 }), t("planner.locked", { n: 2 }).replace("2", "1"),
+      `${locale}: n=1 must select a different sentence, not the plural with a 1 in it`);
+    assert.equal(t("planner.locked", { n: 1 }), strings["planner.locked.one"].replace("{n}", "1"),
+      `${locale}: n=1 must use this locale's own singular`);
+    assert.equal(t("planner.locked", { n: 3 }), strings["planner.locked"].replace("{n}", "3"));
+
+    // 0 is plural in both languages, and so is a string with no n at all.
+    assert.equal(t("planner.locked", { n: 0 }), strings["planner.locked"].replace("{n}", "0"));
+    assert.equal(t("planner.toMark", { n: 1 }), strings["planner.toMark"].replace("{n}", "1"),
+      "an invariant string must not be affected by the plural machinery");
+  }
+
+  // The fallback stays in the reader's language: a key with a Danish plural and no Danish singular resolves to the
+  // Danish plural rather than the English singular. Checked with a temporary locale directory so the real files
+  // keep their complete pairs.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "4water-plural-"));
+  try {
+    writeFileSync(path.join(dir, "en.json"), JSON.stringify({ "x.count": "{n} things", "x.count.one": "one thing" }));
+    writeFileSync(path.join(dir, "da.json"), JSON.stringify({ "x.count": "{n} ting" }));
+    const t = makeT("da", dir);
+    assert.equal(t("x.count", { n: 1 }), "1 ting",
+      "a missing Danish singular must fall back to the Danish plural, never to the English singular");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("no locale file contains an unreplaced English fallback marker or stray HTML", () => {

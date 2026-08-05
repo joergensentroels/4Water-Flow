@@ -178,6 +178,11 @@ test("every string that explains a cause is justified, and no new one slips in u
   const explaining = Object.entries(en)
     .filter(([, v]) => EXPLAINS.some((m) => m.test(v)))
     .map(([k]) => k)
+    // A `<key>.one` is the same sentence at n=1 — makeT chooses between them and they make the same claim about
+    // the app, so one entry covers the pair. Requiring two would ask for the identical paragraph twice and invite
+    // the second to be a copy nobody re-read, which is how a justification stops meaning anything.
+    .map((k) => (k.endsWith(".one") && `${k.slice(0, -4)}` in en ? k.slice(0, -4) : k))
+    .filter((k, i, all) => all.indexOf(k) === i)
     .sort();
 
   const unjustified = explaining.filter((k) => !(k in JUSTIFIED));

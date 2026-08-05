@@ -15,7 +15,7 @@ is NOT built: a chat facility**, which needs a decision between a planner broadc
 already runs with the same sign-in, so a third general chat is the option worth arguing against. Shift swaps are
 noted but not designed.
 
-Status: **✅ A–AH complete plus the commits since, 441 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 443 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file

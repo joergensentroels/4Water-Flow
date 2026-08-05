@@ -246,10 +246,27 @@ export function makeT(locale, dir) {
   const missing = new Set();
   // vars fill {placeholders}. An unfilled placeholder is left visible rather than blanked, because
   // "Salsa on {date} is open" at least tells you what broke; "Salsa on  is open" does not.
+  // ONE is a different sentence, not a smaller number. Every count string in this app read "1 proposals locked in
+  // as final", "1 dates updated", "1 messages could not be sent" — the plural form with a 1 in front of it, on
+  // screens a volunteer administrator reads and in the flash message after their own click. Danish and English
+  // share the same rule (one versus everything else), so the whole mechanism is: when `n` is exactly 1 and
+  // `<key>.one` exists, use that sentence instead.
+  //
+  // The fallback deliberately stays INSIDE the requested language. A `.one` present in English and missing in
+  // Danish resolves to the DANISH plural — slightly wrong about number — rather than to the English singular,
+  // which would switch language mid-page. Being wrong about grammar is a smaller failure than being wrong about
+  // which language somebody reads. test/strings.test.mjs requires both, so this is what happens if that is ever
+  // bypassed rather than a licence to skip one.
+  const pick = (key, vars) => {
+    const one = vars && Number(vars.n) === 1 ? `${key}.one` : null;
+    if (one && one in primary) return primary[one];
+    if (key in primary) return primary[key];
+    missing.add(key);
+    if (one && one in fallback) return fallback[one];
+    return key in fallback ? fallback[key] : key;
+  };
   const t = (key, vars) => {
-    let s;
-    if (key in primary) s = primary[key];
-    else { missing.add(key); s = key in fallback ? fallback[key] : key; }
+    const s = pick(key, vars);
     return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s;
   };
   t.missing = () => [...missing];
