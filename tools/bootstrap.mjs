@@ -6,7 +6,7 @@
 //
 // Idempotent. Safe to run twice, and safe to run on a live system — it never removes anything.
 import { openDb, migrate } from "../src/db.mjs";
-import { loadPattern, patternFileFor } from "../src/config.mjs";
+import { loadPattern, patternFileFor, publicBaseUrl } from "../src/config.mjs";
 import { seedRoles } from "../src/seed.mjs";
 import { createInvite } from "../src/auth.mjs";
 
@@ -63,13 +63,13 @@ if (process.argv[1] && (await import("node:url")).pathToFileURL(process.argv[1])
   }
   const db = openDb();
   migrate(db);
-  const r = bootstrapAdmin(db, { email, name, baseUrl: process.env.FOURWATER_BASE_URL || "" });
+  const r = bootstrapAdmin(db, { email, name, baseUrl: publicBaseUrl() ?? "" });
   if (!r.ok) { console.error(`bootstrap failed: ${r.reason}`); process.exit(2); }
 
   console.log(`${r.created ? "Created" : "Found"} ${email} (person ${r.personId})`);
   console.log(r.alreadyAdmin ? "Already an administrator." : "Granted: administrator, planner.");
   console.log(`\nOpen this link once to sign in. It expires in 14 days and works only once:\n  ${r.inviteUrl}`);
-  if (!process.env.FOURWATER_BASE_URL) {
+  if (!publicBaseUrl()) {
     console.log(`\n(Set FOURWATER_BASE_URL=https://plan-cph.4water.org to get a full URL instead of a path.)`);
   }
   db.close();

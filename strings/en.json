@@ -384,5 +384,7 @@
   "home.standDown": "You are not on the active roster",
   "home.standDownWhy": "A planner has stood you down, so nothing new will be assigned to you and the reminders have stopped. Talk to a planner if that is unexpected.",
   "board.why.not_on_roster": "You are not on the active roster, so nothing can be assigned to you. A planner or an admin can put you back.",
-  "planner.why.nobody_on_roster": "Everybody who could take this is currently stood down. An admin can put one of them back on the roster."
+  "planner.why.nobody_on_roster": "Everybody who could take this is currently stood down. An admin can put one of them back on the roster.",
+  "notify.linkBoard": "Open the shift exchange: {url}",
+  "notify.linkAvailability": "Enter your availability: {url}"
 }

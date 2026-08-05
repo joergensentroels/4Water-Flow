@@ -144,7 +144,16 @@ test("no test depends on a file git does not carry", () => {
   const ignored = [];
   for (const rel of readdirSync(path.join(ROOT, "test"))) {
     if (!rel.endsWith(".mjs")) continue;
-    const text = readFileSync(path.join(ROOT, "test", rel), "utf8");
+    // Line comments stripped first. A comment cannot open a file, so a path written in prose is not a dependency —
+    // and this scan reported one as `test/backup.test.mjs reads 4water.db` when the only mention was a sentence
+    // explaining a defect. A gate whose failure message is false about its own finding is the thing this suite
+    // keeps being written against. The sibling gate in test/seams.test.mjs makes the same distinction and says why:
+    // a literal can reach a user, a comment cannot.
+    //
+    // Line comments only. A `/* */` block containing this call would still be reported, which is the safe
+    // direction to be wrong in — the cost is rewording a comment, not a test that cannot run on a fresh clone.
+    const text = readFileSync(path.join(ROOT, "test", rel), "utf8")
+      .split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "")).join("\n");
     // Only paths built from ROOT — a temp directory the test creates itself is exactly what it should use.
     for (const m of text.matchAll(/path\.join\(ROOT,\s*([^)]*)\)/g)) {
       const parts = [...m[1].matchAll(/"([^"]+)"/g)].map((p) => p[1]);

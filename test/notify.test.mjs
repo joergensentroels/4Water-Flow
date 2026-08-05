@@ -6,7 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { migrate } from "../src/db.mjs";
 import { loadPattern, makeT, validatePattern, notifyTimingConfig } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
-import { makeNotifier, notifyConfig, stubTransport, slotOpenMessage, nudgeMessage } from "../src/notify.mjs";
+import { makeNotifier, notifyConfig, stubTransport, slotOpenMessage, nudgeMessage,
+         shiftReminderMessage } from "../src/notify.mjs";
 import { isoWeek, runNudge, volunteersNeedingNudge, startJobs, runShiftReminders } from "../src/jobs.mjs";
 import { setAvailabilityDay } from "../src/queries.mjs";
 import { listOutbox, renderOutbox } from "../src/pages/outbox.mjs";
@@ -551,5 +552,70 @@ test("the no-webhook banner does not contradict the rows underneath it", () => {
   assert.ok(!/nothing here was actually delivered/.test(page),
     "so the banner must not claim otherwise — it would be visibly wrong on its own page");
   assert.match(page, /still marked/, "it names the rows it is actually talking about");
+  w.db.close();
+});
+
+// ---- the claim link (increment AI) -----------------------------------------------------------------------
+// §3a of the discovery spec says the board announcement reads "Sun 15:00 Salsa is open, 3 qualified" WITH A
+// CLAIM LINK. It was never built. All three messages named a screen — "the shift exchange", "your
+// availability" — that the reader had no way to reach except by remembering a hostname, in a chat channel
+// away from the app. The entire argument for posting into Mattermost is that it meets people where they
+// already are; a message that then asks them to go and find the app themselves moves the chasing rather than
+// reducing it.
+test("every notification carries a link when the deployment knows its own address", () => {
+  const tl = makeT("en");
+  const label = loadPattern().activities[0].label;
+  const base = "https://plan.example.org";
+  const messages = {
+    "notify.slotOpen": slotOpenMessage(tl, { when: "4/1 15:00", activity: label, eligible: 3, publicUrl: base }),
+    "notify.nudge": nudgeMessage(tl, { name: "Volunteer 1", from: "2026-01-01", to: "2026-01-29", publicUrl: base }),
+    "notify.shiftReminder": shiftReminderMessage(tl, { name: "Volunteer 1", when: "4/1 15:00", activity: label, publicUrl: base }),
+  };
+  for (const [key, body] of Object.entries(messages)) {
+    assert.ok(body.includes(base), `${key} must carry the address: "${body}"`);
+    // A path, not a bare origin: "go to plan.example.org" is the same instruction as before, just typed out.
+    const link = body.split("\n").find((l) => l.includes(base));
+    assert.match(link, /https:\/\/plan\.example\.org\/\w+$/, `${key}: the link must end at a real screen: "${link}"`);
+    assert.ok(!body.includes("{"), `${key}: unfilled placeholder in "${body}"`);
+    // The link is a SEPARATE line. A URL run together with prose is what mail clients mangle.
+    assert.ok(body.split("\n").length >= 2, `${key}: the link belongs on its own line`);
+  }
+  // And they point at the right screens: the two board messages at the exchange, the nudge at availability.
+  assert.match(messages["notify.slotOpen"], /\/board/);
+  assert.match(messages["notify.shiftReminder"], /\/board/);
+  assert.match(messages["notify.nudge"], /\/availability/);
+});
+
+test("and with no address configured, the messages are exactly what they were before", () => {
+  const tl = makeT("en");
+  const label = loadPattern().activities[0].label;
+  // Every builder must default publicUrl to null, not undefined-into-a-template. The old behaviour is the
+  // documented behaviour for a deployment that has not set FOURWATER_BASE_URL yet.
+  for (const body of [
+    slotOpenMessage(tl, { when: "4/1 15:00", activity: label, eligible: 3 }),
+    nudgeMessage(tl, { name: "V", from: "2026-01-01", to: "2026-01-29" }),
+    shiftReminderMessage(tl, { name: "V", when: "4/1 15:00", activity: label }),
+  ]) {
+    assert.equal(body.split("\n").length, 1, `no address means no extra line: "${body}"`);
+    assert.ok(!/https?:|null|undefined/.test(body), `nothing half-rendered may leak: "${body}"`);
+  }
+});
+
+// The builders are the easy half. What matters is whether the WEBHOOK BODY carries the link, because that is
+// the text a volunteer reads — and until this increment the answer was no even though the strings existed.
+test("the link reaches the webhook body, end to end, from the environment alone", async () => {
+  const w = world();
+  const s = shift(w, { person: w.people[0] });
+  const { calls, fetchImpl } = stubTransport();
+  const cfg = notifyConfig({ MATTERMOST_WEBHOOK: "https://chat.example/hooks/abc",
+                             FOURWATER_BASE_URL: "https://plan.example.org/" });
+  assert.equal(cfg.publicUrl, "https://plan.example.org", "a trailing slash must not survive into every message");
+  const notifier = makeNotifier({ db: w.db, config: cfg, fetchImpl, log: {} });
+
+  const r = await runShiftReminders(w.db, { notifier, t, seasonId: w.seasonId, today: s.date, daysBefore: 2, ...fmt });
+  assert.deepEqual(r.sent, [s.id], "the fixture must actually produce a reminder, or this test asserts nothing");
+  assert.equal(calls.length, 1, "and it must actually reach the transport");
+  assert.match(calls[0].body, /https:\/\/plan\.example\.org\/board/,
+    "the volunteer reads the webhook body, not the message builder");
   w.db.close();
 });

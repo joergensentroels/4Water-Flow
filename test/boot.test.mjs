@@ -57,3 +57,44 @@ test("it refuses to start without a session secret, loudly", async () => {
   assert.match(err, /FOURWATER_SECRET/, "and it must say which variable is missing");
   for (const s of ["", "-wal", "-shm"]) { try { rmSync(path.join(os.tmpdir(), `4water-nosecret-${process.pid}.db${s}`)); } catch {} }
 });
+
+// A bad address is refused before the port opens, for the same reason a missing secret is: the value is pasted
+// into every invite link, every calendar subscription and — since increment AI — every notification the whole
+// department reads. Discovering it is wrong from a volunteer who cannot log in is the expensive way.
+//
+// Spawned rather than unit-tested on purpose. publicBaseUrl() throwing is easy to assert in isolation; what
+// matters is that nothing on the way up catches it and carries on, which only the real process can show.
+test("it refuses to start with a base URL that is not one", async () => {
+  const db = path.join(os.tmpdir(), `4water-badurl-${process.pid}.db`);
+  const child = spawn(process.execPath, [path.join(ROOT, "src", "server.mjs")], {
+    env: { ...process.env, FOURWATER_SECRET: "x".repeat(32), FOURWATER_BASE_URL: "plan-cph.4water.org",
+           FOURWATER_DB: db, PORT: "8125", NODE_ENV: "test" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let err = "";
+  child.stderr.on("data", (d) => { err += d; });
+  const code = await new Promise((r) => child.once("exit", r));
+  assert.notEqual(code, 0, "a malformed address must be a hard failure, not a link nobody can follow");
+  assert.match(err, /FOURWATER_BASE_URL/, "and it must say which variable is wrong");
+  assert.match(err, /https?:\/\//, "and show the shape it wanted, since 'not a URL' is not actionable on its own");
+  for (const s of ["", "-wal", "-shm"]) { try { rmSync(db + s); } catch {} }
+});
+
+// The control for the test above: the SAME boot with a well-formed address must reach the point of listening.
+// Without this, "refuses to start" would pass just as happily on a build that refuses to start at all.
+test("and it starts normally when the base URL is a real one", async () => {
+  const db = path.join(os.tmpdir(), `4water-goodurl-${process.pid}.db`);
+  const child = spawn(process.execPath, [path.join(ROOT, "src", "server.mjs")], {
+    env: { ...process.env, FOURWATER_SECRET: "x".repeat(32), FOURWATER_BASE_URL: "https://plan.example.org",
+           FOURWATER_DB: db, PORT: "8126", NODE_ENV: "test" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  const listening = await new Promise((resolve) => {
+    child.stdout.on("data", (d) => { out += d; if (/8126/.test(out)) resolve(true); });
+    child.once("exit", () => resolve(false));
+  });
+  child.kill();
+  assert.ok(listening, `a valid address must not stop the boot. Output was:\n${out}`);
+  for (const s of ["", "-wal", "-shm"]) { try { rmSync(db + s); } catch {} }
+});

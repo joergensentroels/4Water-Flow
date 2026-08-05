@@ -3,7 +3,7 @@
 import { pathToFileURL } from "node:url";
 import { createApp, send, redirect, readForm, html } from "./http.mjs";
 import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, exportConfig,
-         notifyTimingConfig } from "./config.mjs";
+         notifyTimingConfig, publicBaseUrl } from "./config.mjs";
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
@@ -50,6 +50,12 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
                            patternFile = PATTERN_FILE, jobs = null, onPatternChange = null,
                            today = () => new Date().toISOString().slice(0, 10) } = {}) {
   const secret = sessionSecret(env);
+  // Validated HERE, once, not where it is used. A malformed FOURWATER_BASE_URL did already fail the standard boot,
+  // but only because notifyConfig() happens to run on the way up — which made the RUNBOOK's "refused at startup"
+  // true by call order rather than by construction. Anything building the app without a notifier would have
+  // deferred the throw to whichever request first needed a link, turning a startup refusal into a 500 on the
+  // invite route. The result is discarded: this line exists to fail, and the callers below ask again.
+  publicBaseUrl(env);
   const secure = env.NODE_ENV === "production";
   const oidc = oidcConfig(env);
   const devAuth = env.FOURWATER_AUTH === "dev" && env.NODE_ENV !== "production";
@@ -607,7 +613,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // this route was the odd one out, and two link builders with two different policies is the tell. When the
     // variable is unset the page shows the path and says to prefix the address, which is the honest answer:
     // the app does not know its own public name unless somebody tells it.
-    const base = String(env.FOURWATER_BASE_URL || "").replace(/\/+$/, "");
+    // `?? ""` because unset must render the PATH, not the string "null" — see src/config.mjs.
+    const base = publicBaseUrl(env) ?? "";
     freshInvites.set(c.personId, `${base}/invite/${token}`);
     redirect(res, "/admin?r=invited");
   });
@@ -721,7 +728,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       // Absolute when the deployment says what it is called: a calendar client cannot resolve a relative path.
       // Without FOURWATER_BASE_URL the path is still correct and the page says to prefix the site address â€”
       // guessing an origin from the Host header would let a proxied request mint a link pointing anywhere.
-      const base = String(env.FOURWATER_BASE_URL || "").replace(/\/+$/, "");
+      const base = publicBaseUrl(env) ?? "";
       freshCalendarLinks.set(c.personId, `${base}/calendar/${made.token}.ics`);
     }
     redirect(res, "/me?r=calendar_created");
@@ -1036,6 +1043,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
         // formatRole returns "" for a slot with no role, so a workshop reads exactly as it did before.
         activity: `${detail.label}${formatRole(t, detail.role)}`,
         eligible,
+        // Read off the notifier rather than threaded through buildApp: makeNotifier already carries the config it
+        // was built with, and a second copy of the same value is a second thing to keep in step. Optional-chained
+        // because a test may hand in a bare { send } with no config at all.
+        publicUrl: notifier.config?.publicUrl ?? null,
       }),
     });
   }

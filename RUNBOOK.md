@@ -38,10 +38,12 @@ guessable default — if it exits complaining about `FOURWATER_SECRET`, that is 
 Two more are worth setting even though nothing forces them:
 
 - **`FOURWATER_BASE_URL`** — e.g. `https://plan-cph.4water.org`. Without it, the bootstrap invite link and the
-  volunteer calendar link are printed as paths, and a volunteer pasting `/calendar/….ics` into their calendar
-  app gets nothing. The app will not guess the origin from the `Host` header on purpose: a request with a
-  forged Host would render a link pointing at someone else's server, and the volunteer would paste their own
-  token into it.
+  volunteer calendar link are printed as paths, a volunteer pasting `/calendar/….ics` into their calendar app
+  gets nothing, and **every notification goes out with no link in it** — so the message that says a shift is
+  open, or that yours is in two days, names a screen the reader cannot click to. The app will not guess the
+  origin from the `Host` header on purpose: a request with a forged Host would render a link pointing at
+  someone else's server, and the volunteer would paste their own token into it. A value that is not a valid
+  http/https URL is refused at startup rather than pasted into every message the app sends.
 - **`calendar.timezone` in `config/pattern.json`** — already set to `Europe/Copenhagen`. This is what puts a
   19:00 shift at 19:00 in a subscriber's calendar. Change the department and forget this, and every event is
   silently off by the UTC offset for the whole season.
@@ -49,6 +51,26 @@ Two more are worth setting even though nothing forces them:
 ```bash
 docker compose up -d --build
 ```
+
+### Everything else the environment can set
+
+Complete, and kept complete by a test: `test/docs.test.mjs` fails if the app reads a variable no document names.
+It was added because seven of these were undocumented, including the three that switch on off-site backup — so
+an operator could not have discovered off-site backup existed without reading the source.
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `FOURWATER_SECRET` | *none — refuses to start* | Signs session cookies. 32+ random hex characters. |
+| `FOURWATER_BASE_URL` | unset → links render as paths | See above. |
+| `FOURWATER_DB` | `4water.db` beside the app | Where the SQLite database is. In the container, set it to the mounted volume — `/data/4water.db`. Resolved in one place (`src/config.mjs`) so the app and `tools/backup.mjs` cannot disagree about which file is the database; they used to. |
+| `FOURWATER_PATTERN` | `config/pattern.json` | Which configuration file this instance reads. This is what lets one image run several departments. |
+| `FOURWATER_AUTH` | unset | `dev` enables the passwordless dev sign-in. Ignored when `NODE_ENV=production`, and the dev provider refuses to construct without it. Never set this on a real deployment. |
+| `FOURWATER_BACKUP_DIR` | `backups/` beside the app | Where `tools/backup.mjs` writes. |
+| `FOURWATER_BACKUP_KEEP` | `14` | How many backups survive pruning. Minimum 1 — a smaller or unparseable value is clamped, not obeyed, because a typo here silently deletes history. |
+| `MATTERMOST_WEBHOOK` | unset → messages queue in the outbox | Where notifications are posted. **A credential** — see the warnings at the end of this file. |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI` | unset | NextCloud sign-in. With any one blank the sign-in page does not offer it. `docs/OIDC.md` is the checklist. |
+| `OIDC_SCOPE` | `openid profile email` | Override only if your provider needs different scopes. Getting it wrong shows up as a login that succeeds and returns no email, which the app then refuses. |
+| `NEXTCLOUD_WEBDAV_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` | unset → **local backups only** | Off-site copy of each backup, over WebDAV. All three must be set or the upload is skipped and `tools/backup.mjs` prints `upload: skipped (local only)`. Use an **app password**, never the account password. An upload that fails exits non-zero, so a cron job reports it. |
 
 ### Create the first administrator — the deployment is a locked door without it
 

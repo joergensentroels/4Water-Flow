@@ -7,12 +7,27 @@
 // rows are durable, so wiring them to whatever mail the host already has is a small adapter, and nothing is
 // lost in the meantime.
 import { fetchBounded, OUTBOUND_TIMEOUT_MS } from "./outbound.mjs";
+import { publicBaseUrl } from "./config.mjs";
 
 export function notifyConfig(env = process.env) {
   const webhook = String(env.MATTERMOST_WEBHOOK || "").trim();
   return {
     webhook,
     channel: webhook ? "mattermost" : "outbox",
+    // WHERE THE APP LIVES, so a message can say where to go.
+    //
+    // Every notification here is read in a chat channel away from the app, and until this existed not one of them
+    // could link back. The discovery spec asked for the shift-exchange announcement to carry "a claim link"; the
+    // shift reminder tells somebody to "hand it back on the shift exchange"; the nudge asks for availability. Three
+    // messages naming a screen the reader had no way to reach except by remembering a hostname — and the entire
+    // argument for posting into Mattermost was that it meets people where they already are. A message with no link
+    // moves the chasing rather than reducing it.
+    //
+    // FOURWATER_BASE_URL, the variable four other callers already use — NOT a second one of its own. This nearly
+    // shipped as FOURWATER_PUBLIC_URL, which would have meant an operator setting the address twice and links
+    // working in invites but not in notifications, or the reverse, depending on which they remembered.
+    // src/config.mjs carries the reasoning and does the validating. UNSET IS VALID: no link, nothing broken.
+    publicUrl: publicBaseUrl(env),
     // Redaction happens at the boundary: nothing downstream ever receives the URL, so nothing downstream
     // can log it. A webhook URL IS the credential — anyone holding it can post as the integration.
     describe: () => (webhook ? `mattermost(${safeHost(webhook)})` : "outbox"),
@@ -110,17 +125,24 @@ export function makeNotifier({ db, config = notifyConfig(), fetchImpl = fetch, l
 // ---- message bodies -----------------------------------------------------------------------------------
 // Built from strings/, so the activity label comes from config and the wording is translatable. Nothing
 // here names an activity or a weekday.
-export const slotOpenMessage = (t, { when, activity, eligible }) =>
-  t("notify.slotOpen", { when, activity, eligible });
+// A link on its own line, appended only when the deployment knows its own address. Kept as a SEPARATE sentence
+// rather than a {link} placeholder inside each message: an unset URL would leave a placeholder to strip and stray
+// punctuation behind it, and test/strings.test.mjs requires both locales to carry the same placeholders — so the
+// empty case would have had to be a second copy of every string.
+export const withLink = (t, base, key, publicUrl, path) =>
+  (publicUrl ? [base, t(key, { url: publicUrl + path })].join("\n") : base);
 
-export const nudgeMessage = (t, { name, from, to }) =>
-  t("notify.nudge", { name, from, to });
+export const slotOpenMessage = (t, { when, activity, eligible, publicUrl = null }) =>
+  withLink(t, t("notify.slotOpen", { when, activity, eligible }), "notify.linkBoard", publicUrl, "/board");
+
+export const nudgeMessage = (t, { name, from, to, publicUrl = null }) =>
+  withLink(t, t("notify.nudge", { name, from, to }), "notify.linkAvailability", publicUrl, "/availability");
 
 // WITH the role, and with the date already formatted by the caller. This message is read in a chat channel away
 // from the app, so it is the one place that has to stand entirely alone — the same reason the slot-open
 // announcement carries the role. An ISO date and a bare 'l' would technically be information.
-export const shiftReminderMessage = (t, { name, when, activity }) =>
-  t("notify.shiftReminder", { name, when, activity });
+export const shiftReminderMessage = (t, { name, when, activity, publicUrl = null }) =>
+  withLink(t, t("notify.shiftReminder", { name, when, activity }), "notify.linkBoard", publicUrl, "/board");
 
 // A stub transport for tests: records what would have been sent, and can be told to fail.
 export function stubTransport({ fail = false } = {}) {

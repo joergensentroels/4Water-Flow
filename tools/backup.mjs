@@ -11,7 +11,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { readdirSync, mkdirSync, statSync, rmSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { ROOT } from "../src/config.mjs";
+import { ROOT, dbFileFor } from "../src/config.mjs";
 import { fetchBounded } from "../src/outbound.mjs";
 
 const PREFIX = "4water-";
@@ -22,7 +22,9 @@ const BACKUP_RE = /^4water-(\d{4}-\d{2}-\d{2}T\d{6}Z)\.sqlite$/;
 
 export function backupConfig(env = process.env) {
   return {
-    db: env.FOURWATER_DB || path.join(ROOT, "4water.db"),
+    // dbFileFor, not a second copy of the same fallback: the two spellings had drifted, and the app and its own
+    // backup disagreeing about which file IS the database is not a disagreement either side can notice.
+    db: dbFileFor(env),
     dir: env.FOURWATER_BACKUP_DIR || path.join(ROOT, "backups"),
     keep: Math.max(1, Number(env.FOURWATER_BACKUP_KEEP) || 14),
     webdavUrl: String(env.NEXTCLOUD_WEBDAV_URL || "").trim(),      // e.g. https://cloud/remote.php/dav/files/user/4water-backups

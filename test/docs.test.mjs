@@ -85,7 +85,11 @@ function sourceFacts() {
     code: stripComments(all),
     routes: new Set([...all.matchAll(/app\.(get|post)\("([^"]+)"/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`)),
     exported: new Set([...all.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map((m) => m[1])),
-    env: new Set([...all.matchAll(/(?:env|process\.env)[.[]"?(FOURWATER_\w+|OIDC_\w+|MATTERMOST_\w+)"?\]?/g)].map((m) => m[1])),
+    // NEXTCLOUD_ was missing from this prefix list, and the list is the whole reach of every env check in this
+    // file. So the three variables that configure the OFF-SITE BACKUP UPLOAD were not merely undocumented — they
+    // were outside what any gate here could see. A collector built from a hand-written list of prefixes has the
+    // same blind spot as a hand-written list of things to check: it cannot fail for a family nobody listed.
+    env: new Set([...all.matchAll(/(?:env|process\.env)[.[]"?(FOURWATER_\w+|OIDC_\w+|MATTERMOST_\w+|NEXTCLOUD_\w+)"?\]?/g)].map((m) => m[1])),
     configKeys: (() => {
       const seen = new Set();
       const rec = (o, prefix = "") => {
@@ -150,6 +154,33 @@ test("every config setting is documented somewhere an operator reads", () => {
     "these settings exist in config/pattern.json and no document names them. An operator can only find them by " +
     "reading the source, and a setting nobody documents is one nobody can be told is wrong. Name it in RUNBOOK.md " +
     "or docs/PRIVACY.md — the dotted path, so this check can see it:\n  " + undocumented.join("\n  "));
+});
+
+// The same asymmetry, one seam over. The check above ran config → documents; the big claim check runs documents →
+// code for environment variables ("names X, which nothing reads"). Nothing ran environment → documents, so a
+// variable the app depends on and no document mentions was invisible to every gate in this suite.
+//
+// Run once, it found five of fourteen: FOURWATER_DB and FOURWATER_PATTERN, which are WHERE THE DATABASE AND THE
+// CONFIG FILE ARE; FOURWATER_BACKUP_KEEP, which decides how much history survives; OIDC_SCOPE, which can break
+// login; and FOURWATER_BASE_URL, documented in RUNBOOK.md but not for the thing this increment added.
+//
+// Both directions now exist for both seams, which is the point: a gate that only follows claims can never find
+// a silence.
+test("every environment variable the app reads is documented somewhere an operator reads", () => {
+  const prose = DOCS.map(read).join("\n");
+  const env = [...sourceFacts().env].sort();
+  assert.ok(env.length >= 10, `only ${env.length} environment variables found — the collector is not working`);
+
+  // Both controls. "0 undocumented" from a blind detector is indistinguishable from a fully documented app.
+  assert.ok(prose.includes("FOURWATER_SECRET"), "the detector cannot see a variable that IS documented");
+  assert.ok(!prose.includes("FOURWATER_NOT_A_VARIABLE"), "the detector reports a nonexistent variable as documented");
+
+  const undocumented = env.filter((v) => !prose.includes(v));
+  assert.deepEqual(undocumented, [],
+    "the app reads these and no document names them. An operator can only discover them by reading the source, " +
+    "which means nobody can be told they have one set wrong — and two of the first five found this way were the " +
+    "paths to the database and the config file. Name each in RUNBOOK.md (or docs/PRIVACY.md), verbatim:\n  " +
+    undocumented.join("\n  "));
 });
 
 // config/pattern.json carries a long `_comment` that an operator is told to read before hand-editing, and it is

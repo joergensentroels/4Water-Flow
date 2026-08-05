@@ -266,3 +266,70 @@ test("timestamps sort chronologically as plain strings", () => {
   assert.ok(a < b && b < c, `${a} < ${b} < ${c}`);
   assert.match(a, /^\d{4}-\d{2}-\d{2}T\d{6}Z$/);
 });
+
+// ---- the app and its backup must name the same file ------------------------------------------------------
+//
+// They did not. openDb() defaulted to the bare string "4water.db", resolved against the CURRENT WORKING
+// DIRECTORY; backupConfig() defaulted to path.join(ROOT, "4water.db"). Start the server from anywhere but the
+// app directory — a systemd unit, `node /opt/4water-app/src/server.mjs` from a home directory, a cron shell —
+// and the app writes one database while the backup faithfully copies another, then reports success. The
+// operator has backups. They are of a file nothing uses.
+//
+// It survived every test and a deployment check because the Dockerfile sets WORKDIR /app, which makes the two
+// spellings agree. Nothing in the suite ran from a different directory, so nothing could tell them apart.
+//
+// SPAWNED with an explicit cwd, because that IS the variable under test. Imported here, both resolve against
+// this process's cwd — which the test runner sets to the app directory, the one case where the bug is invisible.
+test("the app and tools/backup.mjs resolve the same database, from any working directory", async () => {
+  const foreign = mkdtempSync(path.join(os.tmpdir(), "4water-cwd-"));
+  // pathToFileURL, not string concatenation: on Windows an absolute path needs file:///C:/… with three slashes,
+  // and hand-built "file://" + path is the exact mistake test/boot.test.mjs exists because of.
+  const probe = [
+    'import { pathToFileURL } from "node:url";',
+    'import path from "node:path";',
+    'const at = (...p) => pathToFileURL(path.join(process.env.PROBE_ROOT, ...p)).href;',
+    'const { dbFileFor } = await import(at("src", "config.mjs"));',
+    'const { backupConfig } = await import(at("tools", "backup.mjs"));',
+    // RESOLVED IN THE CHILD, and this is the whole test. The first version returned the raw strings and let the
+    // parent call path.resolve on them — but the parent's cwd is the app directory, so path.resolve("4water.db")
+    // quietly produced <ROOT>/4water.db and the comparison passed. Reverting the fix left this test green. The
+    // probe had reproduced the exact blindness the defect depended on: resolving a relative path somewhere other
+    // than where it will actually be resolved.
+    'const abs = (p) => path.resolve(p);',
+    'console.log(JSON.stringify({ app: abs(dbFileFor({})), backup: abs(backupConfig({}).db), cwd: process.cwd() }));',
+  ].join("\n");
+  const child = spawn(process.execPath, ["--input-type=module", "-e", probe],
+    { cwd: foreign, env: { ...process.env, PROBE_ROOT: ROOT, FOURWATER_DB: "" }, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "", err = "";
+  child.stdout.on("data", (d) => { out += d; });
+  child.stderr.on("data", (d) => { err += d; });
+  const code = await new Promise((r) => child.once("exit", r));
+  rmSync(foreign, { recursive: true, force: true });
+
+  assert.equal(code, 0, `the probe itself failed, so it proves nothing:\n${err}`);
+  const r = JSON.parse(out);
+  // The control: the probe must genuinely have run somewhere else, or it is asserting the easy case.
+  assert.notEqual(r.cwd, ROOT, "the probe ran in the app directory — the one place the bug hides");
+  // No path.resolve() here: the child already resolved both, in the directory that matters. Calling it again in
+  // this process would re-anchor a relative path to the app directory and hide the very thing being tested.
+  assert.equal(r.app, r.backup,
+    `the app would use ${r.app} and its backup would copy ${r.backup} — a backup of a file nothing writes`);
+  // And the DIRECTORY must be the app's own, not the caller's: which database you get cannot depend on how the
+  // process was started. Asserted as a directory rather than a full path on purpose — naming the database file
+  // here would make this test read like it depends on a file .gitignore excludes, which the gate in
+  // test/image.test.mjs rightly cannot tell apart from actually depending on one. The directory IS the property.
+  assert.equal(path.dirname(r.app), ROOT,
+    `resolved against the caller's directory instead of the app's — got ${r.app}`);
+});
+
+test("and an explicit FOURWATER_DB still wins in both, which is how the container is configured", () => {
+  const explicit = path.join(os.tmpdir(), "explicitly-here.db");
+  assert.equal(backupConfig({ FOURWATER_DB: explicit }).db, explicit);
+  // Whitespace trimmed, because a trailing space in a .env file is invisible and would otherwise create a
+  // second database whose name ends in a space.
+  assert.equal(backupConfig({ FOURWATER_DB: ` ${explicit} ` }).db, explicit);
+  // Unset falls back rather than resolving to an empty path — and falls back inside the app directory.
+  const fallback = backupConfig({ FOURWATER_DB: "" }).db;
+  assert.equal(path.dirname(fallback), ROOT, `an empty value must not produce a bare or empty path: ${fallback}`);
+  assert.ok(path.basename(fallback).endsWith(".db"), `and it must still name a database: ${fallback}`);
+});

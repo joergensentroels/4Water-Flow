@@ -47,7 +47,7 @@ export async function runNudge(db, { notifier, t, seasonId, today, windowDays = 
       kind: "availability_nudge",
       personId: v.id,
       period: p,
-      body: nudgeMessage(t, { name: v.name, from, to }),
+      body: nudgeMessage(t, { name: v.name, from, to, publicUrl: notifier.config?.publicUrl ?? null }),
     });
     if (r.ok) sent.push(v.id);
   }
@@ -101,6 +101,7 @@ export async function runShiftReminders(db, { notifier, t, seasonId, today, days
         name: s.name,
         when: `${formatDate(t, s.date)} ${formatTime(s.hour, s.minute)}`,
         activity: `${s.label}${formatRole(t, s.role)}`,
+        publicUrl: notifier.config?.publicUrl ?? null,
       }),
     });
     if (r.ok) sent.push(s.assignmentId);

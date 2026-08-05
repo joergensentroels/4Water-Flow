@@ -384,5 +384,7 @@
   "home.standDown": "Du er ikke på den aktive liste",
   "home.standDownWhy": "En planlægger har sat dig på pause, så du får ikke tildelt nye vagter, og påmindelserne er stoppet. Tal med en planlægger, hvis det ikke er meningen.",
   "board.why.not_on_roster": "Du er ikke på den aktive liste, så du kan ikke få tildelt vagter. En planlægger eller en administrator kan sætte dig tilbage.",
-  "planner.why.nobody_on_roster": "Alle, der kunne tage denne, er sat på pause lige nu. En administrator kan sætte en af dem tilbage på listen."
+  "planner.why.nobody_on_roster": "Alle, der kunne tage denne, er sat på pause lige nu. En administrator kan sætte en af dem tilbage på listen.",
+  "notify.linkBoard": "Åbn vagtbørsen: {url}",
+  "notify.linkAvailability": "Indtast din tilgængelighed: {url}"
 }

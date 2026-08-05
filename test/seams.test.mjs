@@ -239,3 +239,64 @@ test("every string the UI asks for exists in the primary locale", () => {
   const en = loadStrings("en");
   assert.deepEqual(Object.keys(en).sort(), Object.keys(da).sort(), "locale files must cover the same keys");
 });
+
+// ---- one environment variable, one reader ---------------------------------------------------------------
+//
+// The environment IS a seam, and until this existed it was the only one with no gate on it. Two modules reading
+// the same variable means two fallbacks, two normalisations and two chances to disagree — and the disagreement is
+// invisible from inside either module, because each one is self-consistent.
+//
+// It had already happened twice. FOURWATER_BASE_URL was read at three sites with three copies of
+// `String(env.X || "").replace()` and no validation anywhere, which is also why increment AI went looking for a
+// variable that did not exist rather than finding the one that did. And FOURWATER_DB resolved to <cwd>/4water.db
+// in src/db.mjs but <ROOT>/4water.db in tools/backup.mjs — so an app started from any other directory wrote one
+// database while its backup dutifully copied another, and reported success.
+//
+// Derived, not a list of forbidden duplicates: a hand-kept list cannot fail for a variable nobody thought of.
+// Every multi-reader needs an entry here, and the entry is a sentence about why sharing is safe.
+const SHARED_ENV_JUSTIFIED = {
+  // Two different questions, deliberately. server.mjs decides whether dev sign-in is permitted at all (and adds
+  // NODE_ENV !== "production" to that decision); auth.mjs re-asserts it inside the provider, so constructing the
+  // dev provider directly cannot bypass the decision. Defence in depth, not a shared fallback — neither has one.
+  FOURWATER_AUTH: "src/server.mjs decides, src/auth.mjs re-asserts; no default on either side",
+  // demo.mjs never opens anything with these — it echoes the value back in the command line it prints, and its
+  // own defaults are demo.db and demo-pattern.json on purpose, so a demo cannot land on the real database.
+  FOURWATER_DB: "src/db.mjs resolves via dbFileFor; tools/demo.mjs only echoes it in printed instructions",
+  FOURWATER_PATTERN: "src/config.mjs resolves via patternFileFor; tools/demo.mjs only echoes it",
+};
+
+test("no environment variable is read from two modules without a recorded reason", () => {
+  const readers = new Map();
+  for (const file of sourceFiles()) {
+    const rel = path.relative(ROOT, file).split(path.sep).join("/");
+    if (rel.startsWith("test/")) continue;              // tests set env deliberately; they are not the deployment
+    for (const m of readFileSync(file, "utf8")
+      .matchAll(/(?:env|process\.env)[.[]"?(FOURWATER_\w+|OIDC_\w+|MATTERMOST_\w+|NEXTCLOUD_\w+)"?\]?/g)) {
+      if (!readers.has(m[1])) readers.set(m[1], new Set());
+      readers.get(m[1]).add(rel);
+    }
+  }
+
+  // Controls, because "0 unjustified" from a collector that found nothing reads exactly like a clean codebase.
+  assert.ok(readers.size >= 10, `only ${readers.size} environment variables found — the collector is not reading`);
+  assert.ok(readers.get("FOURWATER_SECRET")?.size >= 1, "the collector cannot see FOURWATER_SECRET");
+  assert.ok([...readers.values()].some((s) => s.size > 1),
+    "no variable has multiple readers at all — either the codebase converged completely, in which case delete " +
+    "SHARED_ENV_JUSTIFIED, or this collector is grouping by the wrong key and can never fail");
+
+  const shared = [...readers].filter(([, files]) => files.size > 1);
+  const unjustified = shared
+    .filter(([name]) => !SHARED_ENV_JUSTIFIED[name])
+    .map(([name, files]) => `${name} <- ${[...files].sort().join(", ")}`);
+  assert.deepEqual(unjustified, [],
+    "these environment variables are read from more than one module and nothing says why that is safe. Each " +
+    "reader carries its own fallback, and two fallbacks for one variable drift silently — the app and its backup " +
+    "disagreed about which file was the database for exactly this reason. Resolve it once in src/config.mjs, or " +
+    "add an entry to SHARED_ENV_JUSTIFIED saying why sharing is correct here:\n  " + unjustified.join("\n  "));
+
+  // And every justification must describe something real. An entry for a variable that has since converged is a
+  // stale exemption, and a stale exemption is how the next duplicate gets waved through.
+  const stale = Object.keys(SHARED_ENV_JUSTIFIED).filter((name) => (readers.get(name)?.size ?? 0) < 2);
+  assert.deepEqual(stale, [],
+    `SHARED_ENV_JUSTIFIED exempts these and they no longer have two readers. Delete the entries:\n  ${stale.join("\n  ")}`);
+});

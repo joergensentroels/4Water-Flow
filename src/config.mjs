@@ -231,6 +231,58 @@ export const PATTERN_FILE = path.join(ROOT, "config", "pattern.json");
 export const patternFileFor = (env = process.env) =>
   (env.FOURWATER_PATTERN && String(env.FOURWATER_PATTERN).trim()) || PATTERN_FILE;
 
+// WHERE THIS APP LIVES, normalised and validated in ONE place.
+//
+// Four callers already read FOURWATER_BASE_URL — the bootstrap invite link, the admin and profile calendar links,
+// and the backup verifier — and each carried its own `String(env.X || "").replace(/\/+$/, "")`. Four copies of a
+// normalisation is four chances for them to drift, and none of the four validated anything: a typo'd value was
+// pasted straight into an invite link, and the operator heard about it from whoever could not log in.
+//
+// It is also why increment AI first went looking for a *new* variable to hang notification links on. Searching for
+// publicUrl, APP_URL and FOURWATER_URL found nothing, and the conclusion drawn was "the app has no notion of its
+// own address" — which was false. A fact spread across four call sites and named in none of the places you would
+// grep for is a fact the codebase cannot tell you it already has. Hence: one name, one home, one normaliser.
+//
+// UNSET IS VALID and returns null, so `base ? url : path` keeps working exactly as it did. Every caller must
+// handle null anyway: an operator cannot know the hostname the first time they boot this.
+export function publicBaseUrl(env = process.env) {
+  const value = String(env.FOURWATER_BASE_URL ?? "").trim();
+  if (!value) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(
+      `FOURWATER_BASE_URL is not a URL: ${JSON.stringify(value)}\n` +
+      `  It is the address volunteers reach this app on, for example https://plan-cph.4water.org\n` +
+      `  Leave it unset and links are rendered as paths, which is what they did before.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`FOURWATER_BASE_URL must be http or https, not ${parsed.protocol} — got ${value}`);
+  }
+  // Trailing slashes trimmed so a caller can join with "/board" without producing "//board".
+  return parsed.origin + parsed.pathname.replace(/\/+$/, "");
+}
+
+// WHERE THE DATABASE IS, resolved identically for the app and for the thing that backs the app up.
+//
+// These were two defaults, not one. openDb() fell back to the bare string "4water.db" — resolved against the
+// CURRENT WORKING DIRECTORY — while tools/backup.mjs fell back to path.join(ROOT, "4water.db"). Launch the server
+// from anywhere other than the app directory, which a systemd unit and a plain `node /path/to/4water-app/src/
+// server.mjs` both do, and the app creates its database in one place while the backup faithfully copies another.
+// The backup would report success, because the file it names usually exists.
+//
+// Measured from a foreign cwd with FOURWATER_DB unset: openDb wanted <cwd>/4water.db, backupConfig wanted
+// <app>/4water.db. And openDb's own error text — the message an operator reads at the precise moment the database
+// cannot be found — said "default: 4water.db beside the app", which was backup.mjs's policy and not its own. The
+// one line written to tell somebody where to look was pointing at the wrong directory.
+//
+// ROOT-relative is the resolution kept, because it is the one that does not depend on how the process was started.
+// In the container this changes nothing: the Dockerfile sets WORKDIR /app, so both spellings already agreed there,
+// which is exactly why this survived a deployment test.
+export const dbFileFor = (env = process.env) =>
+  (env.FOURWATER_DB && String(env.FOURWATER_DB).trim()) || path.join(ROOT, "4water.db");
+
 export const loadPattern = (file = PATTERN_FILE) => validatePattern(readJson(file));
 
 export function loadStrings(locale, dir = path.join(ROOT, "strings")) {

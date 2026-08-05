@@ -46,7 +46,14 @@ if (nodeTooOld()) {
 }
 const { DatabaseSync } = await import("node:sqlite");
 
-export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
+// Imported after the Node-floor check above on purpose. config.mjs is pure node:fs/node:path and could not trip the
+// missing-node:sqlite failure this file exists to explain — but the floor check must still be the first thing that
+// speaks, so nothing gets a chance to fail earlier and less clearly.
+const { dbFileFor } = await import("./config.mjs");
+
+// dbFileFor, not `process.env.FOURWATER_DB || "4water.db"`. That bare string resolved against the CURRENT WORKING
+// DIRECTORY while tools/backup.mjs resolved the same fallback against ROOT — see src/config.mjs for what that cost.
+export function openDb(file = dbFileFor()) {
   let db;
   try {
     db = new DatabaseSync(file);
@@ -65,7 +72,7 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
     throw new Error(
       `4water Flow could not open its database at ${shown}\n` +
       `  ${e.message}\n` +
-      `  The path comes from FOURWATER_DB (default: 4water.db beside the app).\n` +
+      `  The path comes from FOURWATER_DB (default: 4water.db beside the app, resolved by src/config.mjs).\n` +
       `  Usually this means the directory does not exist — in the container, that the 4water-data volume is not\n` +
       `  mounted at /data. SQLite creates the FILE but never the directory holding it.`,
       { cause: e },
