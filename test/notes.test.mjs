@@ -24,8 +24,16 @@ test("the plan links to every session, so the notes are reachable at all", async
     const sid = aSession(w);
     assert.match(body, new RegExp(`href="/session/${sid}"`),
       "a page nobody can navigate to is the defect this project has shipped three times");
-    // And the link carries an accessible name that says which shift, not just "Open".
-    assert.match(body, /aria-label="Open — /, "the link must name the shift it opens");
+    // The accessible name says WHICH shift, not just "Details".
+    assert.match(body, /aria-label="Details — /, "the link must name the shift it opens");
+
+    // ONE link per session. A class with a leader and a follower is two assignment rows on one session, and the
+    // first version linked from both — two adjacent links to the same page, announcing different names. Found in a
+    // browser, not by a test, which is why this assertion exists at all.
+    const links = [...body.matchAll(/href="\/session\/(\d+)"/g)].map((m) => m[1]);
+    assert.deepEqual(links, [...new Set(links)],
+      `the plan links to some session twice: ${links.filter((s, i) => links.indexOf(s) !== i).join(", ")}`);
+    assert.ok(links.length >= 2, `expected a link per session, saw ${links.length}`);
   } finally { w.close(); }
 });
 

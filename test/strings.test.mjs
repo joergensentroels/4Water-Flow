@@ -368,6 +368,12 @@ const GLOSSARY = {
   role: ["rolle", "fører", "følger"],
   note: ["note"],
   notes: ["note"],
+  // TWO SENSES, and the check found the second one: "Details" is the link from the plan to a shift's own page
+  // (**detaljer**), and "your details" / "contact details" is somebody's personal information (**oplysninger**).
+  // English overloads the word and Danish does not, which is the same shape as `slot` being vagt or tidsrum — so
+  // both renderings are listed rather than the Danish being called drift for being right.
+  detail: ["detalj", "oplysning"],
+  details: ["detalj", "oplysning"],
 };
 // English words common in the strings that name no domain concept, so no Danish rendering is prescribed. Listed so
 // the coverage check below can insist the glossary knows about every frequent noun, rather than quietly skipping
@@ -446,6 +452,24 @@ test("the glossary knows about every frequent word in the English strings", () =
     "these words appear eight or more times in the English strings and the glossary has no opinion about them. If " +
     "one names a domain concept, add it with its Danish; if not, add it to NOT_DOMAIN. A glossary that does not " +
     "know about a frequent word cannot notice it drifting:\n  " + unclassified.join("\n  "));
+});
+
+// Two labels on ONE screen that mean opposite things must not be the same word.
+//
+// The plan page says "Open" against a slot nobody has taken, and the link to a shift's own page was also labelled
+// "Open" — the same word, six characters apart, meaning "unfilled" and "look at this". In Danish they were never
+// the same ("Ledig" and "Detaljer"), so the collision existed in the primary language only, which is the direction
+// nobody checks. Found by reading the rendered page.
+//
+// Deliberately a NAMED PAIR rather than a general rule: plenty of unrelated strings legitimately share a word, and
+// a check that flagged every repetition would be deleted within a week. This is the pair that bit.
+test("no label on the plan means two opposite things", () => {
+  for (const locale of ["en", "da"]) {
+    const s = loadStrings(locale);
+    assert.notEqual(s["plan.openSession"], s["slot.open"],
+      `${locale}: the link to a shift and the word for an unfilled slot are both "${s["slot.open"]}" on the same ` +
+      `page. One means "look at this", the other "nobody has taken it".`);
+  }
 });
 
 test("no locale file contains an unreplaced English fallback marker or stray HTML", () => {

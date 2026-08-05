@@ -379,6 +379,6 @@
   "notes.noSuchNote": "Den note findes ikke længere.",
   "plan.notes": "{n} noter",
   "plan.notes.one": "1 note",
-  "plan.openSession": "Åbn",
+  "plan.openSession": "Detaljer",
   "privacy.notes": "Frivillige kan skrive korte noter på en vagt — hvad man skal huske, om man bliver forsinket. Alle, der er logget ind, kan læse dem, ingen kan rette i andres, og du kan slette dine egne. Bliver dine oplysninger slettet, ryger dine noter med; en note, en anden har skrevet, som nævner dig, kan ikke findes automatisk — så skriv til en administrator."
 }

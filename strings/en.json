@@ -379,6 +379,6 @@
   "notes.noSuchNote": "That note no longer exists.",
   "plan.notes": "{n} notes",
   "plan.notes.one": "1 note",
-  "plan.openSession": "Open",
+  "plan.openSession": "Details",
   "privacy.notes": "Volunteers can write short notes on a shift — what to bring, running late. Everybody signed in can read them, nobody can edit anybody’s, and you can delete your own. If your details are erased, your notes go with them; a note somebody else wrote that mentions you cannot be found automatically, so ask an administrator."
 }
