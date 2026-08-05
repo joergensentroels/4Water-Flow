@@ -43,13 +43,41 @@ test("a path parameter reaching the page is escaped", async () => {
   assert.ok(!body.includes("<img"), `unescaped markup reached the page: ${body}`);
 });
 
+// Every directive, with the reason it is there — not one substring out of six. This used to check
+// `frame-ancestors` alone, which meant `default-src 'none'` could be relaxed to 'self' (allowing same-origin
+// script into an app that ships none) or `form-action` dropped entirely, and the suite would stay green.
+//
+// Found by opening the app in a browser: a page-initiated fetch was refused, and the reason was this policy doing
+// its job. A control strong enough to block that is worth more than one assertion.
+const CSP_DIRECTIVES = {
+  "default-src 'none'": "the floor. With no script-src of its own, this is what forbids script entirely — which is "
+    + "why 'works with JavaScript disabled' is enforced rather than merely claimed, and why an injected <script> "
+    + "would not run even if escaping failed",
+  "style-src 'self'": "one local stylesheet, no inline style, no CDN",
+  "img-src 'self'": "the logo and nothing that phones home; a remote image is a beacon carrying the visitor's IP",
+  "form-action 'self'": "a form on somebody else's page cannot POST here. Defence in depth behind the CSRF token, "
+    + "and the one directive that keeps working when a token leaks",
+  "frame-ancestors 'none'": "no framing, so no clickjacking of the planner's buttons",
+  "base-uri 'none'": "an injected <base> cannot repoint every relative form action at another origin",
+};
+
 test("security headers are on every response, including errors and redirects", async () => {
   for (const p of ["/ok", "/nope", "/boom", "/go"]) {
     const r = await fetch(`${base}${p}`, { redirect: "manual" });
     assert.equal(r.headers.get("x-content-type-options"), "nosniff", p);
     assert.equal(r.headers.get("x-frame-options"), "DENY", p);
     assert.equal(r.headers.get("referrer-policy"), "no-referrer", p);
-    assert.match(r.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/, p);
+
+    const csp = r.headers.get("content-security-policy") ?? "";
+    const present = csp.split(";").map((s) => s.trim()).filter(Boolean);
+    for (const [directive, why] of Object.entries(CSP_DIRECTIVES)) {
+      assert.ok(present.includes(directive), `${p}: the policy no longer says "${directive}" — ${why}`);
+      assert.ok(why.length >= 40, `${directive}: record WHY it is in the policy, not just that it is`);
+    }
+    // Both directions: a directive nobody has reasoned about must not appear either, because the value of this
+    // policy is that every part of it is deliberate.
+    assert.deepEqual(present.filter((d) => !(d in CSP_DIRECTIVES)), [],
+      `${p}: the policy gained a directive nothing here explains`);
   }
 });
 
