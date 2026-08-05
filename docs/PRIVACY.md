@@ -11,12 +11,15 @@ the retention period; the rest is factual and can be checked against the code.
 | Name | `people.name` | admin, or a NextCloud profile on first sign-in |
 | Contact address | `people.contact` | admin, or an invitation |
 | Which activities someone can run | `capabilities` | admin |
+| Which of the four roles they hold | `person_roles` | admin |
 | Which dates and hours they can help | `availability_day`, `availability_hour` | the volunteer, about themselves |
 | Which slots they took | `assignments` | the volunteer, a planner, or auto-roster |
 | Sign-in linkage | `people.auth_provider`, `auth_subject` | derived on first sign-in |
 | Invitation addresses | `invitations.email` | admin |
 | Messages sent about them | `notifications.body` | generated |
 | Calendar-feed credential | `people.calendar_token_hash` | the volunteer, if they ask for a feed |
+| Whether they turned up to a shift | `assignments.attended` | a planner, afterwards |
+| Who changed the plan or a person's record | `audit.actor_name`, `actor_id`, `detail` | derived from the action |
 
 **The calendar feed deserves its own paragraph**, because it is the one place this app hands out a URL that
 works without signing in. A calendar client cannot present a session, so the link itself is the credential.
@@ -32,9 +35,25 @@ in-app privacy notice rather than left to be discovered:
 - **Erasure destroys the credential.** Anonymising also marks the row inactive, which by itself would already
   stop the feed serving — but that would leave a live secret in the database, so `erasePerson` nulls it.
 
+**Attendance is recorded, and this document said the opposite for one commit.** The sentence below used to
+read "no attendance or performance records", which stopped being true the moment 4water asked for the
+contribution figure to count activities *attended* rather than merely taken. Stating it plainly instead:
+
+- A planner marks, **after the shift**, whether the person turned up. Three states, one of which is *nobody
+  has said* — the honest default, and not the same as a no-show.
+- It is **a statement by one person about another**, so it is audited: `planner.attendance` records who marked
+  it and what they marked, and a planner can change it back. The app refuses to record attendance for a shift
+  that has not happened yet.
+- What it feeds is the **contribution record** — "how many activities has this person actually run this
+  season". It deliberately does **not** feed eligibility, auto-roster balancing, or the *active* flag; those
+  read the count of shifts held, for reasons written up in PLAN.md. **Nobody is excluded from anything by an
+  attendance figure.**
+- If the board would rather not hold it, this is one nullable column and one screen, and removing it costs
+  nothing else.
+
 **What is deliberately NOT stored:** no passwords (sign-in is NextCloud's job or a single-use link), no
-payment details, no attendance or performance records, no free-text notes about people, and no analytics or
-tracking of any kind. There are no third-party scripts — the Content-Security-Policy forbids them outright.
+payment details, no free-text notes about people, and no analytics or tracking of any kind. There are no
+third-party scripts — the Content-Security-Policy forbids them outright.
 
 Roughly 40 volunteers per department. Ordinary contact data, no special categories.
 
@@ -75,6 +94,12 @@ actually be serviced.
   schema's `ON DELETE CASCADE` / `SET NULL` takes capabilities, availability and roles with it while leaving the
   assignments as unattributed. The last administrator cannot be erased, so the app cannot be locked out by a
   deletion.
+  **The audit trail is the one place rows are kept on purpose**, and the board should know why: deleting it
+  would mean nobody could ever answer "who stood this volunteer down, and when". Erasure takes the *identity*
+  out of it instead — the actor's name becomes the same `#id` label used elsewhere, and any address written
+  into a row's detail is swept out. So the log still says a person did a thing, and no longer says which
+  person. Both erasure modes do this. It is a bargain rather than a clean answer, and it is the board's to
+  reject: the alternative is an audit trail with holes in it wherever somebody has left.
 - **Restriction:** marking someone inactive stops them being offered or assigned anything while keeping their
   record — which is the right default for a rota, and is *not* erasure. It is listed separately here precisely
   because this document once conflated the two.

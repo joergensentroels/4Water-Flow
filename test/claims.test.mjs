@@ -117,6 +117,18 @@ const JUSTIFIED = {
   "privacy.rights":
     "GET /me exists for every signed-in person and POST /me writes name and contact, so 'always see and " +
     "correct' is true of the app as built. Deletion is deliberately NOT claimed as self-service.",
+  "privacy.attendance":
+    "Three separate guarantees, each with code behind it. 'After a shift': markAttendance returns not_yet when " +
+    "date >= today, and the control only renders for past shifts. 'Never used to decide what you are offered': " +
+    "eligiblePeopleFor, autoRoster and isActive all read score(), which counts confirmed assignments and does " +
+    "not look at `attended` — test/attendance.test.mjs asserts marking attendance leaves score() unchanged. " +
+    "'A planner can change it back': null is an accepted value, which is why the column is nullable.",
+  "privacy.changes":
+    "'What changed, when, who': the audit row carries action, at, actor_name and detail, and the AUDITED list is " +
+    "held against the route table so the coverage is not a promise. 'Kept longer than messages': retentionConfig " +
+    "asserts auditDays > notificationDays and a test fails if that inverts. 'Your name comes out of it': " +
+    "erasePerson calls pseudonymiseAuditActor AND scrubAuditDetail in both modes, checked in both directions — " +
+    "the rows survive and the name does not.",
   "status.queued":
     "Chosen only when notify.channel === 'outbox', i.e. when MATTERMOST_WEBHOOK really is unset. The " +
     "unconditional version of this sentence is the bug this file exists to prevent.",

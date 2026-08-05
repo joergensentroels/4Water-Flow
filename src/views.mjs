@@ -133,6 +133,11 @@ export function renderPrivacy({ t, roles = [], signedIn = false }) {
         <p>${t("privacy.why")}</p>
         <p>${t("privacy.who")}</p>
         <p>${t("privacy.calendar")}</p>
+        <!-- Attendance and the audit trail are both statements OTHER PEOPLE make about a volunteer, which is why
+             they belong on the page the volunteer reads and not only in the board's document. This page listed
+             neither for one commit — the same omission as docs/PRIVACY.md, one screen closer to the person. -->
+        <p>${t("privacy.attendance")}</p>
+        <p>${t("privacy.changes")}</p>
         <p>${t("privacy.rights")}</p>
       </div>
       <p><a class="btn secondary" href="${signedIn ? "/availability" : "/signin"}">${t("privacy.back")}</a></p>`,
