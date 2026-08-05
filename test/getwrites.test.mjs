@@ -14,19 +14,35 @@ import { createInvite } from "../src/auth.mjs";
 
 const MUTATING = /^\s*(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|VACUUM)\b/i;
 
-// Wraps prepare() so every mutating statement executed from here on is recorded. Installed after the fixture is
-// built, so only request-time writes are seen. There is no prepared-statement cache in this app and no db.prepare
-// at module scope — every call site prepares inline — so wrapping this catches all of them.
+// Wraps prepare() AND exec() so every mutating statement executed from here on is recorded. Installed after the
+// fixture is built, so only request-time writes are seen. There is no prepared-statement cache in this app and no
+// db.prepare at module scope — every call site prepares inline — so wrapping prepare catches all of those.
+//
+// `exec` is wrapped because leaving it out left this whole audit resting on an unverified premise about the
+// codebase: that no data write ever goes through it. The premise is true right now — every `db.exec` in src/ is
+// transaction control, a PRAGMA, or migration DDL — but that is a fact about today's source rather than a property
+// of the instrument, and the audit read as though it covered everything. One `db.exec("UPDATE ...")` in a future GET
+// handler would have been invisible to a sweep that then reported a clean result: the check would have asserted
+// "nothing written through prepare" while claiming "no GET writes". Wrapping both is cheaper than a second check
+// asserting the premise, and it cannot go stale.
+//
+// BEGIN, COMMIT and ROLLBACK do not match MUTATING, so transaction control stays quiet, and the migration's DDL
+// runs long before this wrapper exists.
 function watchWrites(db) {
   const seen = [];
-  const real = db.prepare.bind(db);
+  const note = (sql) => sql.replace(/\s+/g, " ").trim().slice(0, 72);
+  const realPrepare = db.prepare.bind(db);
   db.prepare = (sql) => {
-    const st = real(sql);
+    const st = realPrepare(sql);
     if (!MUTATING.test(sql)) return st;
-    const note = sql.replace(/\s+/g, " ").trim().slice(0, 72);
-    return { ...st, run: (...a) => { seen.push(note); return st.run(...a); },
-                    get: (...a) => { seen.push(note); return st.get(...a); },
-                    all: (...a) => { seen.push(note); return st.all(...a); } };
+    return { ...st, run: (...a) => { seen.push(note(sql)); return st.run(...a); },
+                    get: (...a) => { seen.push(note(sql)); return st.get(...a); },
+                    all: (...a) => { seen.push(note(sql)); return st.all(...a); } };
+  };
+  const realExec = db.exec.bind(db);
+  db.exec = (sql) => {
+    if (MUTATING.test(sql)) seen.push(note(sql));
+    return realExec(sql);
   };
   return seen;
 }
@@ -98,5 +114,33 @@ test("the write detector sees writes, on a POST and on the route that used to be
     assert.equal(accepted.headers.get("location"), "/availability", "the accept route must still work");
     assert.ok(seen.some((s) => /INSERT INTO people/i.test(s)),
       "accepting an invitation must create the person — on the POST, where it belongs");
+  } finally { w.close(); }
+});
+
+// The control for the OTHER half of the watcher. Wrapping `exec` closes a hole in the audit above, and an unexercised
+// wrapper is exactly the decoration this repository keeps removing — so this drives a write through `exec` directly
+// and requires the watcher to see it, and drives transaction control through the same path and requires silence.
+//
+// Both directions matter. If BEGIN or COMMIT were recorded as writes, every GET that opens a transaction would be
+// reported as a writer, the audit would fail on correct code, and the fix would be to loosen it — which is how a
+// working check gets weakened into a broken one.
+test("the write detector sees an exec write, and stays quiet on transaction control", async () => {
+  const w = await makeWorld({ volunteers: 1 });
+  try {
+    const seen = watchWrites(w.db);
+
+    w.db.exec("BEGIN");
+    w.db.exec("COMMIT");
+    assert.deepEqual(seen, [], "transaction control was recorded as a write — every GET that opens one would fail");
+
+    // A real write, through exec rather than prepare. This is the shape the audit above could not see before.
+    w.db.exec("UPDATE people SET name = name WHERE id = 0");
+    assert.equal(seen.length, 1, "a write through exec() was not seen — wrapping it accomplished nothing");
+    assert.match(seen[0], /^UPDATE people/, `the recorded note does not name the statement: ${seen[0]}`);
+
+    // And prepare is still wrapped: replacing exec must not have shadowed the original half.
+    seen.length = 0;
+    w.db.prepare("UPDATE people SET name = name WHERE id = 0").run();
+    assert.equal(seen.length, 1, "the prepare wrapper stopped working when the exec wrapper was added");
   } finally { w.close(); }
 });
