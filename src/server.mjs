@@ -22,6 +22,7 @@ import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapabilit
          addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "./admin.mjs";
 import { seedSeason } from "./seed.mjs";
 import { makeLimiter, clientKey } from "./ratelimit.mjs";
+import { recordAudit, listAudit, AUDIT_PAGE } from "./audit.mjs";
 import { erasePerson, exportPerson, exportSeasonCsv, runRetention } from "./retention.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
@@ -97,6 +98,15 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     }
     return { session, roles, personId: g.personId, who: db.prepare("SELECT name FROM people WHERE id=?").get(g.personId)?.name ?? "" };
   };
+
+  // One line per audited action. The actor is assembled once here rather than at eighteen call sites, so it
+  // cannot be right in seventeen of them — `c` already carries the person id and the name the gate resolved.
+  //
+  // Called AFTER the action, and it records the outcome rather than only the successes: "a planner tried to
+  // unassign somebody and was refused because the row had changed" is exactly the sort of thing somebody asks
+  // about later. `detail` must never carry a secret; see the note on recordAudit.
+  const logAudit = (c, action, subject = null, detail = null) =>
+    recordAudit(db, { actorId: c.personId, actorName: c.who, action, subject, detail });
 
   // POST guard. A missing or wrong CSRF token is a 403 with a human explanation, because the honest common
   // cause is a form left open overnight, not an attack.
@@ -302,6 +312,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res });
     if (!c) return;
     const r = claimSlot(db, Number(params.id), c.personId);
+    logAudit(c, "board.claim", `assignment:${params.id}`, r.ok ? "took an open shift" : `refused: ${r.reason}`);
     // Always redirect back to the board: the outcome is a message on the page the volunteer is already
     // looking at, and a 303 means a refresh cannot claim twice.
     redirect(res, `/board?r=${r.ok ? "claimed" : r.reason}`);
@@ -320,6 +331,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
        WHERE a.id = ?`).get(id);
 
     const r = handBackSlot(db, id, c.personId, { today: today(), cutoffDays: Number(cfg.board?.cutoffDays) || 0 });
+    logAudit(c, "board.handBack", `assignment:${id}`, r.ok ? "gave a shift back" : `refused: ${r.reason}`);
     const code = r.ok ? (r.pastCutoff ? "handed_back_late" : "handed_back") : r.reason;
 
     // Announce it, and never let that failure reach the volunteer: the slot IS released, and an error page
@@ -383,6 +395,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const sid = seasonId();
     if (!sid) return redirect(res, "/planner");
     const r = autoRoster(db, { seasonId: sid, fromDate: today() });
+    logAudit(c, "planner.autoRoster", `season:${sid}`, `proposed ${r.filled}, gaps ${r.gaps}`);
     if (r.filled === 0 && r.gaps === 0) return redirect(res, "/planner?r=roster_empty");
     redirect(res, `/planner?r=roster_done&filled=${r.filled}&gaps_n=${r.gaps}`);
   });
@@ -392,6 +405,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const sid = seasonId();
     const n = sid ? lockInProposals(db, sid, today()) : 0;
+    logAudit(c, "planner.lockProposals", `season:${sid}`, `${n} proposals became the plan`);
     redirect(res, `/planner?r=locked&n=${n}`);
   });
 
@@ -400,6 +414,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const sid = seasonId();
     const n = sid ? discardProposals(db, sid, today()) : 0;
+    logAudit(c, "planner.discardProposals", `season:${sid}`, `${n} proposals discarded`);
     redirect(res, `/planner?r=discarded&n=${n}`);
   });
 
@@ -408,6 +423,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const expect = c.form.expect === "" || c.form.expect == null ? null : Number(c.form.expect);
     const r = assignSlot(db, Number(c.form.assignmentId), Number(c.form.personId), { expectPersonId: expect });
+    logAudit(c, "planner.assign", `assignment:${Number(c.form.assignmentId)}`,
+             r.ok ? `to person:${Number(c.form.personId)}` : `refused: ${r.reason}`);
     const code = r.ok ? (r.unanswered ? "assigned_unanswered" : "assigned") : r.reason;
     redirect(res, `/planner?r=${code}`);
   });
@@ -422,6 +439,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
         JOIN timeslots t ON t.id=s.timeslot_id JOIN activities act ON act.id=s.activity_id
        WHERE a.id = ?`).get(id);
     const r = unassignSlot(db, id, { expectPersonId: c.form.expect ? Number(c.form.expect) : null });
+    logAudit(c, "planner.unassign", `assignment:${id}`,
+             r.ok ? `freed ${detail ? detail.date : "?"}` : `refused: ${r.reason}`);
     // A planner freeing a slot puts it on the bÃ¸rs exactly like a volunteer handing it back, so it gets the
     // same announcement â€” otherwise the two paths would behave differently for no reason a volunteer could see.
     if (r.ok && detail) announceOpenSlot(id, detail).catch(() => {});
@@ -477,6 +496,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // harm than accepting a typo, which is the usual outcome of hand-written email validation.
     if (!email) return redirect(res, "/admin?r=no_email");
     const token = createInvite(db, { email });
+    logAudit(c, "admin.invite", null, `invited ${email}`);
     // FOURWATER_BASE_URL, never the Host header.
     //
     // This used to build the absolute URL from req.headers.host, for the good reason that a relative path is
@@ -498,6 +518,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     revokeInvite(db, Number(c.form.id));
+    logAudit(c, "admin.revokeInvite", `invitation:${Number(c.form.id)}`, "withdrawn before it was used");
     redirect(res, "/admin?r=revoked");
   });
 
@@ -505,6 +526,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const r = setRole(db, Number(c.form.personId), String(c.form.role), c.form.on === "1");
+    logAudit(c, "admin.role", `person:${Number(c.form.personId)}`,
+             `${c.form.on === "1" ? "granted" : "removed"} ${String(c.form.role)}${r.ok ? "" : ` (refused: ${r.reason})`}`);
     redirect(res, `/admin?r=${r.ok ? "saved" : r.reason}`);
   });
 
@@ -512,6 +535,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const r = setCapability(db, Number(c.form.personId), String(c.form.key), c.form.on === "1");
+    logAudit(c, "admin.capability", `person:${Number(c.form.personId)}`,
+             `${c.form.on === "1" ? "can" : "cannot"} ${String(c.form.key)}${r.ok ? "" : ` (refused: ${r.reason})`}`);
     redirect(res, `/admin?r=${r.ok ? "saved" : r.reason}`);
   });
 
@@ -519,6 +544,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const r = setPersonStatus(db, Number(c.form.personId), String(c.form.status), { today: today() });
+    logAudit(c, "admin.status", `person:${Number(c.form.personId)}`,
+             `${String(c.form.status)}${r.ok && r.released ? `, released ${r.released} future shifts` : ""}`);
     // Say how many shifts that freed. Reporting "saved" over fifty released shifts is the silence this project
     // keeps closing: the planner is the one who has to fill them, and they have no other way to know.
     if (r.ok && r.released > 0) return redirect(res, `/admin?r=released&n=${r.released}`);
@@ -656,6 +683,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const r = erasePerson(db, Number(c.form.personId), { mode: String(c.form.mode ?? ""), today: today() });
+    logAudit(c, "admin.erase", `person:${Number(c.form.personId)}`,
+             r.ok ? `${r.mode}, released ${r.released ?? 0}` : `refused: ${r.reason}`);
     if (!r.ok) return redirect(res, `/admin?r=${r.reason === "bad_mode" ? "erase_bad_mode" : r.reason}`);
     redirect(res, `/admin?r=erased&who=${encodeURIComponent(r.was)}&mode=${r.mode}&n=${r.released ?? 0}`);
   });
@@ -712,6 +741,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const live = baseForEdit();
     if (live.__unreadable) return redirect(res, `/admin?r=invalid&m=${encodeURIComponent(live.__unreadable)}`);
     const r = runRetention(db, { pattern: live, currentKey: live.season.key });
+    logAudit(c, "admin.retention", null,
+             `notifications ${r.notifications.removed}, invitations ${r.invitations.removed}, audit ${r.audit.removed}`);
     // Invitations are reported too. A clean-up that silently deletes a category it does not mention is the same
     // problem as one that never deletes it: the operator cannot tell what happened.
     redirect(res, `/admin?r=retention_done&notifications=${r.notifications.removed}` +
@@ -760,12 +791,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     applyPattern(patternFromForm(baseForEdit(), c.form), res);
+    logAudit(c, "admin.season", null, "edited the season or activity configuration");
   });
 
   app.post("/admin/activity", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     applyPattern(addActivityToForm(baseForEdit(), c.form), res);
+    logAudit(c, "admin.activity", null, `added activity ${String(c.form.key ?? "?")}`);
   });
 
   // ---- the weekly rhythm (increment Q) ------------------------------------------------------------------
@@ -789,6 +822,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const next = addWeeklyToForm(baseForEdit(), {
       dayOfWeek: c.form.dayOfWeek, hour, minute, activities: c.form.__all("activities"),
     });
+    logAudit(c, "admin.weeklyAdd", null, `day ${String(c.form.dayOfWeek)} at ${time}`);
     // fromDate = today, so adding a slot in August does not manufacture unfilled sessions back to January.
     applyPattern(next, res, { fromDate: today(), okCode: "weekly_added" });
   });
@@ -797,6 +831,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
     const { pattern: next, removed } = removeWeeklyFromForm(baseForEdit(), c.form);
+    logAudit(c, "admin.weeklyRemove", null, `day ${String(c.form.dayOfWeek)} at ${String(c.form.hour)}:${String(c.form.minute)}`);
     if (removed === 0) return redirect(res, "/admin?r=weekly_not_found");
     applyPattern(next, res, { okCode: "weekly_removed" });
   });

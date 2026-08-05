@@ -37,14 +37,18 @@ test("retention settings come from config, with sane floors", withAdmin({}, asyn
   assert.equal(retentionConfig(w.pattern).seasons, w.pattern.retention.seasons);
   assert.equal(retentionConfig(w.pattern).notificationDays, w.pattern.retention.notificationDays);
   // Nothing configured falls back to the documented defaults.
-  assert.deepEqual(retentionConfig({}), { seasons: 2, notificationDays: 90 });
+  assert.deepEqual(retentionConfig({}), { seasons: 2, notificationDays: 90, auditDays: 730 });
 
   // A zero, a negative, or a typo must NOT be honoured — "keep zero seasons" would erase every record of who
   // taught what, and that is not an instruction to follow on the strength of a mistyped field.
   for (const bad of [0, -1, "", null, "soon", NaN]) {
-    assert.deepEqual(retentionConfig({ retention: { seasons: bad, notificationDays: bad } }),
-      { seasons: 2, notificationDays: 90 }, `${JSON.stringify(bad)} should fall back, not delete everything`);
+    assert.deepEqual(retentionConfig({ retention: { seasons: bad, notificationDays: bad, auditDays: bad } }),
+      { seasons: 2, notificationDays: 90, auditDays: 730 },
+      `${JSON.stringify(bad)} should fall back, not delete everything`);
   }
+  // The audit window is honoured when deliberate, and it is the one an organisation is most likely to shorten:
+  // "who changed this" is worth keeping, and a board that would rather hold less can say so.
+  assert.equal(retentionConfig({ retention: { auditDays: 180 } }).auditDays, 180);
   // A deliberate 1 IS honoured — only the current season, which is a legitimate choice.
   assert.equal(retentionConfig({ retention: { seasons: 1 } }).seasons, 1);
   assert.equal(retentionConfig({ retention: { seasons: "3" } }).seasons, 3, "a string from JSON should still work");

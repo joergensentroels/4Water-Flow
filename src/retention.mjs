@@ -1,4 +1,5 @@
 import { releaseFutureShifts } from "./admin.mjs";
+import { pseudonymiseAuditActor } from "./audit.mjs";
 
 // Deleting things on purpose. docs/PRIVACY.md admitted that nothing ever deleted anything, ever — which is
 // both a GDPR gap and the reason `notifications` would grow forever with volunteers' names in it.
@@ -18,6 +19,12 @@ const atLeastOne = (value, fallback) => {
 export const retentionConfig = (pattern) => ({
   seasons: atLeastOne(pattern?.retention?.seasons, 2),
   notificationDays: atLeastOne(pattern?.retention?.notificationDays, 90),
+  // The audit trail's own window, and it is deliberately much longer than the notification one. A notification is
+  // operational — useful for weeks, to tell a broken webhook from a quiet period. An audit answers "who changed
+  // this" a season or two later, when somebody asks why a volunteer was stood down, so a 90-day window would
+  // throw away exactly the rows worth keeping. Two years by default, which outlives the season retention above
+  // and can be shortened by a board that would rather hold less.
+  auditDays: atLeastOne(pattern?.retention?.auditDays, 730),
 });
 
 // Notifications carry names ("Hi Volunteer One — please enter your availability"). They are operational
@@ -92,7 +99,18 @@ export function runRetention(db, { pattern, currentKey, now = new Date() }) {
   const notes = pruneNotifications(db, { olderThanDays: cfg.notificationDays, now });
   const invites = pruneInvitations(db, { olderThanDays: cfg.notificationDays, now });
   const seasons = pruneSeasons(db, { keep: cfg.seasons, currentKey });
-  return { config: cfg, notifications: notes, invitations: invites, seasons };
+  const audit = pruneAudit(db, { olderThanDays: cfg.auditDays, now });
+  return { config: cfg, notifications: notes, invitations: invites, seasons, audit };
+}
+
+// The audit trail holds names, so it cannot be kept forever without a reason — and it cannot be dropped after a
+// few weeks either, because the questions it answers arrive late. Reported like everything else here: a retention
+// step that deletes silently is indistinguishable from one that is broken.
+export function pruneAudit(db, { olderThanDays, now = new Date() }) {
+  const cutoff = new Date(now.getTime() - olderThanDays * 86400000).toISOString();
+  const doomed = db.prepare("SELECT COUNT(*) n FROM audit WHERE at < ?").get(cutoff).n;
+  db.prepare("DELETE FROM audit WHERE at < ?").run(cutoff);
+  return { removed: doomed, cutoff };
 }
 
 // ---- erasure ------------------------------------------------------------------------------------------
@@ -112,6 +130,7 @@ export const ERASURE_MODES = ["anonymise", "remove"];
 export function erasePerson(db, personId, { mode, now = new Date(), today = now.toISOString().slice(0, 10) }) {
   if (!ERASURE_MODES.includes(mode)) return { ok: false, reason: "bad_mode" };
   let released = 0;
+  let auditRenamed = 0;
   const person = db.prepare("SELECT id, name FROM people WHERE id=?").get(personId);
   if (!person) return { ok: false, reason: "no_such_person" };
 
@@ -170,12 +189,18 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
     }
     // Messages about them mention them by name.
     db.prepare("DELETE FROM notifications WHERE person_id=?").run(personId);
+    // And the audit trail, which stores the actor's name as it was so that a deleted person does not reduce a
+    // record to "somebody did this". BOTH modes, and the ordering matters: under `remove` the people row is gone
+    // by now and the foreign key has set actor_id to NULL, so the stored name is the only thing left pointing at
+    // a human being. Pseudonymising rather than deleting is the whole bargain — the audit keeps its answer to
+    // "who", erasure takes away "which human", and neither has to give up the thing it exists for.
+    auditRenamed = pseudonymiseAuditActor(db, personId);
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
 
   const after = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id=?").get(personId).n;
   return { ok: true, mode, was: person.name, availabilityRemoved: before.availability,
-           assignmentsBefore: before.assignments, assignmentsStillLinked: after, released };
+           assignmentsBefore: before.assignments, assignmentsStillLinked: after, released, auditRenamed };
 }
 
 // ---- export -------------------------------------------------------------------------------------------

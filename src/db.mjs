@@ -260,6 +260,37 @@ export function migrate(db) {
       UNIQUE (kind, person_id, period)
     );
 
+    -- Who changed the plan, or somebody else's record, and when. Two planners share one grid, and an
+    -- administrator can hand out privilege or erase a person; none of that left a trace.
+    --
+    -- actor_name is DENORMALISED on purpose. A hard erasure removes the people row, and an audit trail whose
+    -- actor has become NULL answers "somebody did this", which is not an audit trail. Keeping the name as it was
+    -- makes the record answerable — and makes this table hold personal data, so it is covered by BOTH halves of
+    -- the GDPR work: erasure pseudonymises the name to #id exactly as it does in the people table, and retention
+    -- prunes on its own window. An audit log outside that work would defeat erasure; erasure that deleted audit
+    -- rows would defeat the audit. Neither is acceptable, so each gives up the smaller thing.
+    --
+    -- NO BACKTICKS IN THIS COMMENT. The whole schema is one JS template literal, so a backtick here ends the
+    -- string and takes down every module that imports this file. That is a documented mistake in this project and
+    -- I made it again writing this very table: the signature is a SyntaxError at the db.exec line rather than
+    -- anything pointing at the comment.
+    --
+    -- Deliberately NOT logged: a volunteer's own availability answers and their own profile edits. Those change
+    -- nothing anybody else relies on, and recording every time somebody changed their mind about one date would
+    -- buy thousands of rows of private detail for no accountability. What is logged is what changes the PLAN or
+    -- somebody ELSE's record — see AUDITED in src/audit.mjs, which a test holds to the route table.
+    CREATE TABLE IF NOT EXISTS audit (
+      id         INTEGER PRIMARY KEY,
+      at         TEXT NOT NULL,
+      actor_id   INTEGER REFERENCES people(id) ON DELETE SET NULL,
+      actor_name TEXT NOT NULL,
+      action     TEXT NOT NULL,
+      subject    TEXT,
+      detail     TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_at       ON audit(at);
+    CREATE INDEX IF NOT EXISTS idx_audit_actor    ON audit(actor_id);
     CREATE INDEX IF NOT EXISTS idx_assign_session ON assignments(session_id);
     CREATE INDEX IF NOT EXISTS idx_assign_person  ON assignments(person_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_date  ON sessions(date);
