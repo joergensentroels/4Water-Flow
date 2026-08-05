@@ -297,7 +297,27 @@ ul.notes > li:first-child { border-top: 0; }
 .notebody { margin: 0; overflow-wrap: anywhere; }
 .notemeta { margin: .2rem 0 0; color: var(--muted); font-size: .85rem; }
 
-/* Checkbox lists (activities in a timeslot) read as a row of choices, not a stack of full-width fields. */
-label.inline { display: inline-flex; align-items: center; gap: .4rem; width: auto;
+/* Checkbox lists (activities in a timeslot) read as a row of choices, not a stack of full-width fields.
+   min-height because these measured 23px — ONE PIXEL under SC 2.5.8's 24x24 floor, and a row of choices is not
+   "inline in a sentence", so the exception the criterion allows does not apply to them. The 13x13 checkbox inside
+   is not the target; this label is, which is why the size belongs here and not on the input. */
+label.inline { display: inline-flex; align-items: center; gap: .4rem; width: auto; min-height: 2rem;
   margin: .2rem .6rem .2rem 0; color: var(--fg); font-size: .95rem; }
 label.inline input { display: inline-block; width: auto; min-height: 0; margin: 0; }
+
+/* A LINK ALONE IN A HINT PARAGRAPH IS A TARGET, not prose, and this is the third audit the same element has walked
+   through untouched. `p.hint > a` is how the per-volunteer "Download data" export and the season CSV are rendered:
+   twelve of the first, measured 114x22, and the second at 291x22 — both under the 24x24 floor.
+   The comment beside the markup in admin.mjs records this element surviving the accessible-name audit because
+   "links were outside what that audit looked at". It then survived the 2.5.8 pass for the same structural reason:
+   that pass fixed buttons, chips and a select, and this is none of those. Two audits, one element, same blind spot
+   — which is the argument for measuring every target on a page rather than every target of a known kind.
+   Scoped to a link that is the paragraph's only child, so a link inside an actual sentence keeps the inline
+   exception it is entitled to and is not stretched into a box.
+   `:not(.btn)` is load-bearing, not tidiness. Thirteen of the fifteen paragraph-only links in this app are
+   `<a class="btn">` and already carry min-height: var(--tap) = 48px — and `p > a:only-child` outranks `.btn` on
+   specificity, so without the exclusion this rule would have SHRUNK every one of them to 32px and swapped their
+   inline-grid centring for inline-flex. A fix for a 2px shortfall that quietly took 16px off thirteen buttons.
+   Not `p.hint` either: the profile's privacy-notice link is in a plain <p> and measured 246x22, so scoping by class
+   would have missed it. The criterion is about a link being the whole paragraph, not about the paragraph's class. */
+p > a:only-child:not(.btn) { display: inline-flex; align-items: center; min-height: 2rem; }

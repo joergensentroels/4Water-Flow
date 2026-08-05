@@ -247,15 +247,14 @@ check, which is how the shadowing in point 4 came to light.
 ## Before opening a pull request
 
 - `npm test` green.
-- If you touched a screen, **look at it in a browser** at 375px in both colour schemes. **Nine** real bugs in this
-  codebase were invisible to a passing suite: a 403 dead end, unstyled 404s, light-mode form controls on a dark
-  page, an administrator who could not reach the planner screen, two adjacent links to the same session, and the
-  four found in one pass over the newest three screens — the current-page nav tab scrolled off a 375px viewport,
-  117 session links that asked for a 40px chip and rendered as 26px text, a note box 157px wide beside a 309px
-  button, and three attendance buttons stacked into a 186px-tall row, 47 rows deep.
-  `test/css-audit.test.mjs` now catches the two of those that are decidable from the source. It cannot catch the
-  other two: nothing in `node:test` lays out a box, so **the browser is the only instrument for geometry.** Measure
-  with `getBoundingClientRect` rather than looking — "it seems fine" is how all four survived a review.
+- If you touched a screen, **measure it in a browser** at 375px in both colour schemes — see the next section.
+  **Eleven** real bugs here were invisible to a passing suite: a 403 dead end, unstyled 404s, light-mode form
+  controls on a dark page, an administrator who could not reach the planner screen, two adjacent links to the same
+  session, the current-page nav tab scrolled off a 375px viewport, 117 session links that asked for a 40px chip and
+  rendered as 26px text, a note box 157px wide beside a 309px button, three attendance buttons stacked into a
+  186px-tall row 47 rows deep, and nineteen targets on `/admin` at 22–23px against a 24px floor.
+  `test/css-audit.test.mjs` catches the ones decidable from the source. It cannot catch geometry: nothing in
+  `node:test` lays out a box, so **the browser is the only instrument for it.**
 - If you added a `POST` route, `test/csrf-audit.test.mjs` will check it automatically. If you added an outcome
   code, add its message to both locales — a test checks that too.
 - If the route takes an `:id`, `test/ownership-audit.test.mjs` will fail until you say whether that id names one
@@ -269,3 +268,51 @@ check, which is how the shadowing in point 4 came to light.
   section once listed auto-roster, notifications, OIDC, invite redemption and the planner grid as missing, long
   after all five shipped, and claimed nothing consumed `invitations` — in the file a reader opens first. No check
   will catch the next one; reading it will.
+
+## The phone measurement, which is a procedure and not a glance
+
+Six of the eleven browser-only defects above were found in two sweeps with the snippet below, and none of them was
+visible to reading the page. Numbers, not impressions: "it seems fine" is how they all survived review.
+
+Start a demo instance, open it at 375px, sign in, and run this in the console on **every** page — `/`,
+`/availability`, `/board`, `/plan`, `/session/:id`, `/me`, `/planner`, `/outbox`, `/status`, `/admin`, `/privacy`,
+and a URL that 404s:
+
+```js
+(() => {
+  const vw = document.documentElement.clientWidth;
+  // The EFFECTIVE target is what a finger hits. A control wrapped in a label, or paired with one by for=, is
+  // activated by that label, so the label's box is the target — measuring the 13x13 checkbox over-reports.
+  const byId = new Map([...document.querySelectorAll('label[for]')].map(l => [l.getAttribute('for'), l]));
+  const seen = new Set(), targets = [];
+  for (const c of document.querySelectorAll('a, button, input:not([type=hidden]), select, textarea')) {
+    const hit = c.closest('label') ?? (c.id ? byId.get(c.id) : null) ?? c;
+    if (seen.has(hit)) continue;
+    seen.add(hit);
+    const r = hit.getBoundingClientRect(), cs = getComputedStyle(hit);
+    if (cs.opacity === '0' || cs.visibility === 'hidden' || (r.width <= 1 && r.height <= 1)) continue;
+    targets.push({ text: (hit.textContent || '').trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) });
+  }
+  const active = document.querySelector('nav.tabs a[aria-current]');
+  return {
+    sideways: document.documentElement.scrollWidth > vw + 1,
+    pastViewport: [...document.querySelectorAll('body *')]
+      .filter((e) => { const r = e.getBoundingClientRect(); return (r.width || r.height) && r.right > vw + 1; }).length,
+    targets: targets.length,
+    belowWcag24: targets.filter((t) => t.w < 24 || t.h < 24),
+    activeTabVisible: active ? active.getBoundingClientRect().right <= vw + 1 : null,
+  };
+})()
+```
+
+`sideways: false`, `pastViewport: 0`, `belowWcag24: []` and `activeTabVisible: true` on every page. `targets` must be
+non-zero — a page reporting nothing wrong having examined nothing is the failure mode this repository keeps
+rediscovering, so read that number before believing the rest.
+
+**Negative-control it once per session**, because a probe that finds nothing looks identical to a probe that looks at
+nothing. Append a `10px` link and a `900px` div to `document.body`, confirm `belowWcag24`, `pastViewport` and
+`sideways` all light up, then remove them and confirm they go quiet.
+
+Two things that will waste your time otherwise. The stylesheet is cached for an hour, so **restart the server** after
+editing CSS — the `?v=` hash is computed once per process, and a forced reload will not fetch a new file on its own.
+And `boot.test.mjs` spawns on port 8123, so run the demo on a different one.
