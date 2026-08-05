@@ -1,3 +1,5 @@
+import { releaseFutureShifts } from "./admin.mjs";
+
 // Deleting things on purpose. docs/PRIVACY.md admitted that nothing ever deleted anything, ever — which is
 // both a GDPR gap and the reason `notifications` would grow forever with volunteers' names in it.
 //
@@ -107,8 +109,9 @@ export function runRetention(db, { pattern, currentKey, now = new Date() }) {
 // Neither is offered as a default. The admin screen makes you pick, with the consequence written next to it.
 export const ERASURE_MODES = ["anonymise", "remove"];
 
-export function erasePerson(db, personId, { mode, now = new Date() }) {
+export function erasePerson(db, personId, { mode, now = new Date(), today = now.toISOString().slice(0, 10) }) {
   if (!ERASURE_MODES.includes(mode)) return { ok: false, reason: "bad_mode" };
+  let released = 0;
   const person = db.prepare("SELECT id, name FROM people WHERE id=?").get(personId);
   if (!person) return { ok: false, reason: "no_such_person" };
 
@@ -154,6 +157,13 @@ export function erasePerson(db, personId, { mode, now = new Date() }) {
       db.prepare("DELETE FROM person_roles WHERE person_id=?").run(personId);
       db.prepare("DELETE FROM capabilities WHERE person_id=?").run(personId);
       db.prepare("UPDATE invitations SET email='erased', person_id=NULL WHERE person_id=?").run(personId);
+      // And the shifts they had not yet done, for the reason written three lines up about the calendar token: not
+      // leaving the consequence to a filter somewhere else. This row is now inactive, and every consumer of the
+      // roster skips inactive people — so a future shift left on it was covered by nobody while reading as covered
+      // by somebody. "Keep history" means keep the past; a shift next month is not history. `remove` already frees
+      // them, by deleting the row, so the two modes were differing in the future when they should differ only in
+      // what happens to the past.
+      released = releaseFutureShifts(db, personId, today);
     } else {
       db.prepare("UPDATE invitations SET email='erased', person_id=NULL WHERE person_id=?").run(personId);
       db.prepare("DELETE FROM people WHERE id=?").run(personId);
@@ -165,7 +175,7 @@ export function erasePerson(db, personId, { mode, now = new Date() }) {
 
   const after = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id=?").get(personId).n;
   return { ok: true, mode, was: person.name, availabilityRemoved: before.availability,
-           assignmentsBefore: before.assignments, assignmentsStillLinked: after };
+           assignmentsBefore: before.assignments, assignmentsStillLinked: after, released };
 }
 
 // ---- export -------------------------------------------------------------------------------------------

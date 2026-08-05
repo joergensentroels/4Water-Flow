@@ -15,6 +15,9 @@ const OUTCOME = {
   no_such_person: { key: "admin.noSuchPerson", bad: true },
   invalid: { key: "admin.invalidConfig", bad: true },
   erased: { key: "admin.erased" },
+  // Deactivating somebody frees the shifts they had not yet done, and the planner is the one who has to fill
+  // them. Reporting a bare "saved" over fifty released shifts is the silence this project keeps closing.
+  released: { key: "admin.released" },
   erase_bad_mode: { key: "admin.eraseBadMode", bad: true },
   retention_done: { key: "admin.retentionDone" },
   weekly_added: { key: "admin.weeklyAdded" },

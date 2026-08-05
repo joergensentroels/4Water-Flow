@@ -145,10 +145,16 @@ admin to the other person first, then remove it from yourself.
 
 **⚠ Marking somebody inactive does NOT take their access away.** This is the one thing on this page most likely
 to be assumed wrong, so it is measured rather than described: `status='inactive'` is honoured by the eligibility
-rules and the auto-roster — it stops them being offered or assigned anything, which is what it is for — and by
-nothing else. It does not remove a role, and it does not stop them signing in. **An administrator who has stood
-down still has full administrative access until you remove the role explicitly.** When somebody leaves, do both:
-remove the role, then set them inactive.
+rules, the auto-roster, the claim guard and both notification jobs — it stops them being offered or assigned
+anything, which is what it is for — **and it releases the shifts they had not yet done.** The page tells you how
+many. It does not remove a role, and it does not stop them signing in. **An administrator who has stood down still
+has full administrative access until you remove the role explicitly.** When somebody leaves, do both: remove the
+role, then set them inactive.
+
+Releasing the future shifts is not a convenience. Every one of those consumers skips an inactive person, so a shift
+left on one was covered by nobody while the planner grid printed their name beside it — measured at 51 shifts held
+by one deactivated volunteer, none of them opened, none of them reminded, and none of them offered on the exchange.
+A gap that reads as filled is worse than a gap, because nobody chases it. Past shifts stay: they did run those.
 
 Two related things follow from that, and both used to be wrong in the app rather than just undocumented. An
 inactive admin is not counted as a spare when the app decides whether removing an admin would lock the

@@ -70,6 +70,13 @@ const JUSTIFIED = {
   "outbox.noWebhook":
     "Scoped to rows still marked not-sent. It must NOT claim anything about the whole page: with history, or " +
     "after a webhook is removed, 'sent' rows are visible in the list directly beneath this banner.",
+  "admin.eraseHint":
+    "Both modes do release future shifts: anonymise calls releaseFutureShifts (admin.mjs), and remove deletes " +
+    "the person row, which frees every assignment that pointed at it. 'Not yet done' is date >= today, so past " +
+    "assignments survive anonymisation — which is what makes 'keeps who ran what in the past' true, and " +
+    "'past slots read as unfilled too' true of remove alone. The sentence used to describe only the effect on " +
+    "past slots and say nothing about the future shifts either mode frees, which is the half an admin needs " +
+    "before pressing something irreversible.",
 };
 
 test("every string that explains a cause is justified, and no new one slips in unexplained", () => {

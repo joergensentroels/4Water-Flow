@@ -458,7 +458,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       flash: adminFlash(t, query.get("r"), { message: query.get("m") ?? "", who: query.get("who") ?? "",
                                              mode: query.get("mode") ?? "", notifications: query.get("notifications") ?? 0,
                                              invitations: query.get("invitations") ?? 0,
-                                             seasons: query.get("seasons") ?? 0 }),
+                                             seasons: query.get("seasons") ?? 0, n: query.get("n") ?? 0 }),
     }));
   });
 
@@ -518,7 +518,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/status", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const r = setPersonStatus(db, Number(c.form.personId), String(c.form.status));
+    const r = setPersonStatus(db, Number(c.form.personId), String(c.form.status), { today: today() });
+    // Say how many shifts that freed. Reporting "saved" over fifty released shifts is the silence this project
+    // keeps closing: the planner is the one who has to fill them, and they have no other way to know.
+    if (r.ok && r.released > 0) return redirect(res, `/admin?r=released&n=${r.released}`);
     redirect(res, `/admin?r=${r.ok ? "saved" : r.reason}`);
   });
 
@@ -652,9 +655,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/erase", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const r = erasePerson(db, Number(c.form.personId), { mode: String(c.form.mode ?? "") });
+    const r = erasePerson(db, Number(c.form.personId), { mode: String(c.form.mode ?? ""), today: today() });
     if (!r.ok) return redirect(res, `/admin?r=${r.reason === "bad_mode" ? "erase_bad_mode" : r.reason}`);
-    redirect(res, `/admin?r=erased&who=${encodeURIComponent(r.was)}&mode=${r.mode}`);
+    redirect(res, `/admin?r=erased&who=${encodeURIComponent(r.was)}&mode=${r.mode}&n=${r.released ?? 0}`);
   });
 
   // One person's data as JSON, for an access or portability request. Admin-only here; a volunteer downloads

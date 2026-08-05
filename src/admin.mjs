@@ -88,10 +88,39 @@ export function setCapability(db, personId, activityKey, on) {
   return { ok: true };
 }
 
-export function setPersonStatus(db, personId, status) {
+// Going inactive RELEASES the shifts they had not yet done. The note above about capabilities — "do not give them
+// more of these, not erase the ones they already agreed to" — is right for a capability and wrong here, and this
+// function inherited it from next door. Removing a capability does not say the person is gone. This does, and
+// every consumer of the roster already agrees: eligibility, the claim guard, auto-roster and both notification
+// jobs all filter on status='active'.
+//
+// So a held future shift was covered by nobody and looked covered by somebody. Measured on a season with 51 held:
+// after deactivation they still held all 51, no slot opened, the vagtbørs offered them to nobody, auto-roster
+// could not re-fill them, and the shift reminder found 0 of them due — verified against the same query with the
+// person active again, which found theirs. The planner grid still printed their name beside every one. A gap that
+// reads as filled is worse than a gap, because nobody chases it.
+//
+// PAST assignments stay. That is history, and it is true: they did run those. The count comes back so the caller
+// can say what happened rather than reporting a bare "saved" over fifty released shifts — the same reason
+// `erasePerson` returns its counts.
+export function setPersonStatus(db, personId, status, { today = new Date().toISOString().slice(0, 10) } = {}) {
   if (!["active", "inactive"].includes(status)) return { ok: false, reason: "bad_status" };
   db.prepare("UPDATE people SET status=? WHERE id=?").run(status, personId);
-  return { ok: true };
+  const released = status === "inactive" ? releaseFutureShifts(db, personId, today) : 0;
+  return { ok: true, released };
+}
+
+// Frees the assignments a person holds from `today` onward, leaving earlier ones as the record of what they did.
+// Shared with erasure so the two cannot drift: an anonymised person and a deactivated one are equally gone, and
+// the app should not hold shifts for either.
+// `state` returns to 'confirmed', the neutral default, exactly as discardProposals does — its comment gives the
+// reason: state only carries meaning while somebody occupies the row. Leaving a released row 'proposed' would put
+// it in countProposals' way, and 'open' is not a value the CHECK constraint allows.
+export function releaseFutureShifts(db, personId, today) {
+  return db.prepare(`UPDATE assignments SET person_id = NULL, state = 'confirmed'
+                      WHERE person_id = :pid
+                        AND session_id IN (SELECT id FROM sessions WHERE date >= :today)`)
+    .run({ pid: personId, today }).changes;
 }
 
 export const invitesWithDetail = (db) =>
