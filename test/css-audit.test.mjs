@@ -57,19 +57,41 @@ export function selectorsIn(text) {
 // space inside `[aria-current="page"]` is not read as a descendant combinator.
 const selfSufficient = (sel) => !/[\s>+~]/.test(sel.replace(/\[[^\]]*\]/g, ""));
 
+// Both the class AND the element carrying it, because those are two different questions and only the second one
+// matters. See the tag-match test below for what the difference cost.
 function classesUsedInMarkup() {
   const used = new Map();
   for (const rel of modulesToCheck().filter((r) => r.startsWith("src/"))) {
     const text = readFileSync(path.join(ROOT, rel), "utf8");
     // Only literal class attributes. A computed one (`class="${x}"`) cannot be resolved here and is not guessed at.
-    for (const m of text.matchAll(/class="([^"$]*)"/g)) {
-      for (const c of m[1].split(/\s+/).filter(Boolean)) {
-        if (!used.has(c)) used.set(c, new Set());
-        used.get(c).add(rel);
+    // `[^>]*?` spans newlines by design: several tags here wrap before their class attribute.
+    for (const m of text.matchAll(/<([a-z][a-z0-9]*)\b[^>]*?class="([^"$]*)"/g)) {
+      for (const c of m[2].split(/\s+/).filter(Boolean)) {
+        if (!used.has(c)) used.set(c, new Map());
+        if (!used.get(c).has(m[1])) used.get(c).set(m[1], new Set());
+        used.get(c).get(m[1]).add(rel);
       }
     }
   }
   return used;
+}
+
+const filesFor = (tags) => [...new Set([...tags.values()].flatMap((s) => [...s]))];
+
+// For each class, which element names may carry it and still be styled. "*" means a selector with no tag qualifier,
+// which matches anything. Only the selector's LAST compound decides what it styles.
+function elementsStyledPerClass(text) {
+  const allowed = new Map();
+  for (const sel of selectorsIn(text)) {
+    const last = sel.replace(/\[[^\]]*\]/g, "").split(/[\s>+~]+/).filter(Boolean).pop();
+    if (!last) continue;
+    const tag = (last.match(/^([a-z][a-z0-9]*)/) ?? [])[1] ?? "*";
+    for (const m of last.matchAll(/\.([A-Za-z][\w-]*)/g)) {
+      if (!allowed.has(m[1])) allowed.set(m[1], new Set());
+      allowed.get(m[1]).add(tag);
+    }
+  }
+  return allowed;
 }
 
 // Classes that are markup or test hooks rather than styling hooks, each with the reason it needs no rule of its own.
@@ -91,12 +113,63 @@ test("every class the markup uses is either styled or declared unstyled with a r
   const unaccounted = [...used.keys()].filter((c) => !mentioned.has(c) && !UNSTYLED_ON_PURPOSE.has(c)).sort();
   assert.deepEqual(unaccounted, [],
     `these classes appear in markup and nowhere in app.css, so they render with browser defaults: ` +
-    unaccounted.map((c) => `.${c} (${[...used.get(c)].join(", ")})`).join("; ") +
+    unaccounted.map((c) => `.${c} (${filesFor(used.get(c)).join(", ")})`).join("; ") +
     `. Either style them or add them to UNSTYLED_ON_PURPOSE with the reason`);
 
   // The other direction, so an exception cannot outlive the markup that justified it.
   const stale = [...UNSTYLED_ON_PURPOSE.keys()].filter((c) => !used.has(c));
   assert.deepEqual(stale, [], `declared unstyled but no longer used in any markup — remove the entry: ${stale}`);
+});
+
+// The stronger form of the test above, and the reason it is a separate one: "is this class mentioned somewhere in the
+// stylesheet" is not the question. `.inline` was mentioned — twice, as `label.inline` — while notes.mjs put it on a
+// `<form>`, where no rule could reach it. The delete button under every note therefore kept the global
+// `width: 100%` and rendered 343x48: a destructive per-item action, marked `.secondary`, sized like the primary one.
+// The class name was in the file and the element was not styled, which the check above cannot tell apart.
+test("every class is styled on the element that actually carries it, not merely mentioned", () => {
+  const used = classesUsedInMarkup();
+  const allowed = elementsStyledPerClass(css());
+  assert.ok(allowed.get("card")?.size > 0, "control: no element found for `.card`, so the selector parse is broken");
+  assert.ok(allowed.get("inline")?.has("label"),
+    "control: `.inline` should be recorded as styled on `label` — if not, the tag qualifier is not being read");
+
+  const mismatched = [];
+  for (const [cls, tags] of used) {
+    const styledOn = allowed.get(cls);
+    // Absent from `allowed` means either no rule at all (the previous test's business) or the class appears ONLY as
+    // an ancestor qualifier, like `.chiprow` in `.chiprow .chip`. The second is legitimate and deliberate: such a
+    // class is a hook that makes a descendant rule apply, and it is doing its job while carrying no declarations of
+    // its own. Skipping both here is correct rather than an oversight.
+    if (!styledOn || UNSTYLED_ON_PURPOSE.has(cls)) continue;
+    if (styledOn.has("*")) continue;                            // an unqualified selector matches any element
+    for (const [tag, files] of tags) {
+      if (styledOn.has(tag)) continue;
+      mismatched.push(`<${tag} class="${cls}"> in ${[...files].join(", ")} — app.css only styles ` +
+        `${[...styledOn].map((t) => `${t}.${cls}`).join(", ")}`);
+    }
+  }
+  assert.deepEqual(mismatched, [],
+    `these elements carry a class whose every rule is qualified with a DIFFERENT element, so they are unstyled ` +
+    `while looking styled: ${mismatched.join(" | ")}. Either drop the tag qualifier from the rule or add one for ` +
+    `this element`);
+});
+
+test("the tag-qualifier reader distinguishes label.x from form.x, and treats a bare .x as matching anything", () => {
+  const sample = `label.thing { color: red } form.other button { width: auto } .anywhere { margin: 0 }
+    nav.tabs a.deep { color: blue } @media (min-width: 40rem) { section.inmedia { padding: 0 } }`;
+  const allowed = elementsStyledPerClass(sample);
+  assert.deepEqual([...allowed.get("thing")], ["label"], "a tag-qualified class was not tied to its element");
+  assert.deepEqual([...allowed.get("anywhere")], ["*"], "an unqualified class must be recorded as matching anything");
+  assert.deepEqual([...allowed.get("deep")], ["a"],
+    "only the LAST compound decides what a selector styles — `nav.tabs a.deep` styles an <a>, not a <nav>");
+  assert.equal(allowed.has("tabs"), false,
+    "`.tabs` is an ancestor in that selector, not the styled element, so it must not be credited here");
+  assert.deepEqual([...allowed.get("inmedia")], ["section"], "a rule inside @media was missed");
+  // And the failure it exists to catch: a class styled for one element, used on another. `form.other button` styles
+  // the BUTTON, so `.other` must not appear here at all — crediting it to <form> would hide exactly the notes.mjs
+  // defect. (`.get` returning undefined rather than an empty set is what the first version of this line got wrong.)
+  assert.equal(allowed.has("other"), false,
+    "`.other` is only an ancestor qualifier in that selector, so it styles no element and must not be credited");
 });
 
 test("every form control has a rule that does not depend on an ancestor", () => {

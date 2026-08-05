@@ -305,6 +305,18 @@ label.inline { display: inline-flex; align-items: center; gap: .4rem; width: aut
   margin: .2rem .6rem .2rem 0; color: var(--fg); font-size: .95rem; }
 label.inline input { display: inline-block; width: auto; min-height: 0; margin: 0; }
 
+/* `.inline` IS ALSO USED ON A FORM, and every rule for it above says `label`. The delete form under each note in
+   notes.mjs carries class="inline" — the author's word for "this should be compact" — and matched nothing, so its
+   button kept the global `width: 100%` and measured 343x48. A destructive per-item action, styled `.secondary` and
+   sized like the primary one: the widest thing under every note was Delete.
+   Found by asking a stricter question than "is this class mentioned in the stylesheet". It was: `label.inline`
+   mentions it. The question that matters is whether any selector can MATCH THE ELEMENT CARRYING IT, and
+   test/css-audit.test.mjs now asks that instead — `form.inline` was the only answer in the whole app, which is why
+   this is a three-line rule and not a refactor.
+   Height stays at --tap from the global button rule; only the width becomes content-sized. */
+form.inline { display: inline-flex; }
+form.inline button { width: auto; min-width: 4rem; padding: 0 .8rem; font-size: .9rem; }
+
 /* A LINK ALONE IN A HINT PARAGRAPH IS A TARGET, not prose, and this is the third audit the same element has walked
    through untouched. `p.hint > a` is how the per-volunteer "Download data" export and the season CSV are rendered:
    twelve of the first, measured 114x22, and the second at 291x22 — both under the 24x24 floor.
