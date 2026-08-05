@@ -7,8 +7,16 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 395 tests green** — and, as of the AB increment, green on an actual `git clone`
-rather than only in the working copy where they were written.
+Status: **✅ A–AH complete plus the commits since, 395 tests green** — and green in a fresh `git clone` of the
+current commit, not only in the working copy where the tests were written.
+
+That last part is checked rather than assumed, because it has been false before: three tests once read a file
+`.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent
+run of new test files, one of which reads `.env.example`, `compose.yml`, the `Dockerfile` and `.github/workflows` —
+any of which a clone could have been missing. **And the clone run was itself controlled**: `ROOT` was confirmed to
+resolve inside the clone, and a false claim planted in the clone's `README.md` failed the clone's suite while the
+original stayed clean. Without that, a clone whose tests silently read the original would report a green run that
+means nothing.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
 deployment that could not have worked, and why is written down there rather than left for somebody to rediscover.
