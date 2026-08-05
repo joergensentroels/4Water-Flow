@@ -342,6 +342,10 @@ test("makeT picks the singular at exactly one, in the reader's own language", ()
 // English word "activity" and `holidays.country` as "holidays", and the check demands a Danish rendering of
 // something that was never prose — which is exactly what the first version of this did, on five keys.
 const GLOSSARY = {
+  // The ACTIVE ROSTER: whether the app will assign anything to somebody. Crossed the eight-mention threshold
+  // when the home page started telling a stood-down volunteer so, which is what made the glossary ask about it.
+  active: ["aktiv"],
+  inactive: ["aktiv", "pause"],
   shift: ["vagt"],
   shifts: ["vagt"],
   slot: ["vagt", "plads", "tidsrum"],

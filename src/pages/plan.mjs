@@ -17,8 +17,25 @@ function byDate(rows) {
 
 const slotLine = (t, r) => html`${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}`;
 
-export function renderHome({ t, session, roles, who, mine, score, flash }) {
+// `status` is here because the page used to decide "active" from the SCORE alone, and the two are different facts.
+//
+// Reproduced before fixing: a volunteer with 17 past shifts this season is stood down mid-season. The admin action
+// releases their 32 FUTURE shifts and deliberately keeps the past ones as the record of what they did — so the score
+// stays at 17, and this card said **"Active volunteer"** while every operational path treated them as gone: no
+// availability nudge, no slots on the board, no calendar feed, excluded from the auto-roster. Every statement was
+// true on its own (the score is 17, 17 > 0, the label reflects the score); composed, the page told somebody the
+// opposite of what the system believed about them.
+//
+// The score claim is now conditional on the status, and — the more useful half — a stood-down volunteer is TOLD.
+// Before this they got no indication at all: their upcoming list simply emptied, the nudges stopped, and the page
+// called them active. The only reading available to them was that the app was broken.
+export function renderHome({ t, session, roles, who, mine, score, status = "active", flash }) {
+  const onRoster = status === "active";
   const body = html`
+    ${onRoster ? "" : html`<div class="flash bad">
+      <b>${t("home.standDown")}</b><br><small>${t("home.standDownWhy")}</small>
+    </div>`}
+
     <h2>${t("home.mine")}</h2>
     ${mine.length === 0
       ? html`<p class="empty">${t("home.mineEmpty")}</p>`
@@ -30,7 +47,7 @@ export function renderHome({ t, session, roles, who, mine, score, flash }) {
 
     <div class="card">
       <b>${score}</b> — ${t("score.label")}
-      <br><small>${score > 0 ? t("score.active") : t("score.inactive")}</small>
+      <br><small>${onRoster && score > 0 ? t("score.active") : t("score.inactive")}</small>
     </div>
 
     <p><a class="btn" href="/availability">${t("nav.availability")}</a></p>

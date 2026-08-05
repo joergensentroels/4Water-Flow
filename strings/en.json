@@ -380,5 +380,9 @@
   "plan.notes": "{n} notes",
   "plan.notes.one": "1 note",
   "plan.openSession": "Details",
-  "privacy.notes": "Volunteers can write short notes on a shift — what to bring, running late. Everybody signed in can read them, nobody can edit anybody’s, and you can delete your own. If your details are erased, your notes go with them; a note somebody else wrote that mentions you cannot be found automatically, so ask an administrator."
+  "privacy.notes": "Volunteers can write short notes on a shift — what to bring, running late. Everybody signed in can read them, nobody can edit anybody’s, and you can delete your own. If your details are erased, your notes go with them; a note somebody else wrote that mentions you cannot be found automatically, so ask an administrator.",
+  "home.standDown": "You are not on the active roster",
+  "home.standDownWhy": "A planner has stood you down, so nothing new will be assigned to you and the reminders have stopped. Talk to a planner if that is unexpected.",
+  "board.why.not_on_roster": "You are not on the active roster, so nothing can be assigned to you. A planner or an admin can put you back.",
+  "planner.why.nobody_on_roster": "Everybody who could take this is currently stood down. An admin can put one of them back on the roster."
 }

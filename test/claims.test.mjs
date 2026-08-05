@@ -48,6 +48,42 @@ const EXPLAINS = [
 // key -> what makes the claim true. Written to be checkable by a reader, so each names the condition or the
 // code that guarantees it, not just a restatement of the string.
 const JUSTIFIED = {
+  // ---- the roster gate, explained from both ends ----------------------------------------------------------
+  // Both come from the SAME fragment as the rule they explain. GATE.onRoster is one predicate, composed into
+  // eligiblePredicate for the listing and the claim guard, and walked in GATE_ORDER by boardEmptyReason and
+  // slotEmptyReason to find the gate that empties the set. So each string is returned only when that gate is the
+  // binding one and every earlier gate passed — the same mechanism that licenses the reason family below.
+  //
+  // The remedy each names is checkable too: only POST /admin/status writes people.status, and only an admin may
+  // call it (test/authz-audit.test.mjs enforces the role). Every other gate in GATE_ORDER is either the
+  // volunteer's own to fix or mechanical; this is the only one that is somebody else's decision about them,
+  // which is why neither message tells the reader to fix it themselves.
+  "board.why.not_on_roster":
+    "Returned only when GATE.onRoster is the binding gate in boardEmptyReason's walk, so people.status is not " +
+    "'active'. Only POST /admin/status changes that column and only an admin may call it, which makes " +
+    "\"a planner or an admin can put you back\" the true remedy rather than an encouragement.",
+  "planner.why.nobody_on_roster":
+    "SLOT_REASON_BY_GATE maps the onRoster gate to this code, and slotEmptyReason returns it only when relaxing " +
+    "that gate is what makes the candidate set non-empty — every otherwise-eligible person is stood down. " +
+    "Reactivating one is an admin action, which is what the string tells the planner.",
+
+  // ---- what a stood-down volunteer is told ---------------------------------------------------------------
+  // Asserts three consequences, and each has a named mechanism rather than an intention:
+  //   "nothing new will be assigned"  -- the auto-roster and the board both filter on status = active
+  //                                      (candidateIds and ELIGIBLE_OPEN_IDS in src/queries.mjs), so an inactive
+  //                                      person is not a candidate and cannot claim; test/leaving.test.mjs drives it.
+  //   "the reminders have stopped"    -- src/jobs.mjs selects recipients with status = active for both the
+  //                                      availability nudge and the shift reminder; test/notify.test.mjs covers it.
+  //   the shifts they held are gone   -- setPersonStatus calls releaseFutureShifts on inactive, which is the same
+  //                                      helper erasure uses, so the two cannot drift. Measured: standing down a
+  //                                      volunteer mid-season released 32 future shifts and kept 17 past ones.
+  // The string is shown only when status !== "active" (renderHome takes the status; the route reads it from
+  // people.status), so it cannot appear beside an active roster entry.
+  "home.standDownWhy":
+    "Every consequence it names is enforced by a status = active filter: candidateIds and ELIGIBLE_OPEN_IDS for " +
+    "assignment and claiming, src/jobs.mjs for both notification kinds, and setPersonStatus -> releaseFutureShifts " +
+    "for the shifts already held. The page shows it only when people.status is not active.",
+
   // ---- the reason families -------------------------------------------------------------------------------
   // Two of these fifteen were justified and thirteen were not, and the reason is worth keeping: whether the guard
   // below noticed a string depended on whether its WORDING matched one of ten hand-kept regexes. "nobody has" and

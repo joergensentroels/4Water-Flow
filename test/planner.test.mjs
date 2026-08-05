@@ -90,7 +90,8 @@ test("a planner may not assign someone incapable of the activity, or an inactive
   assert.deepEqual(assignSlot(w.db, id, w.people[1]), { ok: false, reason: "not_capable" });
 
   w.db.prepare("UPDATE people SET status='inactive' WHERE id=?").run(w.people[2]);
-  assert.deepEqual(assignSlot(w.db, id, w.people[2]), { ok: false, reason: "no_such_person" });
+  // Was `no_such_person` until the onRoster gate split the two facts: never existed vs stood down.
+  assert.deepEqual(assignSlot(w.db, id, w.people[2]), { ok: false, reason: "not_on_roster" });
   assert.deepEqual(assignSlot(w.db, 999999, w.people[1]), { ok: false, reason: "no_such_slot" });
 }));
 

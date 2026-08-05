@@ -288,6 +288,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       t, session: c.session, roles: c.roles, who: c.who,
       mine: sid ? myUpcoming(db, c.personId, sid, today()) : [],
       score: sid ? score(db, c.personId, sid) : 0,
+      // Not derivable from the score: a stood-down volunteer keeps the shifts they already did, so the score
+      // stays positive while the roster no longer holds them. See renderHome.
+      status: db.prepare("SELECT status FROM people WHERE id = ?").get(c.personId)?.status ?? "active",
     }));
   });
 

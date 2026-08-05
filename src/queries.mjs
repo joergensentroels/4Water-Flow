@@ -23,6 +23,19 @@
 export const GATE = {
   open: `a.person_id IS NULL`,
 
+  // ON THE ROSTER AT ALL. This gate was missing, and its absence let a stood-down volunteer take work straight back.
+  //
+  // Measured before fixing: an admin sets somebody inactive, which releases their future shifts by design. Their
+  // availability answers survive — only assignments are released — and nothing in this predicate looked at status,
+  // so the shift exchange then offered that person 172 open slots and the claim SUCCEEDED. The one path a volunteer
+  // drives themselves was the one path the stand-down did not reach.
+  //
+  // It looked covered because the planner's side is covered: eligiblePeopleFor, slotEmptyReason, rosterReview and
+  // workloadSpread each filter status = active in their own WHERE clause, so a planner could not assign an inactive
+  // person and the review screens left them out. Four call sites enforcing a rule the shared predicate did not have
+  // is exactly the shape the comment above this object warns about, which is why the gate belongs here.
+  onRoster: (person) => `(SELECT status FROM people WHERE id = ${person}) = 'active'`,
+
   capable: (person) => `EXISTS (SELECT 1 FROM capabilities c
                                  WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)`,
 
@@ -55,7 +68,7 @@ export const GATE = {
 
 // The gates in the order a volunteer can act on them: what an admin controls, then what they control
 // themselves, then the mechanical one. boardEmptyReason walks this list and reports the first that empties.
-const GATE_ORDER = ["capable", "role", "available", "free"];
+const GATE_ORDER = ["onRoster", "capable", "role", "available", "free"];
 
 // The reason codes, named once and exported.
 //
@@ -69,6 +82,7 @@ const GATE_ORDER = ["capable", "role", "available", "free"];
 // drift is not expressible.
 export const BOARD_EMPTY_REASONS = {
   NONE_OPEN: "none_open",
+  NOT_ON_ROSTER: "not_on_roster",
   NO_CAPABILITIES: "no_capabilities",
   NOTHING_IN_YOURS: "nothing_in_your_activities",
   NO_ROLE_STATED: "no_role_stated",
@@ -80,6 +94,7 @@ export const BOARD_EMPTY_REASONS = {
 
 export const SLOT_EMPTY_REASONS = {
   NO_VOLUNTEERS: "no_volunteers",
+  NOBODY_ON_ROSTER: "nobody_on_roster",
   NOBODY_CAPABLE: "nobody_capable",
   NOBODY_IN_THAT_ROLE: "nobody_in_that_role",
   NOBODY_FREE: "nobody_free",
@@ -89,6 +104,7 @@ export const SLOT_EMPTY_REASONS = {
 // Which reason each gate produces on the planner's side. Keyed by GATE_ORDER, so a new gate without a reason is
 // `undefined` here rather than a silently missing explanation — and the test below asserts the mapping is total.
 export const SLOT_REASON_BY_GATE = {
+  onRoster: SLOT_EMPTY_REASONS.NOBODY_ON_ROSTER,   // everyone able is stood down; bring one back
   capable: SLOT_EMPTY_REASONS.NOBODY_CAPABLE,        // grant somebody the capability
   role: SLOT_EMPTY_REASONS.NOBODY_IN_THAT_ROLE,      // recruit, or ask a both-role teacher — availability is fine
   available: SLOT_EMPTY_REASONS.NOBODY_FREE,         // the only case where the old message was true
@@ -118,6 +134,10 @@ for (const gate of GATE_ORDER) {
 // silently: add a sixth gate and the app refuses to load until somebody has decided what a planner's direct
 // write should do about it. That decision is the step that was skipped.
 export const PLANNER_WRITE_HONOURS = {
+  onRoster: "yes, and it already did before this gate existed — but under the WRONG NAME. The check read " +
+            "`!person || person.status !== 'active'` and reported `no_such_person`, conflating somebody who was " +
+            "never here with somebody an admin stood down. One is fixed by an admin in a click; the other means " +
+            "the name is wrong. Split, so a planner is told which. Refuses with `not_on_roster`.",
   open: "NO, deliberately — a planner may reassign an occupied slot. `expectPersonId` is the guard instead, so " +
         "overwriting somebody is only possible if the planner was looking at that somebody.",
   capable: "yes — a direct query, refusing with `not_capable`.",
@@ -327,6 +347,10 @@ export function boardEmptyReason(db, personId, seasonId, fromDate = "0000-00-00"
 
     // This gate is the one that empties it. Some have two distinct causes with two different remedies, and
     // conflating them would recreate the uselessness this function exists to remove.
+    // Their own status is the cause, and unlike every other gate here it is not theirs to fix — so the message
+    // has to say who can. Checked FIRST because it makes every later gate moot: a stood-down volunteer is not
+    // "missing a capability", they are not on the roster.
+    if (gate === "onRoster") return { reason: BOARD_EMPTY_REASONS.NOT_ON_ROSTER };
     if (gate === "capable") {
       const mine = db.prepare("SELECT COUNT(*) n FROM capabilities WHERE person_id=?").get(personId).n;
       return { reason: mine === 0 ? BOARD_EMPTY_REASONS.NO_CAPABILITIES : BOARD_EMPTY_REASONS.NOTHING_IN_YOURS };
@@ -484,7 +508,10 @@ export function assignSlot(db, assignmentId, personId, { expectPersonId = null }
   if (current !== (expectPersonId ?? null)) return { ok: false, reason: "changed", current };
 
   const person = db.prepare("SELECT id, status FROM people WHERE id = ?").get(personId);
-  if (!person || person.status !== "active") return { ok: false, reason: "no_such_person" };
+  if (!person) return { ok: false, reason: "no_such_person" };
+  // Stood down is not the same fact as never existed, and a planner staring at an unfillable slot needs to know
+  // which one it is: one is fixed by an admin in a click, the other means the name is wrong.
+  if (person.status !== "active") return { ok: false, reason: "not_on_roster" };
 
   const capable = db.prepare("SELECT 1 FROM capabilities WHERE person_id=? AND activity_id=?").get(personId, row.activity_id);
   if (!capable) return { ok: false, reason: "not_capable" };

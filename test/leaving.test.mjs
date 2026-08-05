@@ -7,10 +7,23 @@
 // still held all 51, no slot opened, the reminder job found 0 of theirs due (checked against the same query with
 // them active, which found one), and the planner grid printed their name beside every one. A gap that reads as
 // filled is worse than a gap, because nobody chases it.
+//
+// ⚠ THE SENTENCE ABOVE WAS FALSE ABOUT TWO OF THOSE FIVE CONSUMERS for most of this file's life, and it is left
+// standing because it is true NOW. Eligibility and the claim guard did not filter on status: `GATE` held `open`,
+// `capable`, `role`, `available` and `free` and nothing about the roster, so `eligiblePredicate` — the single rule
+// the board listing and `claimSlot` share — never looked at it. It appeared covered because the planner's side is:
+// `eligiblePeopleFor`, `slotEmptyReason`, `rosterReview` and `workloadSpread` each filter status in their own WHERE
+// clause, so a planner could not assign an inactive person and no review screen listed one.
+//
+// Measured: stand somebody down, then sign in as them. The shift exchange offered 172 open slots and the claim
+// SUCCEEDED. The deactivation released their future shifts and then let them take new ones straight back — and the
+// only path that allowed it was the one path the volunteer drives themselves. Fixed by adding `GATE.onRoster`, which
+// every caller composes rather than repeats, and the last test in this file is the regression.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, csrfFromCookie, makeAvailableEverywhere } from "../tools/testkit.mjs";
 import { autoRoster } from "../src/roster.mjs";
+import { boardEmptyReason, assignSlot } from "../src/queries.mjs";
 
 // A world where one volunteer really is holding future shifts, so there is something to release. Without this the
 // assertions below all pass over an empty set — the shape of check that cannot fail.
@@ -117,3 +130,58 @@ test("reactivating does not take the shifts back — they belong to whoever clai
     "coming back is not a release, so it must not claim to have freed anything");
   assert.equal(w.future(w.leaver), 0, `the ${held} shifts went to the exchange and stay there`);
 }));
+
+// THE REGRESSION for the gap named at the top of this file: a stood-down volunteer could take work straight back.
+//
+// The stand-down releases their future shifts, and their availability answers survive it — only assignments are
+// released. So with no roster gate in the shared predicate, every one of those freed slots was immediately offered
+// back to the person it had just been taken from, and claiming worked. Measured at 172 slots offered before the fix.
+//
+// Both directions are asserted, because "the board is empty" is also what a broken board looks like: an ACTIVE
+// volunteer in the same fixture must still be offered slots and must still be able to claim one. Without that half,
+// deleting the whole eligibility predicate would pass this test.
+test("a stood-down volunteer is offered nothing and can claim nothing, while an active one still can",
+  withLeaver({}, async (w) => {
+    const stand = (id, status) => w.post("/admin/status", w.admin,
+      new URLSearchParams({ csrf: csrfFromCookie(w.admin), personId: String(id), status }));
+
+    await stand(w.leaver, "inactive");
+    const gone = await w.signIn(w.leaver);
+    const theirBoard = await (await w.get("/board", gone)).text();
+    const offered = (theirBoard.match(/\/claim"/g) ?? []).length;
+    assert.equal(offered, 0, `an inactive volunteer was offered ${offered} slots to take back`);
+
+    // And told why, rather than shown a bare empty page — the reason comes from the same gate that emptied it.
+    assert.equal(boardEmptyReason(w.db, w.leaver, w.seasonId, w.today).reason, "not_on_roster");
+
+    // The claim guard, not just the listing. A volunteer who kept an old slot id must still be refused, because the
+    // listing and the guard are two different consumers of the predicate and only one of them renders.
+    const slot = w.db.prepare("SELECT id FROM assignments WHERE person_id IS NULL LIMIT 1").get()?.id;
+    assert.ok(slot, "the fixture must leave an open slot, or the claim below tests nothing");
+    const refused = await w.post(`/board/${slot}/claim`, gone,
+      new URLSearchParams({ csrf: csrfFromCookie(gone) }));
+    assert.equal(new URL(refused.headers.get("location"), "http://x").searchParams.get("r"), "not_eligible");
+    assert.equal(w.db.prepare("SELECT person_id FROM assignments WHERE id=?").get(slot).person_id, null,
+      "the slot must still be open — an inactive volunteer took it");
+
+    // A planner cannot do it on their behalf either, and is told which fact stopped them.
+    assert.deepEqual(assignSlot(w.db, slot, w.leaver), { ok: false, reason: "not_on_roster" });
+
+    // THE CONTROL, isolating exactly one variable: put the SAME person back on the roster and the SAME slot becomes
+    // claimable. Their capabilities, their availability, the slot and the clock are all untouched, so a pass here
+    // cannot be explained by anything except the status.
+    //
+    // The first version used a different, still-active volunteer and FAILED — the fixture auto-rosters the whole
+    // season, so every other volunteer is already booked at that hour and the `free` gate excludes them from the
+    // slots this one just released. That control was measuring the fixture rather than the rule, and it said so by
+    // failing rather than by passing, which is the only reason it was noticed.
+    await stand(w.leaver, "active");
+    const back = await w.signIn(w.leaver);
+    const backBoard = await (await w.get("/board", back)).text();
+    assert.ok((backBoard.match(/\/claim"/g) ?? []).length > 0,
+      "back on the roster, the same volunteer must be offered slots again — or the emptiness above proves nothing");
+    const took = await w.post(`/board/${slot}/claim`, back, new URLSearchParams({ csrf: csrfFromCookie(back) }));
+    assert.equal(new URL(took.headers.get("location"), "http://x").searchParams.get("r"), "claimed",
+      "the same claim on the same slot must now succeed, or the refusal above was the guard refusing everyone");
+    assert.equal(w.db.prepare("SELECT person_id FROM assignments WHERE id=?").get(slot).person_id, w.leaver);
+  }));

@@ -380,5 +380,9 @@
   "plan.notes": "{n} noter",
   "plan.notes.one": "1 note",
   "plan.openSession": "Detaljer",
-  "privacy.notes": "Frivillige kan skrive korte noter på en vagt — hvad man skal huske, om man bliver forsinket. Alle, der er logget ind, kan læse dem, ingen kan rette i andres, og du kan slette dine egne. Bliver dine oplysninger slettet, ryger dine noter med; en note, en anden har skrevet, som nævner dig, kan ikke findes automatisk — så skriv til en administrator."
+  "privacy.notes": "Frivillige kan skrive korte noter på en vagt — hvad man skal huske, om man bliver forsinket. Alle, der er logget ind, kan læse dem, ingen kan rette i andres, og du kan slette dine egne. Bliver dine oplysninger slettet, ryger dine noter med; en note, en anden har skrevet, som nævner dig, kan ikke findes automatisk — så skriv til en administrator.",
+  "home.standDown": "Du er ikke på den aktive liste",
+  "home.standDownWhy": "En planlægger har sat dig på pause, så du får ikke tildelt nye vagter, og påmindelserne er stoppet. Tal med en planlægger, hvis det ikke er meningen.",
+  "board.why.not_on_roster": "Du er ikke på den aktive liste, så du kan ikke få tildelt vagter. En planlægger eller en administrator kan sætte dig tilbage.",
+  "planner.why.nobody_on_roster": "Alle, der kunne tage denne, er sat på pause lige nu. En administrator kan sætte en af dem tilbage på listen."
 }
