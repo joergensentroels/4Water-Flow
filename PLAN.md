@@ -4,7 +4,8 @@ Planned as ten increments; it ran to thirty-four (A–Z, then AA–AH), and the 
 after AH is one defect per commit, so read `git log` for it rather than counting rows in the table below and
 concluding the project ended at AH. **Each one ends with `npm test` green and is independently
 shippable**; the app is usable by volunteers from D onward even while planners are still on the spreadsheet.
-Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
+Order follows §5 of the discovery document ("4water scheduling — spec", not in this repository — see README),
+which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
 **Not only defects any more.** 4water answered the questions from the spec read-back, and the answers were feature
@@ -76,7 +77,7 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 ## Four places this app differs from the spec — three deliberately, one only noticed later
 
 Every one of the tests verifies the implementation against itself. The spec is outside that loop, so a requirement
-quietly dropped is invisible to all of them. Read back against `../4water-scheduling-spec.md` §2, three sentences
+quietly dropped is invisible to all of them. Read back against the discovery document's §2, three sentences
 in the spec are not true of the software. All three were reasoned about at the time and two of them only in a code
 comment, which is not where somebody holding the spec will look.
 

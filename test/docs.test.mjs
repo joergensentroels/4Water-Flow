@@ -17,6 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
 
@@ -487,6 +488,45 @@ test("the prose an operator reads outside the documents is also true", () => {
   assert.ok(checked >= 10, `only ${checked} claims extracted from non-document prose — the extractors are not reading it`);
   assert.deepEqual(problems, [],
     `${problems.length} claim(s) outside the documents are not true:\n  ${problems.join("\n  ")}`);
+});
+
+// Every relative path a document names must be a file the REPOSITORY carries.
+//
+// The gate below checks paths prefixed src/ tools/ test/ docs/ config/ strings/ static/ — a list of directories,
+// so anything outside it is invisible. `../4water-scheduling-spec.md` is outside it, and README.md, RUNBOOK.md and
+// PLAN.md pointed at it four times between them. That file is the discovery document: the one thing that says what
+// this software is supposed to DO. It is not tracked here, so on a fresh clone, in the container, or for whoever
+// inherits this, all four references dangle — **referenced four times and shipped zero**.
+//
+// Same shape as the environment collector missing a prefix and the plural collector keyed to {n}: a check keyed to
+// a list of known cases cannot fail for a case outside the list. Keyed to the SHAPE here — a relative path with a
+// file extension — so a reference to anywhere at all is in scope.
+//
+// Resolved against the DOCUMENT's own directory, because docs/PRIVACY.md naming ../RUNBOOK.md is correct and must
+// not be reported. And an extension is required, so `/board/../admin` in prose about the open-redirect fix is not
+// mistaken for a file — which it was, in the first draft of this check.
+test("every relative path the documents name is a file the repository carries", () => {
+  const listed = spawnSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" });
+  const tracked = new Set(String(listed.stdout ?? "").split(/\r?\n/).filter(Boolean)
+    .map((f) => f.split("\\").join("/")));
+  assert.ok(tracked.size > 40, `only ${tracked.size} tracked files — git is unavailable, so this check is blind`);
+  assert.ok(tracked.has("README.md"), "the collector cannot see a file it certainly carries");
+
+  const dangling = [];
+  let checked = 0;
+  for (const doc of DOCS) {
+    const dir = path.dirname(doc);
+    for (const m of read(doc).matchAll(/`((?:\.\.\/)+[\w][\w./-]*\.\w{2,4})`/g)) {
+      checked++;
+      const resolved = path.posix.normalize(path.posix.join(dir === "." ? "" : dir, m[1]));
+      if (!tracked.has(resolved)) dangling.push(`${doc} points at ${m[1]} (${resolved}), which this repository does not carry`);
+    }
+  }
+  assert.ok(checked >= 1, "no relative paths found in any document — the extractor is not reading them");
+  assert.deepEqual(dangling, [],
+    "a reader who clones this cannot follow these. Either commit the file, or say in the text that it is not part " +
+    "of this repository and where to get it — a path that resolves only on the author's machine is worse than no " +
+    "path, because it reads as followable:\n  " + dangling.join("\n  "));
 });
 
 test("every claim the documents make about the code is true", () => {

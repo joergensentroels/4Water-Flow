@@ -412,5 +412,6 @@ What that means in practice:
 - The host and container: 4water Lyon's technical volunteers.
 - The code: this repository. `npm test` runs everything and needs no network, no database and no setup.
 
-Any decision that looks arbitrary is probably explained in `../4water-scheduling-spec.md`, and the build order
+Any decision that looks arbitrary is probably explained in the discovery document ("4water scheduling — spec",
+which is not part of this repository — ask whoever handed this over), and the build order
 in `PLAN.md`.
