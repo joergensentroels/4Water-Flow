@@ -129,6 +129,34 @@ export function validatePattern(p) {
     }
   }
 
+  // How late a shift may be handed back. THE ONLY CONFIG SECTION THIS VALIDATOR DID NOT LOOK AT, and the one
+  // RUNBOOK singles out: "Without a sensible value the shift exchange becomes the no-show channel."
+  //
+  // `patternFromForm` sets it with a bare `Number(form.cutoffDays)`, and the form's only protection is
+  // `type="number" min="0" max="30"` — client side. Measured by posting to /admin/season directly, every one of
+  // these was accepted and written to the file:
+  //
+  //   "abc" -> stored null, effective 0        the cutoff is off, silently
+  //   "-5"  -> stored -5,   effective -5       likewise: handBackSlot only acts when cutoffDays > 0
+  //   "0.5" -> half a day
+  //   "1e9" -> a billion days, so every hand-back is flagged late forever
+  //
+  // Two directions of harm, both quiet. Off means a volunteer drops a shift the same evening and no planner is
+  // told, which is exactly the no-show channel. Enormous means every hand-back screams, which trains planners to
+  // ignore the flag — the same end state by the other road.
+  //
+  // Zero stays legal and means no cutoff: an organisation may decide a hand-back never needs escalating, and that
+  // is their call. What is not their call is storing something that is not a number of days.
+  if (p.board !== undefined) {
+    const b = p.board;
+    if (!b || typeof b !== "object" || Array.isArray(b)) err("board must be an object");
+    if (b.cutoffDays !== undefined) {
+      if (!Number.isInteger(b.cutoffDays) || b.cutoffDays < 0 || b.cutoffDays > 30) {
+        err("board.cutoffDays must be a whole number of days, 0..30 — 0 means a hand-back is never flagged late");
+      }
+    }
+  }
+
   // How far ahead a volunteer is reminded of a shift. Zero is meaningful and allowed — it means same-day only —
   // but a long window is not: reminding somebody three weeks out is noise they will have forgotten by the time
   // it matters, and the point of the message is to catch the shift they had lost track of.

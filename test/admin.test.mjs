@@ -306,6 +306,41 @@ test("a config file broken by hand is reported, not overwritten by what the proc
   writeFileSync(w.patternFile, before, "utf8");
 }));
 
+// `board.cutoffDays` was the only config section validatePattern never looked at, and RUNBOOK singles it out:
+// "Without a sensible value the shift exchange becomes the no-show channel." The form's `min="0" max="30"` is
+// client-side, and `patternFromForm` reads it with a bare `Number(...)`. Measured by posting directly: "abc" stored
+// as null and "-5" stored as -5, both leaving the cutoff OFF, because handBackSlot only acts when it is above
+// zero — so a volunteer could drop a shift the same evening and no planner would be told. "1e9" was accepted too,
+// which flags every hand-back as late forever and trains planners to ignore the flag: the same end state by the
+// other road.
+test("the hand-back cutoff cannot be set to something that is not a number of days", withAdmin({}, async (w) => {
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const season = { seasonKey: w.pattern.season.key, seasonFrom: w.pattern.season.from, seasonTo: w.pattern.season.to };
+  const stored = () => JSON.parse(readFileSync(w.patternFile, "utf8")).board?.cutoffDays;
+
+  // A good value first, so "refused" below is distinguishable from "the route never works".
+  assert.equal(reasonOf(await w.post("/admin/season", admin,
+    new URLSearchParams({ csrf: token, ...season, cutoffDays: "2" }))), "saved");
+  assert.equal(stored(), 2);
+
+  for (const bad of ["abc", "-5", "0.5", "1e9", "999", "Infinity", "2px"]) {
+    const r = await w.post("/admin/season", admin, new URLSearchParams({ csrf: token, ...season, cutoffDays: bad }));
+    assert.equal(reasonOf(r), "invalid", `cutoffDays=${JSON.stringify(bad)} must be refused`);
+    assert.match(new URL(r.headers.get("location"), "http://x").searchParams.get("m") ?? "", /cutoffDays/,
+      "and the message must name the field, so an admin knows which box to fix");
+    assert.equal(stored(), 2, `cutoffDays=${JSON.stringify(bad)} must not have been written`);
+  }
+
+  // Zero remains legal and means no cutoff — an organisation may decide a hand-back never needs escalating, and
+  // refusing that would be this test overreaching into their decision.
+  assert.equal(reasonOf(await w.post("/admin/season", admin,
+    new URLSearchParams({ csrf: token, ...season, cutoffDays: "0" }))), "saved");
+  assert.equal(stored(), 0);
+  assert.equal(reasonOf(await w.post("/admin/season", admin,
+    new URLSearchParams({ csrf: token, ...season, cutoffDays: "30" }))), "saved", "and the documented ceiling");
+}));
+
 test("a weekly slot with no time is refused rather than silently meaning midnight", withAdmin({}, async (w) => {
   const admin = await w.signIn(w.people[0]);
   const { token } = await w.csrfFrom("/admin", admin);
