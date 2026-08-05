@@ -194,6 +194,41 @@ export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities }
   return next;
 }
 
+// ---- public holidays ---------------------------------------------------------------------------------------
+// The planner's opt-back-in, one date at a time, in both directions. By VALUE for the same reason
+// removeWeeklyFromForm is: an index would target the wrong row when two people edit at once, and the wrong row
+// here is somebody's class.
+//
+// Returns `changed` so the route can tell "already in that state" from "done". A toggle reporting success over a
+// no-op is how somebody concludes a button works when it does not.
+export function setClassesAnyway(current, date, on) {
+  const next = structuredClone(current);
+  const list = Array.isArray(next.holidays?.classesAnyway) ? [...next.holidays.classesAnyway] : [];
+  const had = list.includes(date);
+  next.holidays = {
+    ...(next.holidays ?? {}),
+    classesAnyway: on ? (had ? list : [...list, date].sort()) : list.filter((d) => d !== date),
+  };
+  return { pattern: next, changed: on !== had };
+}
+
+// What is on a date, and who is on it. Asked before removing anything: turning a holiday back OFF deletes the
+// sessions that were created for it, and deleting a session takes its assignments — so the route refuses when a
+// person is on one, rather than quietly cancelling on somebody who had agreed to teach.
+export function sessionsOnDate(db, seasonId, date) {
+  const rows = db.prepare(`
+    SELECT s.id, COUNT(a.id) AS slots, SUM(CASE WHEN a.person_id IS NOT NULL THEN 1 ELSE 0 END) AS taken
+      FROM sessions s LEFT JOIN assignments a ON a.session_id = s.id
+     WHERE s.season_id = :sid AND s.date = :date
+     GROUP BY s.id`).all({ sid: seasonId, date });
+  return {
+    sessions: rows.length,
+    slots: rows.reduce((n, r) => n + r.slots, 0),
+    taken: rows.reduce((n, r) => n + (r.taken ?? 0), 0),
+    ids: rows.map((r) => r.id),
+  };
+}
+
 // Removal is by value, not index: an index would silently target the wrong row if two admins edit at once.
 export function removeWeeklyFromForm(current, { dayOfWeek, hour, minute }) {
   const next = structuredClone(current);

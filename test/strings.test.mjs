@@ -8,6 +8,10 @@ import os from "node:os";
 import path from "node:path";
 import { ROOT, loadStrings, loadPattern, makeT } from "../src/config.mjs";
 import { BOARD_EMPTY_REASONS, SLOT_EMPTY_REASONS } from "../src/queries.mjs";
+// 2023 rather than a current year on purpose: it is the last year with Store bededag, so the DK table's
+// year-dependent entry is covered. A table read at 2026 would leave `holiday.prayerDay` unchecked while the
+// app can still show it for an archived season.
+import { COUNTRIES } from "../src/holidays.mjs";
 
 function sourceFiles() {
   const out = [];
@@ -86,6 +90,11 @@ test("every dynamically-built key family is complete in both locales", () => {
     // itself contains a dot. That is why this reads whole action names out of the source instead of splitting keys.
     "audit.action": [...new Set(sourceFiles().flatMap((f) =>
       [...readFileSync(f, "utf8").matchAll(/\blogAudit\(\s*\w+\s*,\s*["']([\w.]+)["']/g)].map((m) => m[1])))],
+    // Every public-holiday name any country table can produce, READ FROM THE TABLES. A holiday with no string
+    // renders "holiday.assumption" on the Administration screen beside a button that deletes or creates real
+    // classes — and adding France was one line of table, which is exactly the kind of change that forgets a
+    // string. `extra` is included because src/holidays.mjs labels a board's own closing day with it.
+    holiday: [...new Set([...Object.values(COUNTRIES).flatMap((f) => f(2023).map(([, key]) => key)), "extra"])],
   };
   for (const f of families) assert.ok(f in expected, `t(\`${f}.\${...}\`) is used but this test does not know what the family should contain`);
 
@@ -211,8 +220,20 @@ test("the two locales agree about numbers, paths and environment variables", () 
   assert.notDeepEqual(idents("set FOURWATER_SECRET"), idents("sæt FOURWATER_SECRETS"), "the variable extractor is blind");
   assert.deepEqual(numbers("after 2 seasons"), numbers("efter 2 sæsoner"), "the same number in two languages must not be reported");
 
+  // The one family where a number is part of a NAME rather than a claim about the app. Danish names most of the
+  // Easter and Christmas feasts by ordinal — "2. påskedag" is Easter Monday, "1. juledag" is Christmas Day — so
+  // this check reported five holiday names as locale disagreements. They are not: the number is the word.
+  //
+  // Exempted by PREFIX and no wider, because the check's stated purpose is catching a translation that is "wrong
+  // about the app", and a retention period or a port number in the wrong locale is exactly that. The assertion
+  // below keeps the exemption honest: it must not swallow a genuine mismatch inside the family.
+  const nameOnly = (key) => key.startsWith("holiday.");
+  assert.notDeepEqual(numbers("kept for 2 seasons"), numbers("beholdes i 3 sæsoner"),
+    "the exemption must be by key prefix only — the extractor still has to work on holiday-adjacent strings");
+
   for (const key of Object.keys(en)) {
     if (typeof en[key] !== "string" || typeof da[key] !== "string") continue;
+    if (nameOnly(key)) continue;
     for (const [what, fn] of [["numbers", numbers], ["paths", paths], ["variables", idents]]) {
       assert.deepEqual(fn(da[key]), fn(en[key]),
         `"${key}" states different ${what} in the two locales — one of them is wrong about the app:\n` +

@@ -151,5 +151,11 @@
     "_comment": "Set by the board — see docs/PRIVACY.md. seasons: how many seasons of history to keep (the current one is never removed). notificationDays: how long to keep sent messages, which contain names.",
     "seasons": 2,
     "notificationDays": 90
+  },
+  "holidays": {
+    "_comment": "No sessions are created on a public holiday. country is ISO 3166-1 alpha-2 (DK, FR); an unrecognised one suppresses nothing rather than guessing. extra is for days 4water is closed but the country is not — 24 and 31 December are here as a suggestion and the board can remove them; Grundlovsdag (5 June) is deliberately NOT, because an evening class can run. classesAnyway is the planner's opt-back-in, one date at a time, from the Administration screen.",
+    "country": "DK",
+    "extra": ["2026-12-24", "2026-12-31"],
+    "classesAnyway": []
   }
 }

@@ -2,6 +2,7 @@
 // clock time. All of it arrives via `pattern`, so seeding another department means handing in another file.
 import { migrate } from "./db.mjs";
 import { loadPattern, roleSlotsFor } from "./config.mjs";
+import { holidayConfig, suppressed } from "./holidays.mjs";
 
 // Walk the season day by day in UTC. getUTCDay() rather than getDay() on purpose — an ISO date string parses
 // as UTC midnight, so the local-time accessor can report the previous day west of Greenwich and silently
@@ -55,8 +56,16 @@ export function seedStructure(db, pattern, { fromDate = null } = {}) {
     const findAct = db.prepare("SELECT id FROM activities WHERE key=?");
     const insSession = db.prepare("INSERT OR IGNORE INTO sessions (season_id,date,timeslot_id,activity_id) VALUES (?,?,?,?)");
     let sessions = 0;
+    let skipped = 0;
+    // Public holidays, suppressed by DEFAULT. Nothing here decides which dates those are — see src/holidays.mjs
+    // for the tables and for why suppression is the default direction. A planner who says classes run anyway adds
+    // the date to `holidays.classesAnyway`, and this loop then treats it as an ordinary date.
+    //
+    // Read once, outside the loop: `suppressed()` is called for every day of a six-month season.
+    const hol = holidayConfig(pattern);
     const first = fromDate && fromDate > pattern.season.from ? fromDate : pattern.season.from;
     for (const { iso, dow } of datesIn(first, pattern.season.to)) {
+      if (suppressed(iso, hol)) { skipped++; continue; }
       for (const w of pattern.weekly) {
         if (w.dayOfWeek !== dow) continue;
         const slotId = findSlot.get(w.dayOfWeek, w.hour, w.minute ?? 0).id;
@@ -66,7 +75,10 @@ export function seedStructure(db, pattern, { fromDate = null } = {}) {
         }
       }
     }
-    return { seasonId, sessions };
+    // `skipped` counts DAYS not created, and it is reported rather than silent for the same reason every other
+    // deletion in this project reports: a suppression nobody can see is indistinguishable from a seeding bug, and
+    // this one removes classes from the plan.
+    return { seasonId, sessions, skipped };
   };
   // One transaction: a half-seeded season is worse than an unseeded one, because it looks populated.
   db.exec("BEGIN");
@@ -87,11 +99,11 @@ export function seedStructure(db, pattern, { fromDate = null } = {}) {
 // `sessions > 0` and never `assignments > 0` — structure, not usability. So the fix is not another reminder to
 // call both: it is one function, so that calling half of it is no longer expressible.
 export function seedSeason(db, pattern, { fromDate = null } = {}) {
-  const { seasonId, sessions } = seedStructure(db, pattern, { fromDate });
+  const { seasonId, sessions, skipped } = seedStructure(db, pattern, { fromDate });
   // Not scoped by fromDate on purpose: any session in this season that lacks its slots gets them, which also
   // repairs a database seeded by a version that created sessions and no assignments.
   const slots = openEverySession(db, seasonId, pattern);
-  return { seasonId, sessions, slots };
+  return { seasonId, sessions, slots, skipped };
 }
 
 // Demo people + capabilities + one empty assignment per session, so there is an actual vagtbørs to look at.

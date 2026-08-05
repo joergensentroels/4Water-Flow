@@ -19,12 +19,14 @@ import { autoRoster, lockInProposals, discardProposals, countProposals, rosterRe
 import { renderAdmin, adminFlash } from "./pages/admin.mjs";
 import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapability, setPersonStatus,
          savePattern, patternFromForm, addActivityToForm, proposeNextSeason,
-         addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "./admin.mjs";
+         addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot,
+         setClassesAnyway, sessionsOnDate } from "./admin.mjs";
 import { seedSeason } from "./seed.mjs";
 import { makeLimiter, clientKey } from "./ratelimit.mjs";
 import { recordAudit, listAudit, countAudit, describeAudit, hasOlderAudit } from "./audit.mjs";
 import { erasePerson, exportPerson, exportSeasonCsv, runRetention, retentionConfig } from "./retention.mjs";
 import { renderAudit } from "./pages/audit.mjs";
+import { holidayConfig, holidaysBetween } from "./holidays.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
@@ -503,6 +505,20 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       weeklyUse: Object.fromEntries((cfg.weekly ?? []).map((w) => [
         `${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`,
         seasonId() ? sessionsForSlot(db, seasonId(), w) : 0])),
+      // Public holidays inside THIS season only — a table of every Danish holiday for the next decade is not a
+      // decision anybody on this screen has to make. `slots` comes from the database rather than from the config,
+      // so a date the planner opted back in shows what is actually on it: the config records the intention and
+      // the sessions are the fact, and this screen has to show the fact before offering to delete it.
+      holidayCountry: holidayConfig(cfg).country,
+      holidays: holidaysBetween(cfg.season.from, cfg.season.to, holidayConfig(cfg)).map((h) => ({
+        ...h,
+        // Counted for EVERY holiday, not only the opted-in ones. The first version asked the database only when the
+        // config said classes run — so a date suppressed by a country added after the season was seeded showed
+        // "No sessions on this date" over a plan that still had them. Two true-ish statements, one false screen:
+        // the config records an intention and the sessions are the fact, and a screen offering to change the plan
+        // has to show the fact.
+        slots: seasonId() ? sessionsOnDate(db, seasonId(), h.date).slots : 0,
+      })),
       flash: adminFlash(t, query.get("r"), { message: query.get("m") ?? "", who: query.get("who") ?? "",
                                              mode: query.get("mode") ?? "", notifications: query.get("notifications") ?? 0,
                                              invitations: query.get("invitations") ?? 0,
@@ -860,6 +876,55 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   });
 
   // ---- the weekly rhythm (increment Q) ------------------------------------------------------------------
+  // A public holiday, opted back in or out. 4water's rule: no sessions on a holiday by default, and the planner
+  // says so explicitly when classes run anyway.
+  //
+  // Turning it back OFF is the destructive direction — it deletes the sessions created for that date, and a
+  // session takes its assignments with it. So it counts first and REFUSES when somebody is on one, rather than
+  // silently cancelling on a volunteer who had agreed to teach. That is the same policy as removing a weekly slot,
+  // which deliberately leaves existing sessions alone; the difference is that here the whole point is to remove
+  // them, so refusing is the only honest guard available.
+  app.post("/admin/holiday", async ({ req, res }) => {
+    const c = await postGate({ req, res }, "admin");
+    if (!c) return;
+    const date = String(c.form.date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return redirect(res, "/admin?r=holiday_bad_date");
+    const on = c.form.on === "1";
+    const sid = seasonId();
+
+    if (!on && sid) {
+      const existing = sessionsOnDate(db, sid, date);
+      if (existing.taken > 0) {
+        logAudit(c, "admin.holiday", null, `refused to clear ${date}: ${existing.taken} slots are taken`);
+        return redirect(res, `/admin?r=holiday_taken&n=${existing.taken}&d=${encodeURIComponent(date)}`);
+      }
+    }
+
+    const { pattern: next, changed } = setClassesAnyway(baseForEdit(), date, on);
+
+    // Deleting has to happen here rather than inside savePattern: seeding only ever ADDS, by a policy this project
+    // states twice, so nothing else would ever take the sessions away again.
+    //
+    // And it runs whether or not the CONFIG changed, which is the case worth spelling out. A deployment that adds
+    // `holidays.country` to a season already seeded has sessions on dates that are now holidays: the config says
+    // suppressed, the database says otherwise, and the database is the only one volunteers can see. So "no classes
+    // after all" has to mean "make the plan match", not "edit a list and hope".
+    let removed = 0;
+    if (!on && sid) {
+      const doomed = sessionsOnDate(db, sid, date);
+      if (doomed.sessions > 0) {
+        db.prepare("DELETE FROM sessions WHERE season_id=? AND date=?").run(sid, date);
+        removed = doomed.sessions;
+      }
+    }
+    if (!changed && removed === 0) return redirect(res, `/admin?r=holiday_unchanged&d=${encodeURIComponent(date)}`);
+    logAudit(c, "admin.holiday", null,
+             `${on ? "classes run on" : "no classes on"} ${date}${removed ? `, ${removed} sessions removed` : ""}`);
+
+    // fromDate = the date itself, so opting one holiday back in does not re-seed the rest of the season.
+    applyPattern(next, res, { fromDate: on ? date : null, okCode: on ? "holiday_on" : "holiday_off" });
+  });
+
   app.post("/admin/weekly/add", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;

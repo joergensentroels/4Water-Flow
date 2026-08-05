@@ -1,7 +1,7 @@
 // The admin screen. One page, four sections — a nonprofit's admin is a volunteer doing this twice a season,
 // so discoverability beats density.
 import { html, raw } from "../http.mjs";
-import { layout, csrfField, navFor } from "../views.mjs";
+import { layout, csrfField, navFor, formatDate } from "../views.mjs";
 
 const OUTCOME = {
   invited: { key: "admin.invited" },
@@ -23,6 +23,13 @@ const OUTCOME = {
   weekly_added: { key: "admin.weeklyAdded" },
   weekly_removed: { key: "admin.weeklyRemoved" },
   weekly_not_found: { key: "admin.weeklyNotFound", bad: true },
+  holiday_on: { key: "admin.holidayOn" },
+  holiday_off: { key: "admin.holidayOff" },
+  // Not `bad`, because it is not a failure: somebody clicked twice, or two planners did the same thing. It still
+  // has to SAY so — a toggle that reports "done" over a no-op is how a person concludes the button works.
+  holiday_unchanged: { key: "admin.holidayUnchanged" },
+  holiday_taken: { key: "admin.holidayTaken", bad: true },
+  holiday_bad_date: { key: "admin.holidayBadDate", bad: true },
 };
 
 export function adminFlash(t, code, vars) {
@@ -33,6 +40,7 @@ export function adminFlash(t, code, vars) {
 // `roster` carries the counts and the search term. Defaults describe an unfiltered, uncapped list so a caller
 // that passes a plain array still renders — the search UI simply does not appear.
 export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash,
+                             holidays = [], holidayCountry = null,
                              roster = { q: "", shown: people.length, matching: people.length, total: people.length, limit: "all" } }) {
   // `subject` is WHO or WHAT the button acts on, and it belongs in the accessible name. The card around the
   // button says it; a screen reader arriving at the button does not get the card. With four volunteers this page
@@ -185,6 +193,34 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         <button type="submit">${t("admin.weeklyAdd")}</button>
       </form>
     </div>
+
+    <!-- Public holidays inside the season, with what the app has done about each. Listed rather than left to the
+         config file for the reason every other list on this screen exists: the weekly rhythm was editable only by
+         hand-editing pattern.json, which CONTRIBUTING names as the way a volunteer breaks the config.
+         Two states, one button each way, and the count of what is on the date so that turning a holiday back off
+         is not a blind deletion. -->
+    <h2>${t("admin.holidays")}</h2>
+    <p class="hint">${holidayCountry
+      ? t("admin.holidaysHint", { country: holidayCountry })
+      : t("admin.holidaysNone")}</p>
+    ${holidays.length === 0 ? html`<p class="empty">${t("admin.holidaysEmpty")}</p>` : holidays.map((h) => html`
+      <div class="card">
+        <b>${formatDate(t, h.date)}</b> — ${t(`holiday.${h.key}`)}
+        <!-- THREE states, not two. The third is a date the config now calls a holiday which still has sessions on
+             it, because it was seeded before the country was configured — and it needs the opposite button from
+             the one its config state implies: not "run anyway" but "clear these". Saying "no sessions on this
+             date" over a plan that has them is the failure this screen exists to prevent. -->
+        <p class="hint">${h.classesAnyway
+          ? t("admin.holidayRunning", { n: h.slots ?? 0 })
+          : (h.slots ?? 0) > 0
+            ? t("admin.holidayStale", { n: h.slots })
+            : t("admin.holidaySuppressed")}</p>
+        ${(h.classesAnyway || (h.slots ?? 0) > 0)
+          ? toggle("/admin/holiday", { date: h.date, on: "0" }, t("admin.holidayClear"),
+                   `${formatDate(t, h.date)} — ${t(`holiday.${h.key}`)}`)
+          : toggle("/admin/holiday", { date: h.date, on: "1" }, t("admin.holidayRunAnyway"),
+                   `${formatDate(t, h.date)} — ${t(`holiday.${h.key}`)}`)}
+      </div>`)}
 
     ${nextSeason ? html`
       <div class="card">

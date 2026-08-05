@@ -129,6 +129,10 @@ const JUSTIFIED = {
     "asserts auditDays > notificationDays and a test fails if that inverts. 'Your name comes out of it': " +
     "erasePerson calls pseudonymiseAuditActor AND scrubAuditDetail in both modes, checked in both directions — " +
     "the rows survive and the name does not.",
+  "admin.holidaysNone":
+    "holidayConfig() returns country: null both when the section is absent and when the code is unrecognised, and " +
+    "suppressed() short-circuits on a null country — so 'no dates are suppressed' is what the seeding loop " +
+    "actually does, not a guess. Asserted directly: an unknown country leaves Christmas Day unsuppressed.",
   "status.seasonEmpty":
     "Reached only when the season row EXISTS, covers today, and COUNT(*) over its sessions is 0 — all three " +
     "counted in collectStatus, none assumed. 'That is why every screen is empty' is then a fact about this app " +

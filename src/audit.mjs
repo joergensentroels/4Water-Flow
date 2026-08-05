@@ -36,6 +36,9 @@ export const AUDITED = {
   "/admin/weekly/add": "a slot was added to the weekly rhythm",
   "/admin/weekly/remove": "a slot was removed from the weekly rhythm",
   "/admin/retention": "how long data is kept was changed",
+  "/admin/holiday": "a public holiday was opted into or out of. Logged in BOTH directions and including the "
+    + "refusals, because turning one off deletes sessions and the refusal — 'somebody is already on that date' — "
+    + "is exactly the thing a planner asks about afterwards",
 };
 
 // POSTs that deliberately write nothing to the audit, each with the reason. A route missing from both this and

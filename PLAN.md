@@ -7,13 +7,15 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 
 **Not only defects any more.** 4water answered the questions from the spec read-back, and the answers were feature
 work: attendance counting (which forced Score into two numbers — see item 5 below), an audit trail with a screen to
-read it, and disclosure of both to the board and to volunteers. Still one thing per commit, still `git log` as the
-record. Two things they asked for are NOT built: a chat facility, which needs a decision between planner broadcast
-and per-slot notes, and bank-holiday suppression. Shift swaps are noted but not designed.
+read it, disclosure of both to the board and to volunteers, and public holidays suppressed by default with the
+planner opting a date back in. Still one thing per commit, still `git log` as the record. **One thing they asked for
+is NOT built: a chat facility**, which needs a decision between a planner broadcast and per-slot notes — Mattermost
+already runs with the same sign-in, so a third general chat is the option worth arguing against. Shift swaps are
+noted but not designed.
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 425 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 439 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
