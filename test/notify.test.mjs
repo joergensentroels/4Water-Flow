@@ -284,6 +284,33 @@ test("the job timer swallows its own errors and does not hold the process open",
   jobs.stop();
 });
 
+// /status reads `lastError` to decide whether the nudge job is healthy: `note: lastError ? "error" : null` and
+// `level: lastError ? "bad"`. The success path clears it; the no-current-season path recorded a run and did NOT,
+// which made that branch a one-way door. One transient failure, then a config season key naming a row nobody has
+// created yet — which is every rollover — and the job stayed painted red forever on an instance where every tick
+// since had been fine. Nothing short of a restart could clear it.
+test("a healthy run with no current season clears an earlier failure rather than latching it", async () => {
+  const { db, seasonId, pattern } = world({ volunteers: 1 });
+  const broken = { send: async () => { throw new Error("boom"); } };
+  let sid = seasonId;
+  const jobs = startJobs({ db, notifier: broken, t, seasonId: () => sid, today: () => pattern.season.from,
+                           everyMs: 60_000, log: { warn: () => {}, log: () => {} } });
+  try {
+    await jobs.tick();
+    assert.match(jobs.state().lastError ?? "", /boom/, "precondition: the first tick really did fail");
+
+    // Now the season key names nothing — the state at a rollover before the next season exists.
+    sid = null;
+    await jobs.tick();
+
+    const s = jobs.state();
+    assert.equal(s.lastError, null,
+      "a tick that looked and found no season is a successful run, so /status must stop reporting a failure");
+    assert.equal(s.lastSent, 0);
+    assert.ok(s.lastRun !== null, "and it still counts as having run, or a live instance reads as a dead timer");
+  } finally { jobs.stop(); }
+});
+
 // ---- the shift reminder --------------------------------------------------------------------------------
 //
 // src/calendar.mjs says missed shifts are the failure this app exists to prevent, and the answer until now was a

@@ -51,7 +51,9 @@ export async function runNudge(db, { notifier, t, seasonId, today, windowDays = 
     });
     if (r.ok) sent.push(v.id);
   }
-  return { considered: true, from, to, period: p, sent };
+  // No `considered: true` here any more — it was a constant nothing ever read, which is the same shape as the
+  // per-event duration override the calendar feed carried: a field that looks like a signal and is not one.
+  return { from, to, period: p, sent };
 }
 
 // ---- the shift reminder ---------------------------------------------------------------------------------
@@ -145,8 +147,17 @@ export function startJobs({ db, notifier, t, seasonId, today, everyMs = 6 * 60 *
         // Counts as a run: the job did its job, which was to look and find no current season. Not recording it
         // would make a perfectly-behaved instance with a past season indistinguishable from a dead timer, and
         // /status already reports the season separately.
+        //
+        // `lastError` is cleared here for the same reason the success path clears it, and it was NOT — which made
+        // this branch a one-way door. /status reads `note: lastError ? "error" : null` and `level: lastError ?
+        // "bad"`, so one transient failure followed by the season key naming a row that does not exist yet left
+        // the nudge job painted red forever, on an instance where every tick since had run fine. Reachable at
+        // any rollover: `currentSeasonId` returns null the moment config names a season nobody has created.
+        // Nothing short of a restart could clear it, and the whole point of these three fields is that an
+        // operator can trust them.
         state.lastRun = Date.now();
         state.lastSent = 0;
+        state.lastError = null;
         return;
       }
       const now = today();
