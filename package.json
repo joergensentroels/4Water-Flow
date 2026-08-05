@@ -8,11 +8,12 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node tools/precheck.mjs && node --test",
     "start": "node src/server.mjs",
     "demo": "node tools/demo.mjs",
     "backup": "node tools/backup.mjs",
-    "bootstrap": "node tools/bootstrap.mjs"
+    "bootstrap": "node tools/bootstrap.mjs",
+    "precheck": "node tools/precheck.mjs"
   },
   "license": "AGPL-3.0-or-later"
 }

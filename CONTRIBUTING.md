@@ -7,6 +7,12 @@ that is the news — not a detail.
 npm test
 ```
 
+It parses every module first (`npm run precheck`, about half a second) and refuses to start the suite if one cannot
+be parsed. That is not tidiness. A single unterminated template literal — a backtick inside a comment inside a
+template literal, which `src/db.mjs` warns about over the schema — left a quarter of the test files **unrun** and the
+process not terminating. The suite did not go red, it went unreliable, and working out why cost most of a session.
+`node --check` naming the file takes a moment.
+
 To look at it:
 
 ```bash

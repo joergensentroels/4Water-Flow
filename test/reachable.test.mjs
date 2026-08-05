@@ -193,6 +193,42 @@ test("every config setting is read by the code, or is declared descriptive", () 
   assert.deepEqual(stale, [], `declared descriptive but no longer a config key — remove: ${stale}`);
 });
 
+// The precheck that runs before the suite. It exists because a single unterminated template literal left a quarter
+// of the test files unrun and the process not terminating — so what this test guards is that the precheck still
+// SEES every module the suite loads. (A proportion, not a count: the docs gate allows one home for a test count and
+// it caught the first version of this line.) A precheck covering three directories out of four would be the same class of defect
+// it was written to catch: something that looks like coverage and is not.
+test("the precheck parses every module the suite can load", async () => {
+  const { modulesToCheck, CHECKED_DIRS } = await import("../tools/precheck.mjs");
+  const covered = new Set(modulesToCheck());
+  assert.ok(covered.size >= 60, `the precheck sees only ${covered.size} modules — it is not walking properly`);
+
+  // Every .mjs anywhere in the repository, minus the places a module cannot live. Derived, so a new directory of
+  // source is a failure here rather than a silent gap in the precheck.
+  const found = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(path.join(ROOT, rel || "."), { withFileTypes: true })) {
+      if (["node_modules", ".git", ".playwright-mcp"].includes(e.name)) continue;
+      const next = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(next);
+      else if (e.name.endsWith(".mjs")) found.push(next);
+    }
+  };
+  walk("");
+  const missed = found.filter((f) => !covered.has(f));
+  assert.deepEqual(missed, [],
+    `these modules exist and the precheck does not look at them, so a syntax error in one would present as a ` +
+    `suite that hangs rather than a message naming the file. Add the directory to CHECKED_DIRS:\n  ` +
+    missed.join("\n  "));
+
+  // And the npm script actually calls it, because a precheck nobody runs is a file.
+  const pkg = JSON.parse(read("package.json"));
+  assert.match(pkg.scripts.test, /precheck/,
+    "npm test must run the precheck first — CONTRIBUTING tells a contributor to run `npm test` and nothing else");
+  assert.ok(CHECKED_DIRS.includes("src") && CHECKED_DIRS.includes("test"),
+    "the precheck must cover at least src/ and test/");
+});
+
 // The comment stripper has to remove SQL comments without removing code, and both halves have bitten. Kept as a
 // test rather than a careful regex, because "it looked right" is how the first version shipped blind.
 test("stripping comments removes a SQL comment and leaves a JS decrement alone", () => {
