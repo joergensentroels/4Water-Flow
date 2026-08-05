@@ -65,7 +65,7 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **AG** | name the volunteers who have not answered | A count is not actionable, and chasing cover is half of why this exists. Capped at eight with the rest counted; escaped, because this is the first user-supplied name on that screen. Written after four load-bearing correctness properties — ICS folding, DST, the hour-over-day availability override, the claim race — were checked and all found already right |
 | **AH** | the upgrade path, the recovery drill, and one home per fact | `applyColumnAdditions` had never executed anywhere: on a fresh database the columns already exist, so every test ran it as a no-op while the branch that alters a table — the upgrade path for a live deployment — had never run. Coverage then found four more never-executed branches. Also: the app now boots against a *restored* backup rather than merely opening one, and three documents stating the test count (129, 330, 330, against 338) are down to one |
 
-## Three places this app knowingly differs from the spec — deliberately, and here is why
+## Four places this app differs from the spec — three deliberately, one only noticed later
 
 Every one of the tests verifies the implementation against itself. The spec is outside that loop, so a requirement
 quietly dropped is invisible to all of them. Read back against `../4water-scheduling-spec.md` §2, three sentences
@@ -93,6 +93,27 @@ bootstrapping paradox that would make the app unusable for exactly the people it
 still derived and never stored, as the spec requires, and it still drives fairness and the planner's overview —
 only the *active* flag is separate. Worth confirming with 4water that "active volunteer" in their reports means
 "not stood down" rather than "has done something this season", because those diverge for a newcomer.
+
+**4. The spec's `Distribution Modifier` has no equivalent, and until now no record either.** §1 documents a rules
+engine in the existing spreadsheet: `Add`, `Remove`, `Replace(old→new)`, `ClearSet`, scoped by `FromDate`/`ToDate`
+and filtered by `EveryNth`, `Timeslot`, `DayName`. The phrase appears nowhere in this repository — not in code, not
+in a document, not in the config. Judged operation by operation rather than as a whole:
+
+- `Add` and `Remove` over a date range are effectively covered. The Administration screen edits the weekly pattern
+  and reseeds from today onward, which is how you start or stop a slot.
+- `Replace(old→new)` has no equivalent. Removing a weekly slot and adding another leaves the sessions already
+  created for the old one, by the policy stated on that screen — so a mid-season swap of one activity for another
+  is a hand edit per date.
+- `ClearSet` has no equivalent beyond unassigning one slot at a time on the planner grid.
+- **`EveryNth` is the one that matters, and it is a hard limit rather than a chore.** `timeslots` carries a
+  `day_of_week` and a time, and `seedSeason` creates a session on *every* matching date. A fortnightly or monthly
+  activity cannot be expressed at all. An admin wanting one would have to add it weekly and then cancel half the
+  dates by hand, which the config would not show and nothing would explain to a volunteer looking at the plan.
+
+Nobody has asked 4water whether anything in their rhythm is fortnightly. If the answer is no, this costs nothing
+and the note can go. If the answer is yes, it is a schema change (a recurrence rule on `timeslots`) and much
+cheaper to know now than after a season has been planned. **This is the one gap found in the read-back that is a
+missing capability rather than a wording difference.**
 
 Checked and **held** in the same pass, so the list above is exhaustive rather than the part I happened to notice:
 Score is derived and never a stored column; locked assignments are immune to later auto-roster runs

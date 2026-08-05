@@ -112,8 +112,14 @@ because the count went stale the moment a fourth was added: three documents said
 And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
 current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.
 
-Two more, which are places the software knowingly differs from what the spec says — the reasoning is in `PLAN.md`
-under "Three places this app knowingly differs from the spec":
+And the one question worth asking before a season is planned in this: **does anything in the rhythm happen
+fortnightly or monthly rather than every week?** The weekly pattern creates a session on every matching date, so a
+fortnightly activity cannot be expressed — it would have to be added weekly and half its dates cancelled by hand.
+The spreadsheet has an `EveryNth` filter for exactly this and the app has no equivalent. If the answer is no, this
+costs nothing; if yes, it is a small schema change and far cheaper now than later.
+
+Three more, which are places the software differs from what the spec says — the reasoning is in `PLAN.md` under
+"Four places this app differs from the spec":
 
 - **Notifications have no email fallback.** The spec says email covers people who are not in Mattermost; the app
   writes an **outbox** page instead, because a zero-dependency SMTP client is a project of its own. Somebody has to
