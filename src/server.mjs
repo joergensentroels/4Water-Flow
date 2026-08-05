@@ -679,8 +679,36 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
                   `&invitations=${r.invitations.removed}&seasons=${r.seasons.removed.length}`);
   });
 
+  // The base every admin form edits: what is ON DISK, not what this process loaded at boot.
+  //
+  // Each form does `structuredClone(current)` and `savePattern` writes the clone back, so `current` decides what
+  // survives. It was `cfg`, the in-memory copy — which meant an operator's hand edit that the process had not
+  // picked up was silently destroyed by the next ordinary admin action. Measured: set `notify.remindDaysBefore`
+  // in the file, then add a weekly slot from the Administration screen, and the value is GONE. No error, no
+  // warning, and the admin who pressed the button has no idea they overwrote anything.
+  //
+  // RUNBOOK sends an operator to that file for five values — the clock times, `board.cutoffDays`,
+  // `calendar.eventMinutes`, `export.csvDelimiter`, `notify.remindDaysBefore` — so hand edits are not a misuse,
+  // they are the documented way to set most of them. Only a value the in-memory copy happened to share survived,
+  // which is why `export.csvDelimiter` came through in that measurement and the other did not: the repository
+  // config already carries the delimiter.
+  //
+  // If the file on disk does not parse, this REFUSES rather than falling back to `cfg`. Falling back is the
+  // destructive path: it would overwrite a broken file with the process's own idea of the config and destroy
+  // whatever the operator was in the middle of typing. `readJson` names the file in its error, so the admin is
+  // told which one.
+  // `loadPattern` already validates, so this catches both a file that will not parse and one whose contents the
+  // app would refuse at boot — either way the right answer is to tell the admin rather than write over it.
+  const baseForEdit = () => {
+    try { return loadPattern(patternFile); }
+    catch (e) { return { __unreadable: e.message }; }
+  };
+
   // Every config edit goes through validate-then-atomic-write, then reloads in this process.
   const applyPattern = (next, res, { fromDate = null, okCode = "saved" } = {}) => {
+    if (next?.__unreadable) {
+      return redirect(res, `/admin?r=invalid&m=${encodeURIComponent(next.__unreadable)}`);
+    }
     // seedSeason, not seedStructure: adding a timeslot used to create the sessions and none of their slots, so
     // a newly added class appeared on the plan and could never be staffed.
     const r = savePattern(db, next, { file: patternFile, seed: (d, p) => seedSeason(d, p, { fromDate }) });
@@ -692,22 +720,34 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/season", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    applyPattern(patternFromForm(cfg, c.form), res);
+    applyPattern(patternFromForm(baseForEdit(), c.form), res);
   });
 
   app.post("/admin/activity", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    applyPattern(addActivityToForm(cfg, c.form), res);
+    applyPattern(addActivityToForm(baseForEdit(), c.form), res);
   });
 
   // ---- the weekly rhythm (increment Q) ------------------------------------------------------------------
   app.post("/admin/weekly/add", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const [hour, minute] = String(c.form.time ?? "").split(":");
+    // Refused explicitly rather than left to `Number("")`, which is 0 — so a POST with no `time` silently meant
+    // MIDNIGHT and validation accepted it, because 0 is a legal hour. Measured by omitting the field: it created a
+    // slot at 00:00 and seeded 26 sessions for it, reporting success. The form marks the input `required` and
+    // pre-fills 19:00, so a browser cannot do this — but `required` is a client-side courtesy, and the CSRF audit
+    // exists in this project precisely because what the server accepts is the only thing that counts.
+    //
+    // `retention.mjs` already warns about this exact trap in prose: its `atLeastOne` is "written out rather than
+    // leaning on `Number(x) || default`, where 0 silently becomes the default". Here 0 was silently a valid answer.
+    const time = String(c.form.time ?? "");
+    if (!/^\d{1,2}:\d{2}$/.test(time)) {
+      return redirect(res, `/admin?r=invalid&m=${encodeURIComponent("config: a weekly slot needs a time as hh:mm")}`);
+    }
+    const [hour, minute] = time.split(":");
     // __all, because the activity checkboxes share one name and Object.fromEntries keeps only the last.
-    const next = addWeeklyToForm(cfg, {
+    const next = addWeeklyToForm(baseForEdit(), {
       dayOfWeek: c.form.dayOfWeek, hour, minute, activities: c.form.__all("activities"),
     });
     // fromDate = today, so adding a slot in August does not manufacture unfilled sessions back to January.
@@ -717,7 +757,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/weekly/remove", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const { pattern: next, removed } = removeWeeklyFromForm(cfg, c.form);
+    const { pattern: next, removed } = removeWeeklyFromForm(baseForEdit(), c.form);
     if (removed === 0) return redirect(res, "/admin?r=weekly_not_found");
     applyPattern(next, res, { okCode: "weekly_removed" });
   });

@@ -1,5 +1,5 @@
 // Administration: who is on the roster, who can do what, and the season's shape.
-import { writeFileSync, renameSync, readFileSync } from "node:fs";
+import { writeFileSync, renameSync } from "node:fs";
 import { validatePattern, PATTERN_FILE } from "./config.mjs";
 
 // ---- people, roles, capabilities ----------------------------------------------------------------------
@@ -123,7 +123,14 @@ export function savePattern(db, next, { file = PATTERN_FILE, seed } = {}) {
   return { ok: true, pattern: validated, seeded };
 }
 
-export const readPatternFile = (file = PATTERN_FILE) => JSON.parse(readFileSync(file, "utf8"));
+// `readPatternFile` used to live here, exported and called by nothing — and it was the function whose absence
+// caused the defect above: reading the file is exactly what the admin forms needed to do instead of cloning the
+// process's in-memory copy. A hook that looks wired and is not, sitting next to the problem it would have solved.
+//
+// Removed rather than wired up, because it also bypassed `readJson`: it called `JSON.parse(readFileSync(...))`
+// directly, so it stripped no byte-order mark and named no file on failure. Anybody reaching for it in good faith
+// would have reintroduced the boot crash that a config saved in Notepad now survives. `loadPattern(file)` is the
+// one way in, it validates, and server.mjs's `baseForEdit()` is what the admin routes use.
 
 // Parse the season form. Kept separate from savePattern so a bad number is a validation message rather than
 // a thrown exception from deep inside the writer.

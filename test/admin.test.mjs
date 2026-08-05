@@ -252,6 +252,85 @@ test("a config saved with a byte-order mark still loads, and a broken one names 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// The admin screen and an operator's text editor write the SAME file, and every form did
+// `structuredClone(cfg)` — the copy this process loaded at boot — then wrote it back. So a hand edit the process
+// had not picked up was silently destroyed by the next ordinary admin action.
+//
+// RUNBOOK sends an operator to that file for five values, so hand-editing is the documented way to set most of
+// them, not a misuse. Measured before the fix: set notify.remindDaysBefore in the file, add a weekly slot from the
+// screen, and the value is GONE — no error, and the admin who pressed the button has no idea. Only a value the
+// in-memory copy happened to share survived, which is why export.csvDelimiter came through and the other did not.
+test("an admin save preserves a hand edit the running process has not seen", withAdmin({}, async (w) => {
+  const read = () => JSON.parse(readFileSync(w.patternFile, "utf8"));
+  const edited = read();
+  edited.notify = { remindDaysBefore: 5 };
+  edited.calendar = { ...(edited.calendar ?? {}), eventMinutes: 105 };
+  writeFileSync(w.patternFile, JSON.stringify(edited, null, 2) + "\n", "utf8");
+  // The process still holds the pattern from before this edit — that is the whole situation.
+  assert.notEqual(w.pattern.notify?.remindDaysBefore, 5, "precondition: the in-memory copy predates the edit");
+
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const r = await w.post("/admin/weekly/add", admin, new URLSearchParams({
+    csrf: token, dayOfWeek: "4", time: "20:30", activities: w.pattern.activities[0].key,
+  }));
+  assert.equal(reasonOf(r), "weekly_added", "the admin action itself must still work");
+
+  const after = read();
+  assert.equal(after.notify?.remindDaysBefore, 5, "the hand-edited value must survive an unrelated admin save");
+  assert.equal(after.calendar?.eventMinutes, 105, "and so must the other one");
+  assert.ok(after.weekly.some((x) => x.dayOfWeek === 4 && x.hour === 20 && x.minute === 30),
+    "and the admin's own change must be there — preserving the edit must not mean dropping the edit");
+}));
+
+test("a config file broken by hand is reported, not overwritten by what the process remembers", withAdmin({}, async (w) => {
+  const before = readFileSync(w.patternFile, "utf8");
+  writeFileSync(w.patternFile, "{ half a config", "utf8");
+
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const r = await w.post("/admin/season", admin, new URLSearchParams({
+    csrf: token, seasonKey: "2027-Q1Q2", seasonFrom: "2027-01-01", seasonTo: "2027-06-30",
+  }));
+  assert.equal(reasonOf(r), "invalid", "a config that will not load must be refused, not silently replaced");
+
+  // Still broken — which is correct. Overwriting it with the in-memory copy would destroy whatever the operator
+  // was in the middle of typing, and would hide that the file is broken until the next restart.
+  assert.equal(readFileSync(w.patternFile, "utf8"), "{ half a config",
+    "the app must not write over a file it could not read");
+  // And the message names the file, so an admin who has several JSON files knows which one.
+  const m = new URL(r.headers.get("location"), "http://x").searchParams.get("m") ?? "";
+  assert.match(m, /not valid JSON/);
+  assert.ok(m.includes("pattern"), `the message must name the file, got: ${m}`);
+
+  writeFileSync(w.patternFile, before, "utf8");
+}));
+
+test("a weekly slot with no time is refused rather than silently meaning midnight", withAdmin({}, async (w) => {
+  const admin = await w.signIn(w.people[0]);
+  const { token } = await w.csrfFrom("/admin", admin);
+  const act = w.pattern.activities[0].key;
+  const weeklyBefore = JSON.parse(readFileSync(w.patternFile, "utf8")).weekly.length;
+
+  // `Number("")` is 0 and 0 is a legal hour, so an absent time used to create a 00:00 slot and seed a session for
+  // every one of those days, reporting success. The form marks the field required and pre-fills it, so this needs
+  // a hand-made POST — but what the server accepts is the only thing that counts.
+  for (const time of [undefined, "", "  ", "1900", "nineteen", "19:00:00"]) {
+    const body = new URLSearchParams({ csrf: token, dayOfWeek: "4", activities: act });
+    if (time !== undefined) body.set("time", time);
+    const r = await w.post("/admin/weekly/add", admin, body);
+    assert.equal(reasonOf(r), "invalid", `time ${JSON.stringify(time)} must be refused`);
+  }
+  assert.equal(JSON.parse(readFileSync(w.patternFile, "utf8")).weekly.length, weeklyBefore,
+    "and nothing may have been added along the way");
+
+  // The control: a real time still works, or the guard has simply broken the feature.
+  const ok = await w.post("/admin/weekly/add", admin, new URLSearchParams({
+    csrf: token, dayOfWeek: "4", time: "20:30", activities: act,
+  }));
+  assert.equal(reasonOf(ok), "weekly_added", "a well-formed time must still be accepted");
+}));
+
 test("the validator rejects every way of breaking the config", () => {
   const good = loadPattern();
   const bad = [
