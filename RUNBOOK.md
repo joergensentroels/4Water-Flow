@@ -228,6 +228,20 @@ reports it as a fault naming both keys**. That is the thing to look at if the pl
 sessions; narrowing them does **not** delete the ones already created, for the same reason removing an activity does
 not — deleting sessions would destroy assignments volunteers have agreed to.
 
+## Closing a single date — the venue is shut, the term breaks, nobody can teach
+
+Administration → **Close a date**. Pick any date inside the season and the sessions on it are removed; the date is
+written into `holidays.extra`, so it stays closed when the plan is next regenerated. Reopening it is the same
+screen: the date appears in the list above with a **Classes run anyway** button.
+
+A date where somebody has already taken a shift is **refused**, naming how many. Free those under Planning first —
+removing the date would cancel on a volunteer who had agreed to be there. A date outside the season is refused too.
+
+This is also how a fortnightly slot is expressed: add the weekly rhythm entry, then close the alternate dates. That
+is one action per skipped date, which is laborious over a six-month season — if 4water runs anything on a repeating
+interval other than weekly, say so and it should become a property of the weekly entry instead. The spreadsheet's
+rules engine had `EveryNth` for this; nothing here does.
+
 ## Public holidays — no sessions on them unless you say otherwise
 
 **Administration** → **Public holidays** lists every public holiday inside the season and what the app has done
@@ -240,7 +254,7 @@ Three keys in `config/pattern.json`, under `holidays`:
 | key | what it does |
 |---|---|
 | `holidays.country` | `DK` or `FR`, an ISO 3166-1 alpha-2 code. An unrecognised code **suppresses nothing** rather than guessing a calendar, and the Administration screen says so — a wrong holiday table silently deletes real classes. |
-| `holidays.extra` | Dates 4water is closed but the country is not. 24 and 31 December are there as a suggestion and the board can remove them; Grundlovsdag is deliberately absent, because an evening class can run on it. |
+| `holidays.extra` | Dates 4water is closed but the country is not. 24 and 31 December are there as a suggestion and the board can remove them; Grundlovsdag is deliberately absent, because an evening class can run on it. **Editable from the Administration screen** — see below; you do not need to touch this file. |
 | `holidays.classesAnyway` | The planner's opt-back-in list. Written by the button on the Administration screen — no need to edit it by hand. |
 
 Adding `holidays.country` to a deployment whose season is **already seeded** does not remove the sessions that

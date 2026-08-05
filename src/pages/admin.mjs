@@ -30,6 +30,7 @@ const OUTCOME = {
   holiday_unchanged: { key: "admin.holidayUnchanged" },
   holiday_taken: { key: "admin.holidayTaken", bad: true },
   holiday_bad_date: { key: "admin.holidayBadDate", bad: true },
+  holiday_outside: { key: "admin.closeDateOutside", bad: true },
 };
 
 export function adminFlash(t, code, vars) {
@@ -221,6 +222,26 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
           : toggle("/admin/holiday", { date: h.date, on: "1" }, t("admin.holidayRunAnyway"),
                    `${formatDate(t, h.date)} — ${t(`holiday.${h.key}`)}`)}
       </div>`)}
+
+    <!-- ANY date, which the list above cannot offer. The cards are built from the country's holiday table, so the
+         only dates this screen could name were public holidays — and the planner's real question is usually about a
+         date that is not one: the venue is closed that Wednesday, nobody can teach, the term breaks for a week.
+         The holidays.extra list has always existed for exactly that — "days 4water is closed but the country is
+         not", in the config's own words — and had no control, so using it meant hand-editing pattern.json, the thing
+         every other editor on this screen was built to avoid. One direction had a button and its opposite did not.
+         No backticks in this comment: it sits inside a template literal and one would end the string. -->
+    <div class="card">
+      <b>${t("admin.closeDate")}</b>
+      <p class="hint">${t("admin.closeDateHint")}</p>
+      <form method="post" action="/admin/holiday">
+        ${csrfField(session)}
+        <input type="hidden" name="on" value="0">
+        <label>${t("admin.closeDateWhich")}
+          <input type="date" name="date" min="${pattern.season.from}" max="${pattern.season.to}" required>
+        </label>
+        <button type="submit">${t("admin.closeDateDo")}</button>
+      </form>
+    </div>
 
     ${nextSeason ? html`
       <div class="card">

@@ -28,7 +28,7 @@ import { erasePerson, exportPerson, exportSeasonCsv, runRetention, retentionConf
 import { renderAudit } from "./pages/audit.mjs";
 import { renderSession, sessionFlash } from "./pages/session.mjs";
 import { listNotes, addNote, deleteNote, noteCounts } from "./notes.mjs";
-import { holidayConfig, holidaysBetween } from "./holidays.mjs";
+import { holidayConfig, holidaysBetween, suppressed } from "./holidays.mjs";
 import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/profile.mjs";
 import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
@@ -1011,6 +1011,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const date = String(c.form.date ?? "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return redirect(res, "/admin?r=holiday_bad_date");
+    // Inside the season, or there is nothing to close. The form carries min/max so a browser will not offer a date
+    // outside it, but a crafted POST can — and accepting one would write a closure into the config for a date the
+    // seeder never visits: a config entry that does nothing, which is the "switch wired to no lamp" this project
+    // deleted once already.
+    const bounds = baseForEdit().season;
+    if (date < bounds.from || date > bounds.to) {
+      return redirect(res, `/admin?r=holiday_outside&d=${encodeURIComponent(date)}`);
+    }
     const on = c.form.on === "1";
     const sid = seasonId();
 
@@ -1022,7 +1030,12 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       }
     }
 
-    const { pattern: next, changed } = setClassesAnyway(baseForEdit(), date, on);
+    // Whether a TABLE already accounts for this date, so the setter knows if it must write the closure down itself.
+    // Asked with classesAnyway emptied, because the question is "does something other than the planner's own opt-in
+    // suppress this date" — and `suppressed()` short-circuits on classesAnyway by design.
+    const holCfg = holidayConfig(baseForEdit());
+    const byTable = suppressed(date, { ...holCfg, classesAnyway: [], extra: [] }) !== null;
+    const { pattern: next, changed } = setClassesAnyway(baseForEdit(), date, on, { suppressedByTable: byTable });
 
     // Deleting has to happen here rather than inside savePattern: seeding only ever ADDS, by a policy this project
     // states twice, so nothing else would ever take the sessions away again.

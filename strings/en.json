@@ -396,5 +396,10 @@
   "status.nudgeError.one": "Scheduled reminders ran {n} minute ago and failed. Check the log and the notifications table.",
   "planner.rosterDone.one": "{n} proposal made, and every open slot now has somebody.",
   "planner.rosterGaps": "Proposed: {filled}. Still without anybody: {n} slots — nobody eligible was free for those.",
-  "planner.rosterGaps.one": "Proposed: {filled}. Still without anybody: {n} slot — nobody eligible was free for it."
+  "planner.rosterGaps.one": "Proposed: {filled}. Still without anybody: {n} slot — nobody eligible was free for it.",
+  "admin.closeDate": "Close a date",
+  "admin.closeDateHint": "For a date that is not a public holiday: the venue is closed, the term breaks, nobody can teach. A date with slots somebody has already taken is refused.",
+  "admin.closeDateWhich": "Date",
+  "admin.closeDateDo": "No classes on that date",
+  "admin.closeDateOutside": "That date is outside the season."
 }

@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
 import { easterSunday, COUNTRIES, holidayConfig, holidaysBetween, suppressed } from "../src/holidays.mjs";
 import { seedSeason } from "../src/seed.mjs";
 import { loadPattern } from "../src/config.mjs";
@@ -283,4 +284,93 @@ test("a volunteer cannot change which days are holidays", withAdmin(async (w) =>
   const res = await w.post("/admin/holiday", volunteer,
     new URLSearchParams({ csrf: csrfFromCookie(volunteer), date: "2026-04-06", on: "1" }));
   assert.equal(res.status, 403);
+}));
+
+// ---- closing an ordinary date (increment AN) ----------------------------------------------------------------
+//
+// The screen listed only the country's public holidays, so the only dates it could name were the ones a table
+// produced. A planner's real question is usually about a date that is not one: the venue is closed that Wednesday,
+// the term breaks, nobody can teach. `holidays.extra` has always existed for exactly that — "days 4water is closed
+// but the country is not", in the config's own words — and had no control, so using it meant hand-editing
+// pattern.json. One direction had a button and its opposite did not.
+//
+// The regression that goes with it, measured before the fix: POST on=0 for such a date deleted the sessions,
+// applyPattern immediately re-created them because nothing in the config said the date was suppressed, and the
+// route reported "that date is a holiday again, and its sessions have been removed" while writing an audit entry
+// saying so. Session ids 1,2 became 99,100. A suppression with nowhere to persist cannot survive a re-seed.
+test("closing an ordinary class date STAYS closed across the re-seed the same request performs", withAdmin(async (w) => {
+  const date = w.db.prepare("SELECT date FROM sessions GROUP BY date ORDER BY date LIMIT 1").get().date;
+  const before = w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE date=?").get(date).n;
+  assert.ok(before > 0, "the fixture must have sessions on that date, or this test asserts nothing");
+  // It must NOT be a date any table already accounts for — that is the case that always worked.
+  assert.equal(suppressed(date, { ...holidayConfig(loadPattern()), classesAnyway: [], extra: [] }), null,
+    "this test is about an ORDINARY date; a public holiday would take the path that was already correct");
+
+  const res = await w.post("/admin/holiday", w.admin,
+    new URLSearchParams({ csrf: csrfFromCookie(w.admin), date, on: "0" }));
+  assert.equal(res.status, 303);
+  assert.equal(new URL(res.headers.get("location"), "http://x").searchParams.get("r"), "holiday_off");
+
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE date=?").get(date).n, 0,
+    "the sessions must be gone AFTER the re-seed, not merely deleted and put back with new ids");
+  // And the closure is written down where the seeder reads it, which is what makes it survive.
+  const saved = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  assert.ok(saved.holidays.extra.includes(date), `${date} must be recorded in holidays.extra: ${saved.holidays.extra}`);
+}));
+
+test("and re-opening it removes the closure rather than layering an opt-in on top", withAdmin(async (w) => {
+  const date = w.db.prepare("SELECT date FROM sessions GROUP BY date ORDER BY date LIMIT 1").get().date;
+  const form = (on) => new URLSearchParams({ csrf: csrfFromCookie(w.admin), date, on });
+  await w.post("/admin/holiday", w.admin, form("0"));
+  const closed = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  assert.ok(closed.holidays.extra.includes(date));
+
+  const back = await w.post("/admin/holiday", w.admin, form("1"));
+  assert.equal(new URL(back.headers.get("location"), "http://x").searchParams.get("r"), "holiday_on");
+  const open = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  // The honest inverse: take it OUT of the board's own list. Adding it to classesAnyway instead would leave the
+  // date in both lists — consistent, because classesAnyway wins, but a state nobody can read off the config.
+  assert.ok(!open.holidays.extra.includes(date), "the closure must be removed, not overridden");
+  assert.ok(!open.holidays.classesAnyway.includes(date),
+    "and an ordinary date needs no opt-in recorded — only a date the COUNTRY suppresses does");
+  assert.ok(w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE date=?").get(date).n > 0, "and the classes are back");
+}));
+
+test("a date somebody has already taken a shift on is refused, and nothing is written", withAdmin(async (w) => {
+  const date = w.db.prepare("SELECT date FROM sessions GROUP BY date ORDER BY date LIMIT 1").get().date;
+  const slot = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              WHERE s.date=? LIMIT 1`).get(date);
+  w.db.prepare("UPDATE assignments SET person_id=?, state='confirmed' WHERE id=?").run(w.people[1], slot.id);
+
+  const res = await w.post("/admin/holiday", w.admin,
+    new URLSearchParams({ csrf: csrfFromCookie(w.admin), date, on: "0" }));
+  assert.equal(new URL(res.headers.get("location"), "http://x").searchParams.get("r"), "holiday_taken");
+  assert.equal(w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              WHERE s.date=? AND a.person_id IS NOT NULL`).get(date).n, 1,
+    "cancelling on somebody who agreed to teach is the one thing this must never do");
+  const saved = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  assert.ok(!saved.holidays.extra.includes(date), "and a refused request must leave the config alone");
+}));
+
+test("a date outside the season is refused, because the seeder would never visit it", withAdmin(async (w) => {
+  const outside = "2099-03-04";
+  const res = await w.post("/admin/holiday", w.admin,
+    new URLSearchParams({ csrf: csrfFromCookie(w.admin), date: outside, on: "0" }));
+  assert.equal(new URL(res.headers.get("location"), "http://x").searchParams.get("r"), "holiday_outside");
+  const saved = JSON.parse(readFileSync(w.patternFile, "utf8"));
+  assert.ok(!saved.holidays.extra.includes(outside),
+    "a config entry for a date nothing reads is a switch wired to no lamp");
+}));
+
+test("the admin screen offers a control for any date, not only the ones a table names", withAdmin(async (w) => {
+  const { body } = await w.csrfFrom("/admin", w.admin);
+  const form = body.match(/action="\/admin\/holiday"[\s\S]*?<input type="date"[^>]*name="date"[^>]*>/);
+  assert.ok(form, "a date field posting to /admin/holiday must exist, or the capability is config-file-only");
+  assert.match(form[0], /min="/, "bounded by the season, so a browser does not offer a date the route will refuse");
+  assert.match(form[0], /max="/);
+  // The control the list of holidays cannot provide: a date the country table does not name.
+  const ordinary = w.db.prepare("SELECT date FROM sessions GROUP BY date ORDER BY date LIMIT 1").get().date;
+  assert.equal(suppressed(ordinary, { ...holidayConfig(loadPattern()), classesAnyway: [], extra: [] }), null);
+  assert.ok(!body.includes(`name="date" value="${ordinary}"`),
+    "the holiday cards still cannot name it — which is why the free date field is the thing being tested");
 }));

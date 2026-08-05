@@ -396,5 +396,10 @@
   "status.nudgeError.one": "Planlagte påmindelser kørte for {n} minut siden og fejlede. Se loggen og notifications-tabellen.",
   "planner.rosterDone.one": "{n} forslag lavet, og alle ledige vagter har nu nogen.",
   "planner.rosterGaps": "Foreslået: {filled}. Stadig uden nogen: {n} vagter — ingen egnet var fri til dem.",
-  "planner.rosterGaps.one": "Foreslået: {filled}. Stadig uden nogen: {n} vagt — ingen egnet var fri til den."
+  "planner.rosterGaps.one": "Foreslået: {filled}. Stadig uden nogen: {n} vagt — ingen egnet var fri til den.",
+  "admin.closeDate": "Luk en dato",
+  "admin.closeDateHint": "Til en dato, der ikke er en helligdag: lokalet er lukket, der er ferie, ingen kan undervise. En dato med vagter, nogen har taget, bliver afvist.",
+  "admin.closeDateWhich": "Dato",
+  "admin.closeDateDo": "Ingen undervisning den dato",
+  "admin.closeDateOutside": "Datoen ligger uden for sæsonen."
 }

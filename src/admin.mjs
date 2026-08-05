@@ -1,6 +1,7 @@
 // Administration: who is on the roster, who can do what, and the season's shape.
 import { writeFileSync, renameSync } from "node:fs";
 import { validatePattern, PATTERN_FILE } from "./config.mjs";
+import { holidayConfig, suppressed } from "./holidays.mjs";
 
 // ---- people, roles, capabilities ----------------------------------------------------------------------
 // Searchable and capped by default, because the editor per person is large and the roster is not.
@@ -201,15 +202,55 @@ export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities }
 //
 // Returns `changed` so the route can tell "already in that state" from "done". A toggle reporting success over a
 // no-op is how somebody concludes a button works when it does not.
+// BOTH LISTS, and until this handled `extra` the "no classes" direction was a lie on any ordinary date.
+//
+// `classesAnyway` is the opt-back-IN and it had a screen. `holidays.extra` — the config's own comment calls it
+// "days 4water is closed but the country is not" — is the opt-OUT, and it had none: adding one meant hand-editing
+// pattern.json, which CONTRIBUTING names as the way a volunteer breaks the config. That is the exact argument the
+// weekly-rhythm editor was built on, and the comment stating it sits ten lines above a capability that never got
+// the same treatment. One direction had a button and its opposite did not.
+//
+// What that cost, measured: POST /admin/holiday with on=0 on a date the country table does not name deleted the
+// sessions, `applyPattern` immediately re-created them because nothing in the config said the date was suppressed,
+// and the route reported "that date is a holiday again, and its sessions have been removed" — writing an audit
+// entry that said so. Session ids 1,2 became 99,100 and the classes were still scheduled. The message, the redirect
+// code and the audit record were all false, because a suppression with nowhere to persist cannot survive a re-seed.
+//
+// Not reachable through the old screen, which only ever offered dates from the country table — so it was latent
+// rather than live. The fix is the same either way: a suppression has to be written down somewhere the seeder reads.
+// It asks the TABLE question itself rather than taking it as an argument. The first version had the route pass a
+// `suppressedByTable` flag computed from the same config object being handed in — so a caller that forgot it got
+// different semantics silently, and the existing unit test became the caller that forgot. The function has the
+// config; it can answer its own question, and then there is no way to call it inconsistently.
 export function setClassesAnyway(current, date, on) {
   const next = structuredClone(current);
-  const list = Array.isArray(next.holidays?.classesAnyway) ? [...next.holidays.classesAnyway] : [];
-  const had = list.includes(date);
-  next.holidays = {
-    ...(next.holidays ?? {}),
-    classesAnyway: on ? (had ? list : [...list, date].sort()) : list.filter((d) => d !== date),
-  };
-  return { pattern: next, changed: on !== had };
+  // Does something OTHER than the planner's own opt-in already account for this date? Asked with both editable
+  // lists emptied: suppressed() short-circuits on classesAnyway by design, and `extra` is decided below.
+  const cfg = holidayConfig(current);
+  const suppressedByTable = suppressed(date, { ...cfg, classesAnyway: [], extra: [] }) !== null;
+  const anyway = Array.isArray(next.holidays?.classesAnyway) ? [...next.holidays.classesAnyway] : [];
+  const extra = Array.isArray(next.holidays?.extra) ? [...next.holidays.extra] : [];
+  const wasAnyway = anyway.includes(date);
+  const wasExtra = extra.includes(date);
+  // Was this date going to have classes before the edit? Only if it is neither in the board's own closing list nor
+  // named by the country table — unless the planner had already opted it back in.
+  const hadClasses = wasAnyway || !(wasExtra || suppressedByTable);
+
+  let nextAnyway = anyway, nextExtra = extra;
+  if (on) {
+    // Classes run after all. Removing the date from the board's own list is the honest inverse of adding it; only a
+    // date the COUNTRY suppresses needs an opt-in recorded, because that list is not ours to edit.
+    if (wasExtra) nextExtra = extra.filter((d) => d !== date);
+    else if (!wasAnyway) nextAnyway = [...anyway, date].sort();
+  } else {
+    // No classes. Drop any opt-in, and record the closure unless a table already accounts for it — writing a date
+    // into `extra` that the country table already names would be a duplicate the admin screen shows once.
+    nextAnyway = anyway.filter((d) => d !== date);
+    if (!suppressedByTable && !wasExtra) nextExtra = [...extra, date].sort();
+  }
+
+  next.holidays = { ...(next.holidays ?? {}), classesAnyway: nextAnyway, extra: nextExtra };
+  return { pattern: next, changed: hadClasses !== on };
 }
 
 // What is on a date, and who is on it. Asked before removing anything: turning a holiday back OFF deletes the

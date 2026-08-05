@@ -5,6 +5,7 @@
 // holds both against the app's own route table: a POST in neither list fails, and a route that claims to log but
 // does not call the writer fails too.
 import { test } from "node:test";
+import { loadPattern } from "../src/config.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,7 +46,11 @@ test("every POST that changes the plan, a person or the config is accounted for"
 const ACTING_FORM = {
   "/admin/invite": { email: "invited@example.invalid", name: "Invited Person" },
   "/admin/weekly/add": { time: "19:00", dayOfWeek: "3", activities: "salsa" },
-  "/admin/holiday": { date: "2026-12-25", on: "1" },
+  // DERIVED from the season, not a fixed date. It was 2026-12-25 — a Danish public holiday, and OUTSIDE the
+  // configured season, which the route now refuses because writing a closure for a date the seeder never visits
+  // would be a config entry that does nothing. The season's first day is in-season by construction and is itself a
+  // public holiday in the shipped config, so on=1 is a real opt-in that changes something and gets recorded.
+  "/admin/holiday": { date: loadPattern().season.from, on: "1" },
 };
 
 // THE RUNTIME VERSION OF THE TEST BELOW, and the reason both exist.
