@@ -162,11 +162,16 @@ if (process.argv[1] && (await import("node:url")).pathToFileURL(process.argv[1])
   // The demo needs its own config file, not 4water's. The app reads the season KEY from config to find the
   // season in the database, so seeding one season while the server looks for another would leave every screen
   // empty — which is exactly the failure this replaces.
+  //
+  // DATABASE FIRST, config second, and that order is the whole point. It was the other way round, and the
+  // failure this comment claims to prevent happened anyway by a different route: the pattern file was written,
+  // the seeding run then did not complete, and what was left behind was a config naming a season with no
+  // sessions in it. Every screen empty, and /status reporting the season as fine. Writing the config only after
+  // the database is known good means an interrupted run leaves the PREVIOUS working pair in place.
   const pattern = demoPattern();
-  writeFileSync(patternFile, JSON.stringify(pattern, null, 2) + "\n", "utf8");
-
   const db = openDb(dbFile);
   const r = buildDemo(db, { pattern });
+  writeFileSync(patternFile, JSON.stringify(pattern, null, 2) + "\n", "utf8");
   const today = new Date().toISOString().slice(0, 10);
 
   // Every count below is scoped to the demo season. Counting the whole table is what hid a second season
