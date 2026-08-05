@@ -12,19 +12,11 @@ import { BOARD_EMPTY_REASONS, SLOT_EMPTY_REASONS } from "../src/queries.mjs";
 // year-dependent entry is covered. A table read at 2026 would leave `holiday.prayerDay` unchecked while the
 // app can still show it for an archived season.
 import { COUNTRIES } from "../src/holidays.mjs";
+// One walk, with a floor built in — see tools/sourcewalk.mjs. The local copy this replaces could be made to
+// return nothing and "every statically-written translation key exists in both locales" stayed green.
+import { sourceFiles as walkSource } from "../tools/sourcewalk.mjs";
 
-function sourceFiles() {
-  const out = [];
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (name.endsWith(".mjs")) out.push(full);
-    }
-  };
-  for (const d of ["src", "tools"]) walk(path.join(ROOT, d));
-  return out;
-}
+const sourceFiles = () => walkSource();
 
 // Static calls only: t("some.key") or t('some.key'). Dynamic ones like t(`role.${role}`) cannot be resolved
 // this way and are covered by the family checks below.

@@ -10,23 +10,16 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { ROOT, loadPattern, loadStrings } from "../src/config.mjs";
+// The walk lives in one place and refuses to return an implausibly short list. Blinding the two local copies of
+// this function left all but three tests in the suite green, including the two "and the gate genuinely fires"
+// controls below —
+// they exercise the detector on a planted string and never the file list. tools/sourcewalk.mjs carries the detail.
+import { sourceFiles as walkSource } from "../tools/sourcewalk.mjs";
 
 const SCAN_DIRS = ["src", "test", "tools"];   // tools/ holds real code too, so it is not exempt from the rule
 const EXEMPT = ["config", "strings"];      // the seams themselves are where these names belong
 
-function sourceFiles() {
-  const out = [];
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) {
-        if (!EXEMPT.includes(name)) walk(full);
-      } else if (name.endsWith(".mjs")) out.push(full);
-    }
-  };
-  for (const d of SCAN_DIRS) walk(path.join(ROOT, d));
-  return out;
-}
+const sourceFiles = () => walkSource({ dirs: SCAN_DIRS, exempt: EXEMPT });
 
 // Extract string literals with a single-pass scanner rather than a regex. A regex cannot tell a quote
 // inside a // comment from a real literal, and the first version of this gate reported three offences that

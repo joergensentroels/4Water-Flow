@@ -20,6 +20,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import os from "node:os";
 import { ROOT } from "../src/config.mjs";
+import { testFiles } from "../tools/sourcewalk.mjs";
 import { MIN_NODE, nodeTooOld } from "../src/db.mjs";
 
 const PORT = 8302;
@@ -142,8 +143,12 @@ test("nothing only the tests use is baked into the image", () => {
 // that one file: every path the tests reach for under the repo root must be something git actually carries.
 test("no test depends on a file git does not carry", () => {
   const ignored = [];
-  for (const rel of readdirSync(path.join(ROOT, "test"))) {
-    if (!rel.endsWith(".mjs")) continue;
+  // testFiles(), not a bare readdirSync: over an empty directory the answer to "does any test depend on a
+  // gitignored file" is always no, and this test would report success having read nothing at all. The walk refuses
+  // an implausibly short list — tools/sourcewalk.mjs exists because blinding the equivalent walk in seams and
+  // strings left all but three tests in the suite green, controls included.
+  for (const full of testFiles()) {
+    const rel = path.basename(full);
     // Line comments stripped first. A comment cannot open a file, so a path written in prose is not a dependency —
     // and this scan reported one as `test/backup.test.mjs reads 4water.db` when the only mention was a sentence
     // explaining a defect. A gate whose failure message is false about its own finding is the thing this suite
@@ -152,7 +157,7 @@ test("no test depends on a file git does not carry", () => {
     //
     // Line comments only. A `/* */` block containing this call would still be reported, which is the safe
     // direction to be wrong in — the cost is rewording a comment, not a test that cannot run on a fresh clone.
-    const text = readFileSync(path.join(ROOT, "test", rel), "utf8")
+    const text = readFileSync(full, "utf8")
       .split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "")).join("\n");
     // Only paths built from ROOT — a temp directory the test creates itself is exactly what it should use.
     for (const m of text.matchAll(/path\.join\(ROOT,\s*([^)]*)\)/g)) {

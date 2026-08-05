@@ -33,6 +33,9 @@ test/
 tools/testkit.mjs
 tools/season-fixture.mjs
 tools/measure.mjs
+# sourcewalk.mjs is the shared file-walk the derived audits build their evidence from, with the floor that
+# makes an empty walk a failure rather than a green suite. Nothing at runtime reads it.
+tools/sourcewalk.mjs
 node_modules/
 .git/
 .gitignore
