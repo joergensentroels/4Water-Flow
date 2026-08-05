@@ -78,8 +78,21 @@ version was a regex and reported three offences that were all prose inside comme
 
 **One thing: an importer for the old workbooks, and that is deliberate.** The cutover plan (spec §7) switches at
 a season boundary, and Score is per-season — so nothing needs importing except the ~40 people and the capability
-matrix. Building a reader for 22 sheets and 86 MB of XML to avoid typing forty names in would be the expensive
-way round.
+matrix. Building a reader for 22 sheets and 86 MB of XML to avoid that would be the expensive way round.
+
+**But be honest about what "that" is, because the sentence above used to say "typing forty names in" and the
+capability matrix is the larger half.** Concretely, at cutover somebody sits down and does:
+
+- ~40 invitations, one address at a time, each needing the volunteer to open the link and accept.
+- **the capability matrix — up to 40 × 6 = 240 toggles.** The Administration screen has one button per person per
+  activity and no JavaScript, so each is a form submission and a page reload. Half an hour of clicking, not five
+  minutes, and worth putting in somebody's calendar rather than discovering at the season boundary.
+
+**A wrong capability is silent, so check the matrix afterwards.** Nothing validates it: a volunteer you forgot to
+mark as a Salsa leader is simply never offered Salsa, and the shift exchange tells them *"Nothing is open in the
+activities you run"* — which is true, and hides the mistake. The Administration screen lists each person's
+capabilities as text, so the check is to read that roster against the sheet once, before the season opens. If the
+matrix ever grows past a few hundred cells, that is the point to reconsider an importer — not before.
 
 Everything else is built: availability at two granularities, the shift exchange, the read-only plan, the planner
 grid, auto-roster with proposals a planner locks or discards, leader/follower roles per session, notifications

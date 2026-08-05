@@ -170,6 +170,24 @@ demote the genuinely last active administrator.
 and is never recoverable — only a hash of it is stored, so a stolen database yields no working invite links.
 Copy it and send it to them. It is single-use and expires after 14 days.
 
+## Moving the whole roster over from the spreadsheet — budget an afternoon, and check it afterwards
+
+There is no importer, deliberately (`README.md` says why). What that means in practice, so nobody plans it as a
+five-minute job:
+
+1. **~40 invitations**, one address at a time on **Administration → Invitations**. Each needs the volunteer to
+   open the link and press **Accept invitation** before they exist as a person you can give capabilities to.
+2. **The capability matrix — up to 40 people × 6 activities = 240 toggles.** One button per person per activity,
+   no JavaScript anywhere in this app, so each one is a form submission and a page reload.
+3. **Then read it back.** This is the step to not skip. Nothing validates the matrix, and a wrong cell is silent:
+   a volunteer you did not mark as a Salsa leader is simply never offered Salsa, and the shift exchange tells them
+   *"Nothing is open in the activities you run"* — true, and it hides your mistake rather than reporting it. The
+   Administration roster prints each person's capabilities as text next to their name, so read that list against
+   the sheet once, before the season opens.
+
+Do steps 1 and 2 well before the season boundary. Step 3 is the only defence against a quiet gap in the roster,
+and it is much cheaper than a planner discovering in week three that a slot has never had a candidate.
+
 ## Change the season, the activities, or the hand-back deadline
 
 **Administration** → **Season** / **Activities**. Changes are validated before anything is written, written
