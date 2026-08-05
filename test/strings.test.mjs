@@ -330,6 +330,122 @@ test("makeT picks the singular at exactly one, in the reader's own language", ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// One concept, one Danish word. A translator — or me, six months from now — rendering `shift` as "tjans" in one
+// string and "vagt" in the next costs a volunteer more than a clumsy sentence does: they stop being sure the two
+// screens are talking about the same thing.
+//
+// Checked from the ENGLISH side, which is the only side where the concept is unambiguous. Two of the mappings are
+// deliberately one-to-many and that is the interesting part: `slot` is **vagt** when it means a shift to be filled
+// and **tidsrum** when it means a place in the weekly rhythm, and English uses one word for both.
+//
+// Both sides are stripped of placeholders and dotted identifiers first. Without that, `{activity}` counts as the
+// English word "activity" and `holidays.country` as "holidays", and the check demands a Danish rendering of
+// something that was never prose — which is exactly what the first version of this did, on five keys.
+const GLOSSARY = {
+  shift: ["vagt"],
+  shifts: ["vagt"],
+  slot: ["vagt", "plads", "tidsrum"],
+  slots: ["vagt", "plads", "tidsrum"],
+  session: ["mødegang", "vagt"],
+  sessions: ["mødegang", "vagt"],
+  calendar: ["kalender"],
+  plan: ["plan"],
+  season: ["sæson"],
+  planner: ["planlægger"],
+  volunteer: ["frivillig"],
+  availability: ["tilgængelighed"],
+  activity: ["aktivitet"],
+  activities: ["aktiviteter"],
+  holiday: ["helligdag", "lukket"],
+  exchange: ["børs"],
+  session: ["mødegang", "vagt"],
+  proposal: ["forslag"],
+  proposals: ["forslag"],
+  administrator: ["administrator"],
+  invitation: ["invitation"],
+  // Two senses, and both are real: a permission role (planner/admin/volunteer) and a dance role (leader/follower).
+  // Danish uses "rolle" for both, which is why one entry covers it — the ambiguity is in English, not the Danish.
+  role: ["rolle", "fører", "følger"],
+};
+// English words common in the strings that name no domain concept, so no Danish rendering is prescribed. Listed so
+// the coverage check below can insist the glossary knows about every frequent noun, rather than quietly skipping
+// the ones nobody thought of.
+const NOT_DOMAIN = new Set(["the", "and", "you", "your", "that", "this", "for", "are", "have", "has", "not", "can",
+  "will", "with", "from", "they", "them", "their", "was", "were", "been", "which", "what", "when", "who", "why",
+  "how", "there", "here", "one", "all", "any", "some", "more", "most", "than", "then", "but", "because", "into",
+  "out", "off", "still", "yet", "does", "did", "just", "only", "also", "already", "again", "back", "now", "date",
+  "dates", "day", "days", "time", "times", "week", "weeks", "month", "somebody", "nobody", "everybody", "people",
+  "person", "name", "email", "page", "screen", "list", "message", "messages", "link", "log", "data", "under",
+  "about", "answer", "answered", "ask", "add", "added", "remove", "removed", "change", "changed", "make", "made",
+  "take", "taken", "takes", "run", "runs", "set", "see", "show", "shown", "showing", "read", "keep", "kept",
+  "since", "before", "after", "first", "next", "last", "own", "same", "other", "each", "every", "few", "many",
+  "something", "nothing", "anything", "yours", "ours", "app", "chat", "status", "version", "total", "number",
+  // Ordinary verbs and adjectives that carry no concept of their own. `open` is the one worth naming: it is an
+  // adjective about a slot ("ledig") and never a noun in this app, so prescribing a word for it would be wrong.
+  "open", "could", "else", "created", "address", "sent", "exist", "look"]);
+
+const proseOnly = (s) => s
+  .replace(/\{[^}]*\}/g, " ")
+  .replace(/\b[\w-]+(?:\.[\w-]+)+\b/g, " ")
+  .replace(/\b[A-Z][A-Z_]{2,}\b/g, " ");
+
+test("one concept, one Danish word", () => {
+  const en = loadStrings("en");
+  const da = loadStrings("da");
+  const drift = [];
+  let checked = 0;
+
+  for (const [term, allowed] of Object.entries(GLOSSARY)) {
+    const re = new RegExp(`\\b${term}\\b`, "i");
+    for (const key of Object.keys(en)) {
+      if (typeof en[key] !== "string" || typeof da[key] !== "string") continue;
+      if (!re.test(proseOnly(en[key]))) continue;
+      checked++;
+      const danish = proseOnly(da[key]).toLowerCase();
+      if (!allowed.some((word) => danish.includes(word))) drift.push(`${key} (${term}): ${da[key]}`);
+    }
+  }
+  assert.ok(checked >= 100, `only ${checked} term occurrences checked — the glossary or the matcher is not working`);
+  assert.deepEqual(drift, [],
+    "these Danish strings render an English domain term as something the glossary does not list. Either the Danish " +
+    "has drifted from the word used everywhere else, or the concept legitimately has a second rendering and the " +
+    "glossary should say so:\n  " + drift.join("\n  "));
+
+  // The control: a string with no Danish term in it must NOT satisfy the matcher, or "no drift" means nothing.
+  // No weekday name in the example — the seams gate forbids them in string literals and caught the first version
+  // of this line, which is the fourth time it has caught me reaching for a day of the week as an illustration.
+  const bogus = proseOnly("A shift nobody has taken").toLowerCase();
+  assert.ok(!GLOSSARY.shift.some((w) => bogus.includes(w)), "the matcher accepts a string with no Danish term in it");
+});
+
+// The glossary is hand-written, so this is what stops it silently covering less than it appears to: every English
+// word used often enough to be a domain term must be either IN the glossary or declared not-domain. A new concept
+// added to the app fails here until somebody decides what it is called in Danish.
+test("the glossary knows about every frequent word in the English strings", () => {
+  const en = loadStrings("en");
+  // Counted as LEMMAS, not tokens. The first version counted "volunteer" (7) and "volunteers" (5) separately, so
+  // both fell under the threshold and `volunteer` could be dropped from the glossary without anything noticing —
+  // which the control caught. Crude singular-stripping is enough here: the question is only whether a word is
+  // frequent enough to be a concept.
+  const lemma = (w) => w.replace(/s$/, "");
+  const counts = new Map();
+  for (const v of Object.values(en)) {
+    if (typeof v !== "string") continue;
+    for (const w of (proseOnly(v).toLowerCase().match(/[a-z]{3,}/g) ?? [])) {
+      counts.set(lemma(w), (counts.get(lemma(w)) ?? 0) + 1);
+    }
+  }
+  const frequent = [...counts].filter(([, n]) => n >= 8).map(([w]) => w);
+  assert.ok(frequent.length >= 20, `only ${frequent.length} frequent words — the counter is not working`);
+
+  const known = new Set([...Object.keys(GLOSSARY), ...NOT_DOMAIN].map(lemma));
+  const unclassified = frequent.filter((w) => !known.has(w));
+  assert.deepEqual(unclassified, [],
+    "these words appear eight or more times in the English strings and the glossary has no opinion about them. If " +
+    "one names a domain concept, add it with its Danish; if not, add it to NOT_DOMAIN. A glossary that does not " +
+    "know about a frequent word cannot notice it drifting:\n  " + unclassified.join("\n  "));
+});
+
 test("no locale file contains an unreplaced English fallback marker or stray HTML", () => {
   for (const locale of ["da", "en"]) {
     for (const [key, value] of Object.entries(loadStrings(locale))) {
