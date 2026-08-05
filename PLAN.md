@@ -167,6 +167,22 @@ up, add it there too.**
   available without a remote. **Push, and confirm the first run is green, before trusting that line.**
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
+- **The newest two screens have not been photographed, and one has not been pressed.** The invitation landing page
+  was read in a real browser at 375×812 — its button measures 309×48 CSS px, the page does not scroll sideways, and
+  a second GET of the link still offers it and sets no cookie, which is the whole point of it existing. What could
+  not be done from here is interactive: screenshots fail with "the Browser pane is not displayed, so the page is not
+  compositing frames", clicks aimed at the button's measured centre were never delivered (nothing appeared in the
+  network log), and the Playwright surface shares that browser's profile so it refuses to start alongside it. So
+  both screens were instead walked over real HTTP against a running demo instance with real cookies — accept
+  returns 303 to `/availability`, which renders 70 date rows and 210 radios for the newcomer; deactivating a
+  volunteer holding three shifts redirects to `?r=released&n=3` and the page reads "Marked inactive. 3 future
+  shifts were released to the exchange for somebody else to take."; the planner then shows that person on zero
+  rows and offers 90 selects. Structure and wording are verified. **Pixels are not**, and neither screen adds CSS,
+  which is the reason that gap is small rather than a reason it is closed.
+  One thing worth having measured on a live instance rather than only in a fixture: a brand-new volunteer's
+  availability page has 70 radio groups, exactly one checked in each, and in every case it is "No answer yet" —
+  so rule 4, silence is not consent, holds where it is load-bearing, and no group carries the two-checked defect
+  that the same-hour grouping bug used to produce.
 - **Whether the auto-roster's weekday concentration is a problem is not a technical question.** Measured on a
   full season from zero it evens out shift *counts* about as well as availability permits, and puts three of
   the four broadly-available volunteers on one weekday 78–91% of the time. Both facts are in `RUNBOOK.md` under
