@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { ROOT, loadPattern, roleSlotsFor } from "../src/config.mjs";
@@ -41,6 +41,45 @@ const waitHealthy = async (port, child) => {
   }
   return false;
 };
+
+// The divergence this whole file exists because of, checked in the other direction too.
+//
+// Every other suite builds its world through the harness, and twice the harness did setup the boot path skipped.
+// The mirror image is just as dangerous and harder to notice: the harness taking a DIFFERENT route to the same
+// state. It was — the boot block calls `seedSeason`, and `makeWorld` called `seedStructure` plus a separate
+// `openEverySession`, which is precisely the pair seedSeason exists to replace. Its comment says so: the fix for
+// calling only the first "is not another reminder to call both: it is one function, so that calling half of it is
+// no longer expressible." The harness went on expressing it.
+//
+// Nothing failed when that was changed — same file, same rows — which is the point. A step added to seedSeason
+// later would reach production and miss every test built through the harness, and the suite would stay green.
+//
+// Both sides are read from the source rather than named here, so this cannot agree with a stale copy of itself.
+test("the harness materialises a season through the same entry point the boot path uses", () => {
+  const server = readFileSync(path.join(ROOT, "src", "server.mjs"), "utf8");
+  const kit = readFileSync(path.join(ROOT, "tools", "testkit.mjs"), "utf8");
+  const strip = (s) => s.replace(/^\s*\/\/.*$/gm, "");
+
+  const bootBlock = strip(server).slice(strip(server).indexOf("import.meta.url"));
+  assert.ok(bootBlock.length > 500, "the boot block was not located — this check is not looking at anything");
+
+  const seedersIn = (text) => [...new Set([...text.matchAll(/\b(seedSeason|seedStructure)\s*\(/g)].map((m) => m[1]))];
+  const boot = seedersIn(bootBlock);
+  assert.deepEqual(boot, ["seedSeason"],
+    `the boot path seeds with ${boot.join(", ") || "nothing"} — if that changed, the harness must change with it`);
+
+  const harness = seedersIn(strip(kit));
+  assert.ok(harness.includes("seedSeason"),
+    `tools/testkit.mjs seeds with ${harness.join(", ")} and not seedSeason, so every test builds its world by a ` +
+    `route production does not take. That is how the harness and the boot path drift apart, which has already ` +
+    `shipped two defects in this project.`);
+
+  // seedStructure alone is still allowed in the harness, for the `openSessions: false` world — a season with no
+  // slots is the shape of the defect that shipped and tests need to be able to build it deliberately. What must
+  // not happen is the DEFAULT path taking it.
+  assert.match(strip(kit), /openSessions\s*\?\s*\r?\n?\s*seedSeason\(/,
+    "the harness's default world must be the seedSeason one, with seedStructure reserved for the no-slots case");
+});
 
 test("a brand-new deployment seeds its season, not an empty shell", async () => {
   const dir = freshDir();

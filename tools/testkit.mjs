@@ -10,7 +10,7 @@ import path from "node:path";
 import os from "node:os";
 import { migrate } from "../src/db.mjs";
 import { loadPattern } from "../src/config.mjs";
-import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
+import { seedSeason, seedStructure, seedPeople } from "../src/seed.mjs";
 import { buildApp } from "../src/server.mjs";
 
 export const TEST_ENV = { FOURWATER_SECRET: "s".repeat(48), FOURWATER_AUTH: "dev", NODE_ENV: "test" };
@@ -37,14 +37,32 @@ export async function makeWorld({ volunteers = 2, openSessions = true, roles = {
   const pattern = loadPattern();
   const db = new DatabaseSync(":memory:");
   migrate(db);
-  const { seasonId } = seedStructure(db, pattern);
+
+  // `seedSeason` — the SAME entry point the real boot path uses — rather than seedStructure plus a separate
+  // openEverySession. Those two halves are exactly what seedSeason was created to replace: its comment says the
+  // fix for calling only the first "is not another reminder to call both: it is one function, so that calling half
+  // of it is no longer expressible." The harness went on expressing it, which is how a helper diverges from
+  // production in the one file whose divergence has already shipped two defects.
+  //
+  // Nothing changes for a passing test today — same file, same rows — and that is the point: the divergence was
+  // latent. A step added to seedSeason later would reach production and miss every test built through here, which
+  // is the same failure as the notifier the harness supplied and the boot path did not, only pointing the other
+  // way.
+  //
+  // It also passes `pattern` through. The old call was `openEverySession(db, seasonId)` with no pattern, so it
+  // re-read config/pattern.json from disk — the hazard seed.mjs's own header warns about, harmless only because
+  // the harness happens to load the same file.
+  const { seasonId } = openSessions
+    ? seedSeason(db, pattern)
+    // Structure WITHOUT slots is a legitimate world to want: it is the shape of the defect that shipped, and
+    // test/firstrun.test.mjs and test/journey.test.mjs both need to be able to build it deliberately.
+    : seedStructure(db, pattern);
 
   const people = seedPeople(db, seasonId, Array.from({ length: volunteers }, (_, i) => ({
     name: `Volunteer ${i + 1}`,
     contact: `v${i + 1}@example.org`,
     can: [pattern.activities[0].key],
   })));
-  if (openSessions) openEverySession(db, seasonId);
 
   // roles: { 0: ["planner"], 1: [] } — index into `people`.
   for (const [idx, names] of Object.entries(roles)) {
