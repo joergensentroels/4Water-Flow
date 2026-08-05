@@ -269,13 +269,41 @@ const NUMBER_INVARIANT = {
   "status.silent": "'1 of 12 active volunteers have not answered' — same n-of-N shape.",
   "status.silentMore": "'And 1 more.' — the noun is elided entirely, so there is nothing for it to agree with.",
   "outbox.all": "'Everything (1)' — a filter chip carrying a bare count in brackets.",
+  // NOTE_MAX is a constant 280 in src/notes.mjs, not configuration — so {max} is never 1 and never can be. This
+  // is the only reason in this table that is provable from the source rather than from how a sentence reads.
+  "notes.limit": "{max} is NOTE_MAX, a constant 280 in src/notes.mjs — it cannot be 1, so no singular is reachable.",
+  "notes.tooLong": "{max} is NOTE_MAX, a constant 280 in src/notes.mjs — it cannot be 1, so no singular is reachable.",
 };
 
 test("every count string has a singular form, or is declared invariant", () => {
   const en = loadStrings("en");
   const da = loadStrings("da");
-  const counted = Object.keys(en).filter((k) => !k.endsWith(".one") && /\{n\}/.test(en[k]));
-  assert.ok(counted.length >= 20, `only ${counted.length} strings interpolate {n} — this check is not looking`);
+  // ANY placeholder immediately in front of a plural noun, not only {n}.
+  //
+  // The first version collected on /\{n\}/ alone, which is the name the singular mechanism keys on — so it saw the
+  // strings that were already able to be fixed and was blind to every count written as {eligible}, {gaps}, {filled},
+  // {hours}, {minutes} or {seasons}. Measured: 30 strings in view, and thirteen more outside it that render
+  // "1 volunteers", "1 slots", "1 hours" at a count of one. One of them is the slot-open announcement posted to the
+  // whole channel, where exactly one eligible volunteer is an ordinary case in a department this size.
+  //
+  // A collector keyed to the name of the machinery can only ever find what the machinery already covers. This one
+  // is keyed to the SHAPE — a placeholder, whitespace, a word ending in s — so a count named anything at all is in
+  // scope, and the fix is either a singular, a rewording, or a recorded reason.
+  // The word after the placeholder has to be a plural NOUN, and "is", "has" and "exists" all end in s. Separated by
+  // a list of English verb forms rather than by morphology, because morphology cannot tell "exists" from "slots" —
+  // and this list describes the LANGUAGE, not this codebase, so it does not go stale as the app changes. The first
+  // draft of this collector had no such list and its own control caught it on "Season {key} is running".
+  const NOT_A_PLURAL = /^(is|are|was|were|has|had|does|exists|its|this|us|as|less|plus|yes|always)$/i;
+  const pluralAfterPlaceholder = (s) => [...String(s).matchAll(/\{\w+\}\s+([a-zA-Z]+s)\b/g)]
+    .some((m) => !NOT_A_PLURAL.test(m[1]));
+  const counted = Object.keys(en).filter((k) => !k.endsWith(".one") && pluralAfterPlaceholder(en[k]));
+  assert.ok(counted.length >= 20, `only ${counted.length} strings put a placeholder before a plural — not looking`);
+  // Controls, because a shape-based collector that stopped matching would report an empty problem list.
+  assert.ok(pluralAfterPlaceholder("removed {n} messages"), "the collector cannot see the shape it exists for");
+  assert.ok(pluralAfterPlaceholder("{eligible} volunteers can take it"), "and must see a count named anything");
+  assert.ok(!pluralAfterPlaceholder("Season {key} is running"), "and must not treat a bare 'is' as a plural noun");
+  assert.ok(!pluralAfterPlaceholder("Season {key} exists and covers today"), "nor a verb that happens to end in s");
+  assert.ok(!pluralAfterPlaceholder("nothing interpolated here"), "nor a string with no placeholder at all");
 
   const missing = counted.filter((k) => !(`${k}.one` in en) && !(k in NUMBER_INVARIANT));
   assert.deepEqual(missing, [],
@@ -291,8 +319,15 @@ test("every count string has a singular form, or is declared invariant", () => {
 
   // Both directions: an invariant entry for a string that no longer counts anything, or that has since grown a
   // singular, is a decision about a file that has changed.
-  const stale = Object.keys(NUMBER_INVARIANT).filter((k) => !counted.includes(k));
-  assert.deepEqual(stale, [], `declared invariant but no longer a count string — remove: ${stale}`);
+  //
+  // "Still a count string" is asked DIFFERENTLY from "needs a singular", and conflating them broke this check the
+  // moment the collector widened. Most entries here exist precisely BECAUSE the number trails the noun — that is
+  // the reason written beside them — so they never match the placeholder-before-plural shape, and testing them
+  // against that shape declared nine sound decisions stale at once. What makes an entry stale is the string
+  // vanishing or ceasing to interpolate anything at all.
+  const stale = Object.keys(NUMBER_INVARIANT).filter((k) => !(k in en) || !/\{\w+\}/.test(en[k]));
+  assert.deepEqual(stale, [],
+    `declared invariant but the string is gone or interpolates nothing — remove: ${stale}`);
   const both = Object.keys(NUMBER_INVARIANT).filter((k) => `${k}.one` in en);
   assert.deepEqual(both, [], `declared invariant AND given a singular — decide which: ${both}`);
 
@@ -352,6 +387,11 @@ const GLOSSARY = {
   slots: ["vagt", "plads", "tidsrum"],
   session: ["mødegang", "vagt"],
   sessions: ["mødegang", "vagt"],
+  // The notification kind `shift_reminder`, which the volunteer reads in a chat channel. It crossed the
+  // threshold when the singular forms were added, and it is worth owning: "påmindelse" must not drift to
+  // "notifikation", which this app uses for the row in the table rather than for the message.
+  reminder: ["påmindelse"],
+  reminders: ["påmindelse"],
   calendar: ["kalender"],
   plan: ["plan"],
   season: ["sæson"],
@@ -386,7 +426,8 @@ const NOT_DOMAIN = new Set(["the", "and", "you", "your", "that", "this", "for", 
   "will", "with", "from", "they", "them", "their", "was", "were", "been", "which", "what", "when", "who", "why",
   "how", "there", "here", "one", "all", "any", "some", "more", "most", "than", "then", "but", "because", "into",
   "out", "off", "still", "yet", "does", "did", "just", "only", "also", "already", "again", "back", "now", "date",
-  "dates", "day", "days", "time", "times", "week", "weeks", "month", "somebody", "nobody", "everybody", "people",
+  "dates", "day", "days", "time", "times", "week", "weeks", "month", "minute", "minutes", "hour",
+  "hours", "automatically", "somebody", "nobody", "everybody", "people",
   "person", "name", "email", "page", "screen", "list", "message", "messages", "link", "log", "data", "under",
   "about", "answer", "answered", "ask", "add", "added", "remove", "removed", "change", "changed", "make", "made",
   "take", "taken", "takes", "run", "runs", "set", "see", "show", "shown", "showing", "read", "keep", "kept",

@@ -325,9 +325,16 @@ test("the planner can propose, review, and lock in from the grid", withPlanner({
   const { token } = await w.csrfFrom("/planner", planner);
 
   const ran = await w.post("/planner/auto-roster", planner, new URLSearchParams({ csrf: token }));
-  assert.equal(reasonOf(ran), "roster_done");
+  // roster_gaps, and that it is this fixture's outcome is the point. Some slots need a leader AND a follower and
+  // no eligible pair is free, so a realistic run finishes with slots nobody can take — which makes the gaps case
+  // the ORDINARY one, not an edge. It used to share one code and one sentence with a complete run, and rendered in
+  // a neutral banner: "12 proposals made. 3 slots could not be filled", styled exactly like unqualified success.
+  assert.equal(reasonOf(ran), "roster_gaps", "this fixture leaves slots nobody is eligible for");
   const { body } = await w.follow(ran, planner);
-  assert.match(body, /proposals made|forslag lavet/, "the message should say what happened, not just 'done'");
+  assert.match(body, /class="flash warn"/,
+    "unstaffed slots must be flagged for attention — the planner is the only person who can fix them");
+  assert.match(body, /Still without anybody|Stadig uden nogen/, "and the banner must say how many");
+  assert.match(body, /Proposed:|Foreslået:/, "while still reporting what it did manage");
   assert.match(body, /waiting for your decision|afventer din beslutning/);
   assert.match(body, /Proposed|Forslag/, "and the grid should mark them as provisional");
 

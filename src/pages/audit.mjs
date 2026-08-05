@@ -42,7 +42,7 @@ export function renderAudit({ t, session, roles, who, rows, labels, total, reten
   const body = html`
     <h2>${t("audit.title")}</h2>
     <p class="hint">${t("audit.intro", { n: total })}</p>
-    <p class="hint">${t("audit.retention", { days: retentionDays })}</p>
+    <p class="hint">${t("audit.retention", { n: retentionDays })}</p>
 
     ${rows.length === 0
       ? html`<p class="empty">${t("audit.empty")}</p>`

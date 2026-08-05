@@ -524,7 +524,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const r = autoRoster(db, { seasonId: sid, fromDate: today() });
     logAudit(c, "planner.autoRoster", `season:${sid}`, `proposed ${r.filled}, gaps ${r.gaps}`);
     if (r.filled === 0 && r.gaps === 0) return redirect(res, "/planner?r=roster_empty");
-    redirect(res, `/planner?r=roster_done&filled=${r.filled}&gaps_n=${r.gaps}`);
+    // Which sentence the planner reads is decided HERE, where both numbers are known, rather than by one
+    // string trying to cover every case. `n` is whichever count the message inflects on.
+    if (r.gaps > 0) return redirect(res, `/planner?r=roster_gaps&filled=${r.filled}&n=${r.gaps}`);
+    redirect(res, `/planner?r=roster_done&n=${r.filled}`);
   });
 
   app.post("/planner/proposals/lock", async ({ req, res }) => {

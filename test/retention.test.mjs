@@ -335,7 +335,10 @@ test("running retention from the admin screen reports what it removed", withAdmi
   const r = await w.post("/admin/retention", admin, new URLSearchParams({ csrf: token }));
   assert.equal(reasonOf(r), "retention_done");
   const { body } = await w.follow(r, admin);
-  assert.match(body, /removed 1 messages|1 beskeder/, "a silent clean-up is indistinguishable from a broken one");
+  // The counts trail their nouns now ("messages: 1"), because one sentence carried three independent counts and
+  // no single singular form can serve all of them — "removed 1 messages, 3 invitations and 1 seasons" is wrong
+  // twice in the same line.
+  assert.match(body, /messages: 1|beskeder: 1/, "a silent clean-up is indistinguishable from a broken one");
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n, 0);
 }));
 

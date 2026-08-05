@@ -265,7 +265,9 @@ test("the nudge job's own account of itself is reported, and doing nothing is no
   for (const [state, expect] of [
     [{ startedAt: at - 3600_000, lastRun: null }, /have not run once/],
     [{ startedAt: at - 3600_000, lastRun: at - 600_000, lastSent: 0 }, /last ran 10 minutes ago and sent 0/],
-    [{ startedAt: at - 3600_000, lastRun: at - 60_000, lastError: "boom" }, /ran 1 minutes ago and failed/],
+    // "1 minute", singular. This line used to pin "1 minutes" — the test asserted the ungrammatical rendering,
+    // so the defect had a check protecting it. Found by widening the plural gate to any placeholder, not just {n}.
+    [{ startedAt: at - 3600_000, lastRun: at - 60_000, lastError: "boom" }, /ran 1 minute ago and failed/],
   ]) {
     const page = renderStatus({ t, session: { csrf: "x" }, roles: ["planner"], who: "P",
       status: collectStatus(w.db, { ...base, now: at, jobs: jobsWith(state) }) }).__raw;

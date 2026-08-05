@@ -140,7 +140,9 @@ export const withLink = (t, base, key, publicUrl, path) =>
 //
 // A leading sentence, not a second message: two announcements for one slot is how a channel starts getting muted.
 export const slotOpenMessage = (t, { when, activity, eligible, publicUrl = null, shortNotice = false }) => {
-  const base = t("notify.slotOpen", { when, activity, eligible });
+  // `n`, not `eligible`: makeT picks <key>.one only when vars.n is 1, so a count under any other name can never
+  // inflect. "1 volunteers can take it" was going to the whole channel, and one eligible volunteer is ordinary.
+  const base = t("notify.slotOpen", { when, activity, n: eligible });
   const body = shortNotice ? [t("notify.shortNotice"), base].join(" ") : base;
   return withLink(t, body, "notify.linkBoard", publicUrl, "/board");
 };

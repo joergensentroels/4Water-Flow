@@ -193,11 +193,11 @@ export function renderStatus({ t, session, roles, who, status, flash }) {
             f.more ? ` ${t("status.silentMore", { n: f.more })}` : ""}`,
       failed: () => t("status.failed", { n: f.value }),
       queued: () => t(f.note === "interrupted" ? "status.queuedInterrupted" : "status.queued", { n: f.value }),
-      backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { hours: f.value, kept: f.detail }),
+      backup: () => f.note === "none" ? t("status.backupNone") : t("status.backupAge", { n: f.value, kept: f.detail }),
       oidc: () => f.note === "discovery" ? t("status.oidcDiscovery") : t("status.oidcFallback", { why: f.detail }),
-      nudge: () => f.note === "never" ? t("status.nudgeNever", { minutes: f.detail })
-                 : f.note === "error" ? t("status.nudgeError", { minutes: f.value })
-                 : t("status.nudgeRan", { minutes: f.value, sent: f.detail }),
+      nudge: () => f.note === "never" ? t("status.nudgeNever", { n: f.detail })
+                 : f.note === "error" ? t("status.nudgeError", { n: f.value })
+                 : t("status.nudgeRan", { n: f.value, sent: f.detail }),
     }[f.key];
     return html`<li class="status ${f.level}"><b aria-hidden="true">${BADGE[f.level]}</b> <span>${text ? text() : f.key}</span></li>`;
   };

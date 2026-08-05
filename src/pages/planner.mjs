@@ -7,7 +7,12 @@ import { html, raw } from "../http.mjs";
 import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 const OUTCOME = {
+  // Three outcomes, not one sentence covering all of them. "12 proposals made. 0 slots could not be filled."
+  // made a planner parse a double negative to learn it had worked, and "0 proposals made. 5 slots could not be
+  // filled" — a run where nobody eligible was free for any of them — rendered in a neutral banner that signals
+  // nothing at all. The route has both numbers and can pick.
   roster_done: { key: "planner.rosterDone" },
+  roster_gaps: { key: "planner.rosterGaps", warn: true },
   roster_empty: { key: "planner.nothingToPropose" },
   locked: { key: "planner.locked" },
   discarded: { key: "planner.discarded" },
@@ -31,7 +36,7 @@ const OUTCOME = {
 // actually happened instead of "done".
 export function plannerFlash(t, code, vars) {
   const o = OUTCOME[code];
-  return o ? { text: t(o.key, vars), bad: !!o.bad } : null;
+  return o ? { text: t(o.key, vars), bad: !!o.bad, warn: !!o.warn } : null;
 }
 
 function byDate(rows) {

@@ -226,7 +226,11 @@ test("a real deployment can be set up and used end to end", async () => {
     // ---- 8. the planner fills the rest automatically, reviews, and locks it in ----
     const { token: rosterCsrf } = await admin.csrfFrom("/planner");
     const proposed = await admin.post("/planner/auto-roster", { csrf: rosterCsrf });
-    assert.equal(reasonOf(proposed), "roster_done", "auto-roster must have something to propose");
+    // Either code means it ran and proposed something; which one depends on whether every open slot could be
+    // filled, and on a real roster it usually cannot. What must hold is that it proposed, which the count below
+    // checks — not which of the two sentences the planner reads.
+    assert.ok(["roster_done", "roster_gaps"].includes(reasonOf(proposed)),
+      `auto-roster must have something to propose, got ${reasonOf(proposed)}`);
     {
       const db = new DatabaseSync(dbFile, { readOnly: true });
       const n = db.prepare("SELECT COUNT(*) n FROM assignments WHERE state='proposed' AND person_id IS NOT NULL").get().n;
