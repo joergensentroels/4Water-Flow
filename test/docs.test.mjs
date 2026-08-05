@@ -50,6 +50,25 @@ const MUST_COVER = ["CONTRIBUTING.md", "PLAN.md", "README.md", "RUNBOOK.md", "do
 
 const read = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
 
+// A documented config key is legitimate either because the shipped config has it, or because the code reads it —
+// an optional setting a deployment has not set belongs in the documents and not in config/pattern.json.
+//
+// "the code reads it" used to mean the leaf word appearing ANYWHERE in source, and two things were wrong with that.
+// A comment satisfied it, so a made-up setting whose last word appeared in any sentence anywhere passed. And the
+// scan covers test/ as well, which means a comment IN THIS FILE naming an example key made that key undetectable —
+// the check was defeated by the prose explaining it, silently, rather than failing. That is the seventh time in
+// this project that writing the forbidden thing into the explanation has cost something, and the first time it
+// disarmed a check instead of tripping one.
+//
+// So: comments are stripped, and the leaf has to appear as a property access or an object key. Code, not prose,
+// which is what the sentence meant all along. No example key is named here on purpose — describe, do not quote.
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+const configKeyKnown = (facts, dotted) => {
+  if (facts.configKeys.has(dotted)) return true;
+  const leaf = dotted.split(".").pop();
+  return new RegExp(`[.?]\\s*${leaf}\\b|["'\`]${leaf}["'\`]\\s*:`).test(facts.code);
+};
+
 function sourceFacts() {
   const files = [];
   const walk = (rel) => {
@@ -62,6 +81,8 @@ function sourceFacts() {
   const all = files.filter((f) => f.endsWith(".mjs")).map(read).join("\n");
   return {
     all,
+    // The same source with comments removed, for questions about what the code DOES rather than what it says.
+    code: stripComments(all),
     routes: new Set([...all.matchAll(/app\.(get|post)\("([^"]+)"/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`)),
     exported: new Set([...all.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map((m) => m[1])),
     env: new Set([...all.matchAll(/(?:env|process\.env)[.[]"?(FOURWATER_\w+|OIDC_\w+|MATTERMOST_\w+)"?\]?/g)].map((m) => m[1])),
@@ -80,22 +101,6 @@ function sourceFacts() {
   };
 }
 
-// One place may state the test count, and it is PLAN.md.
-//
-// Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK claimed a
-// hundred-and-something automated checks, RUNBOOK claimed a different three-hundred-and-something further down,
-// PLAN claimed that same wrong number, and the suite was a fourth. My own doc-claims sweep missed two of them
-// because it only matched PLAN's exact phrasing — a checker with a blind spot shaped like the thing it was
-// checking.
-//
-// The numbers are described rather than quoted on purpose: the source scan below now covers this file too, and
-// quoting them here would make this comment an offender. That is not a workaround, it is the rule applying to
-// itself — the point was never the specific digits, it was that four places disagreed.
-//
-// The count cannot be verified from inside the suite (running it from within itself does not terminate — see the
-// note at the top of this file), so this asserts the STRUCTURE instead: exactly one document may carry a number,
-// which makes the external check a single-place check rather than a hunt. Same fix as the Node floor and the
-// webhook timeout — one fact, one home.
 // Before anything else: the set of documents being checked has to be non-empty and has to include the ones that
 // carry real claims. Every test below iterates DOCS, so a walk that finds nothing would make all of them pass
 // while checking not one sentence — the exact shape of vacuous success this file exists to prevent.
@@ -143,6 +148,22 @@ test("the config comment's own count of its placeholders is true", () => {
   }
 });
 
+// One place may state the test count, and it is PLAN.md.
+//
+// Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK claimed a
+// hundred-and-something automated checks, RUNBOOK claimed a different three-hundred-and-something further down,
+// PLAN claimed that same wrong number, and the suite was a fourth. My own doc-claims sweep missed two of them
+// because it only matched PLAN's exact phrasing — a checker with a blind spot shaped like the thing it was
+// checking.
+//
+// The numbers are described rather than quoted on purpose: the source scan below now covers this file too, and
+// quoting them here would make this comment an offender. That is not a workaround, it is the rule applying to
+// itself — the point was never the specific digits, it was that four places disagreed.
+//
+// The count cannot be verified from inside the suite (running it from within itself does not terminate — see the
+// note at the top of this file), so this asserts the STRUCTURE instead: exactly one document may carry a number,
+// which makes the external check a single-place check rather than a hunt. Same fix as the Node floor and the
+// webhook timeout — one fact, one home.
 test("only PLAN.md states a test count, so there is one number to keep true", () => {
   const COUNTISH = /\b\d{2,4}\+?\s+(?:automated\s+)?(?:tests?|checks?)\b/gi;
   const offenders = [];
@@ -319,6 +340,60 @@ test("every service, volume and port the documents tell an operator to use actua
     `${problems.join("\n  ")}`);
 });
 
+// Everything above reads markdown. An operator also reads .env.example, compose.yml, the Dockerfile and the
+// _comment in config/pattern.json, and those name the same kinds of thing — paths, environment variables, config
+// keys, routes. The previous commit found a stale count in that comment, which is what made the gap visible: prose
+// was being checked by file extension rather than by whether anybody reads it.
+//
+// Only the extractors that need no allow-list are applied here. The function-name one is deliberately left out: a
+// sweep with it reported `getUTCDay()` in the config comment (a JavaScript built-in, documenting the weekday
+// convention) and `sort()` in the CI workflow (a shell command). Both are false positives, and the markdown version
+// of that check only survives them by carrying a hand-kept list of exceptions. Four precise checks that cost
+// nothing beat five with a list to maintain.
+//
+// Nothing was stale when this was written. It exists because .env.example naming a variable nothing reads is
+// exactly the failure the markdown gate was built for, and that file was outside it.
+test("the prose an operator reads outside the documents is also true", () => {
+  const facts = sourceFacts();
+  const cfg = JSON.parse(read("config/pattern.json"));
+  const sources = { "config/pattern.json (_comment)": (cfg._comment ?? []).join("\n") };
+  for (const f of [".env.example", "compose.yml", "Dockerfile"]) {
+    if (existsSync(path.join(ROOT, f))) sources[f] = read(f);
+  }
+  for (const dir of [".github/workflows"]) {
+    if (!existsSync(path.join(ROOT, dir))) continue;
+    for (const n of readdirSync(path.join(ROOT, dir))) sources[`${dir}/${n}`] = read(`${dir}/${n}`);
+  }
+  assert.ok(Object.keys(sources).length >= 4,
+    `only ${Object.keys(sources).length} non-document prose files found — this check would be looking at almost nothing`);
+
+  const problems = [];
+  let checked = 0;
+  const claim = (ok, message) => { checked++; if (!ok) problems.push(message); };
+  const norm = (s) => s.replace(/:[\w]+/g, ":x");
+
+  for (const [name, text] of Object.entries(sources)) {
+    for (const m of text.matchAll(/\b((?:src|tools|test|docs|config|strings|static)\/[\w./-]+\.\w{2,4})\b/g)) {
+      claim(existsSync(path.join(ROOT, m[1])), `${name} names ${m[1]}, which does not exist`);
+    }
+    for (const m of text.matchAll(/\b(FOURWATER_\w+|OIDC_\w+|MATTERMOST_\w+)\b/g)) {
+      claim(facts.env.has(m[1]), `${name} names ${m[1]}, which nothing reads`);
+    }
+    for (const m of text.matchAll(/\b((?:season|calendar|board|export|notify|retention)\.[\w.]+)\b/g)) {
+      claim(configKeyKnown(facts, m[1]),
+        `${name} names config ${m[1]}, which is neither in config/pattern.json nor read anywhere`);
+    }
+    for (const m of text.matchAll(/\b(GET|POST)\s+(\/[\w/:.-]*)/g)) {
+      claim([...facts.routes].some((r) => norm(r) === norm(`${m[1]} ${m[2]}`)),
+        `${name} names route ${m[1]} ${m[2]}, which is not registered`);
+    }
+  }
+
+  assert.ok(checked >= 10, `only ${checked} claims extracted from non-document prose — the extractors are not reading it`);
+  assert.deepEqual(problems, [],
+    `${problems.length} claim(s) outside the documents are not true:\n  ${problems.join("\n  ")}`);
+});
+
 test("every claim the documents make about the code is true", () => {
   const facts = sourceFacts();
   const problems = [];
@@ -349,8 +424,7 @@ test("every claim the documents make about the code is true", () => {
     for (const m of text.matchAll(/`((?:season|calendar|board|export|notify|retention)\.[\w.]+)`/g)) {
       // Either it is in the shipped config, or the code reads that name — an optional setting a deployment has
       // not set is legitimately documented and legitimately absent from config/pattern.json.
-      const leaf = m[1].split(".").pop();
-      claim(facts.configKeys.has(m[1]) || new RegExp(`\\b${leaf}\\b`).test(facts.all),
+      claim(configKeyKnown(facts, m[1]),
         `${doc} documents config ${m[1]}, which is neither in config/pattern.json nor read anywhere`);
     }
 
