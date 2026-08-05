@@ -29,6 +29,26 @@ test("every registered POST route refuses a missing and a wrong CSRF token", asy
     assert.ok(posts.length >= 12, `expected the app to register many POST routes, saw ${posts.length}`);
 
     const admin = await w.signIn(w.people[0]);   // an admin, so no route is refused merely for lack of a role
+
+    // A VALID TOKEN FROM ANOTHER SESSION, which is the only one of the four cases below that reaches the comparison.
+    //
+    // `checkCsrf` returns false on a length mismatch before comparing anything, and a real token is 22 characters
+    // (16 random bytes, base64url). "definitely-not-the-token" is 24, "" is 0, and missing is not a string — so the
+    // three original cases are all answered by the length guard alone. Measured, not reasoned: replacing the
+    // comparison with `return true` fails exactly one test in the whole suite, the unit test in auth.test.mjs, and
+    // nothing in this file. This audit was green against an implementation that accepted any 22-character token.
+    //
+    // That unit test proves the PRIMITIVE compares two tokens. It says nothing about whether a ROUTE hands that
+    // primitive the session belonging to this request — and a browser CSRF is precisely the attacker supplying the
+    // form, and therefore the token, while the browser supplies the victim's cookie. So the case that matters is
+    // one session's cookie with another session's token: same length, correctly formed, genuinely issued, wrong
+    // session. Nothing submitted that before.
+    const otherToken = csrfFromCookie(await w.signIn(w.people[1]));
+    const adminToken = csrfFromCookie(admin);
+    assert.equal(otherToken.length, adminToken.length,
+      "the two tokens differ in length, so the length guard would answer this case and it would prove nothing");
+    assert.notEqual(otherToken, adminToken, "both sessions minted the same token — not a real pair");
+
     const audited = [];
     for (const route of posts) {
       if (NO_SESSION_YET.has(route.pattern)) continue;
@@ -38,6 +58,7 @@ test("every registered POST route refuses a missing and a wrong CSRF token", asy
         ["missing", new URLSearchParams({})],
         ["empty", new URLSearchParams({ csrf: "" })],
         ["wrong", new URLSearchParams({ csrf: "definitely-not-the-token" })],
+        ["valid but from another session", new URLSearchParams({ csrf: otherToken })],
       ]) {
         const r = await w.post(path, admin, body);
         assert.equal(r.status, 403, `${route.pattern} accepted a ${label} CSRF token (status ${r.status})`);
@@ -45,7 +66,7 @@ test("every registered POST route refuses a missing and a wrong CSRF token", asy
 
       // And prove the route is reachable WITH a good token, so the 403s above are the guard talking and not
       // simply a route that refuses everything.
-      const ok = await w.post(path, admin, new URLSearchParams({ csrf: csrfFromCookie(admin) }));
+      const ok = await w.post(path, admin, new URLSearchParams({ csrf: adminToken }));
       assert.notEqual(ok.status, 403, `${route.pattern} refuses even a valid token — the audit above proved nothing`);
       audited.push(route.pattern);
     }
