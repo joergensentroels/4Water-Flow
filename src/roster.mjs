@@ -105,6 +105,14 @@ export function autoRoster(db, { seasonId, fromDate = "0000-00-00" }) {
 //
 // Whole-season, deliberately: that is the window autoRoster's own tally uses, so the planner sees the same
 // numbers the machine balanced against rather than a differently-scoped second opinion.
+// The `attended` column is the contribution record sitting beside the load. 4water asked for activities ATTENDED to
+// be what counts, and the function computing that had no caller outside test/ — a feature with no screen, for the
+// fifth time in this project. The two numbers belong side by side here, because the entire reason they are separate
+// is that they differ.
+//
+// That sentence was first written as a SQL comment inside the query below, and doing so made the reachability check
+// in test/reachable.test.mjs unable to see the defect: it strips JS comments, not `--` ones, so the identifier
+// named in the explanation counted as a call. A comment satisfying the check it explains, for the third time.
 export function rosterReview(db, seasonId) {
   // Two queries, both constant in headcount. strftime('%w') is 0=Sunday, which is getUTCDay()'s convention and
   // therefore the `weekday.N` string keys — no weekday name appears here, and none may.
@@ -112,6 +120,7 @@ export function rosterReview(db, seasonId) {
     SELECT p.id, p.name,
            CAST(strftime('%w', s.date) AS INTEGER) AS dow,
            SUM(CASE WHEN a.state = 'proposed' THEN 1 ELSE 0 END) AS proposed,
+           SUM(CASE WHEN a.attended IS 1 THEN 1 ELSE 0 END) AS attended,
            COUNT(a.id) AS n
       FROM people p
       LEFT JOIN assignments a ON a.person_id = p.id
@@ -147,11 +156,14 @@ export function rosterReview(db, seasonId) {
 
   const people = new Map();
   for (const r of rows) {
-    if (!people.has(r.id)) people.set(r.id, { id: r.id, name: r.name, total: 0, proposed: 0, byDay: new Map() });
+    if (!people.has(r.id)) {
+      people.set(r.id, { id: r.id, name: r.name, total: 0, proposed: 0, attended: 0, byDay: new Map() });
+    }
     const p = people.get(r.id);
     if (r.dow === null) continue;                 // the row a person with no work at all produces
     p.total += r.n;
     p.proposed += r.proposed;
+    p.attended += r.attended;
     p.byDay.set(r.dow, (p.byDay.get(r.dow) ?? 0) + r.n);
   }
 

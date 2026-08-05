@@ -89,6 +89,10 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
                 ? t("planner.reviewSameDay", { n: p.topDay.n, total: p.total, day: t.weekday(p.topDay.dow) })
                 : p.proposed > 0 ? t("planner.reviewProposed", { n: p.proposed })
                 : ""}</small>
+            <!-- Held is the big number, because it is what auto-roster balances and what the planner is deciding
+                 about. Attended sits beside it as the record, and only once there IS one: "0 turned up" against a
+                 season of future shifts reads as an accusation rather than as an absence of information. -->
+            ${p.attended > 0 ? html`<small class="attended">${t("planner.reviewAttended", { n: p.attended })}</small>` : ""}
           </li>`)}
       </ul>
     </details>`;

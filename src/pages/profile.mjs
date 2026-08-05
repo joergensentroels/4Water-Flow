@@ -3,6 +3,7 @@
 // which capabilities they were down for, or why the board looked empty.
 import { html } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
+import { attendedCount } from "../queries.mjs";
 
 export function myProfile(db, personId, seasonId) {
   const person = db.prepare(`SELECT id, name, contact, preferred_role AS preferredRole, status,
@@ -19,6 +20,14 @@ export function myProfile(db, personId, seasonId) {
                             SELECT date FROM availability_day WHERE person_id=?
                             UNION SELECT date FROM availability_hour WHERE person_id=?)`).get(personId, personId).n,
     datesInSeason: seasonId ? db.prepare("SELECT COUNT(DISTINCT date) n FROM sessions WHERE season_id=?").get(seasonId).n : 0,
+    // What they are recorded as having done. The privacy notice tells a volunteer that a planner records whether
+    // they turned up and that it counts how much they have helped — so they have to be able to SEE it. A record
+    // somebody can neither read nor question is the wrong kind to keep about a person, and telling them it exists
+    // while hiding it is worse than not telling them.
+    //
+    // Only `attended` here: the held count already reaches this page as renderProfile's `score` prop, and computing
+    // it twice under a second name is how two numbers that must agree stop agreeing.
+    attended: seasonId ? attendedCount(db, personId, seasonId) : 0,
   };
 }
 
@@ -85,6 +94,10 @@ export function renderProfile({ t, session, roles, who, me, score, flash,
 
     <div class="card">
       <p><b>${score}</b> — ${t("score.label")}</p>
+      <!-- Their own contribution record, in their own words. Shown even at zero, unlike the planner's version:
+           a volunteer looking for "what am I down as having done" needs an answer, and a missing line reads as
+           "not recorded anywhere" — which is what the privacy notice would then be wrong about. -->
+      <p class="hint">${t("profile.attended", { n: me.attended })}</p>
       <p class="hint">${t("profile.answered", { n: me.answered, of: me.datesInSeason })}</p>
       <p class="hint">${t("admin.capabilities")}:
         ${me.capabilities.length ? me.capabilities.map((c) => c.label).join(", ") : t("profile.noCapabilities")}</p>
