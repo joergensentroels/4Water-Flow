@@ -1,5 +1,5 @@
 // Wiring. Routes live here; the work lives in src/pages/*. Exported as buildApp() so tests can run the real
-// server on an ephemeral port rather than a mock — the bugs worth catching are in the plumbing.
+// server on an ephemeral port rather than a mock â€” the bugs worth catching are in the plumbing.
 import { pathToFileURL } from "node:url";
 import { createApp, send, redirect, readForm, html } from "./http.mjs";
 import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, exportConfig,
@@ -7,8 +7,8 @@ import { loadPattern, makeT, PATTERN_FILE, patternFileFor, calendarConfig, expor
 import { openDb, migrate } from "./db.mjs";
 import { readSession, sign, cookieHeader, clearCookieHeader, newCsrf, checkCsrf, sessionSecret } from "./session.mjs";
 import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOidc, discoverOidc, checkState, completeOidc,
-         linkIdentity, redeemInvite, createInvite, revokeInvite } from "./auth.mjs";
-import { layout, navFor, formatDate, formatTime, formatRole, renderErrorPage, renderPrivacy } from "./views.mjs";
+         linkIdentity, redeemInvite, inviteStatus, createInvite, revokeInvite } from "./auth.mjs";
+import { layout, navFor, formatDate, formatTime, formatRole, renderErrorPage, renderPrivacy, renderInvite } from "./views.mjs";
 import { slotOpenMessage, notifyConfig, makeNotifier } from "./notify.mjs";
 import { startJobs } from "./jobs.mjs";
 import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailability, bulkTargets } from "./pages/availability.mjs";
@@ -36,7 +36,7 @@ import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
 // and the nudge window later all need one, and three separate calls to new Date() is how those drift apart
 // in tests. Returns an ISO date string because everything stored is a date, not an instant.
 // `patternFile` is injectable so a test never rewrites the repository's own config. Without it, running the
-// admin suite would silently edit config/pattern.json — a test that damages the thing it is testing.
+// admin suite would silently edit config/pattern.json â€” a test that damages the thing it is testing.
 // `onPatternChange` exists because the config is mutable HERE and was frozen everywhere else. See reloadPattern.
 export function buildApp({ db, pattern = loadPattern(), env = process.env, notifier = null,
                            patternFile = PATTERN_FILE, jobs = null, onPatternChange = null,
@@ -48,7 +48,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
   // Deliberately mutable: the admin screen edits config/pattern.json, and the running process must pick that
   // up immediately. Telling an admin to restart the server would be the same class of failure as a cached
-  // credential that only looks rotated — the file says one thing while the process believes another.
+  // credential that only looks rotated â€” the file says one thing while the process believes another.
   let cfg = pattern;
   let t = makeT(cfg.locale);
   // ...and ANNOUNCED, because "the running process must pick that up immediately" was true of the routes and
@@ -58,7 +58,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // Measured through the real admin route: rolling over from 2026-Q1Q2 to 2026-Q3Q4 seeded 106 sessions into the
   // new season, the pages followed it, and the jobs' getter still returned the OLD season's id. Both notification
   // features then operate on a season that is entirely in the past, so `volunteersNeedingNudge` finds no dates in
-  // its window and `shiftsNeedingReminder` finds no shifts — nobody is nudged and nobody is reminded, until
+  // its window and `shiftsNeedingReminder` finds no shifts â€” nobody is nudged and nobody is reminded, until
   // somebody restarts the process. `/status` reports a recent run having sent 0, which is precisely what a
   // healthy quiet instance looks like: jobs.mjs warns in its own comments that a dead nudge and an unneeded one
   // are indistinguishable from outside, and this is how that happens.
@@ -67,7 +67,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   const reloadPattern = (next) => { cfg = next; t = makeT(cfg.locale); onPatternChange?.(next); };
   const seasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(cfg.season.key)?.id ?? null;
 
-  // Throttle for the routes reachable without a session — the OIDC callback, invite redemption and the calendar
+  // Throttle for the routes reachable without a session â€” the OIDC callback, invite redemption and the calendar
   // feed. An alarm, not a lock; see ratelimit.mjs. The list is enumerated and enforced in test/csrf-audit.test.mjs
   // rather than counted here, because this sentence said "two" for an entire increment after the third arrived.
   const limiter = makeLimiter();
@@ -134,10 +134,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   });
 
   // The dev sign-in has no CSRF token because there is no session yet. It is gated by assertDevAllowed(),
-  // which throws under NODE_ENV=production — the route simply does not function in a real deployment.
+  // which throws under NODE_ENV=production â€” the route simply does not function in a real deployment.
   // REGISTERED ONLY WHEN ALLOWED, so in production the route does not exist and the router answers 404.
-  // It used to be registered unconditionally and rely on assertDevAllowed throwing, which refused correctly —
-  // no session was issued — but answered 500. That is the wrong answer three ways: it reads as "the server
+  // It used to be registered unconditionally and rely on assertDevAllowed throwing, which refused correctly â€”
+  // no session was issued â€” but answered 500. That is the wrong answer three ways: it reads as "the server
   // broke" rather than "there is no such thing here", it files an error in the log for what is actually the
   // safety posture working, and it tells anyone probing that the route exists and blew up. The assert stays
   // inside as well, so that making registration unconditional again cannot quietly re-open it.
@@ -169,16 +169,40 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const id = await completeOidc(oidc, { code: query.get("code") ?? "", verifier: session.oidcVerifier });
     // emailVerified is forwarded, not dropped. linkIdentity refuses to adopt a pre-registered record on an
     // address the provider marks unverified, and a guard that exists but is never reached is the defect this
-    // project keeps finding — twice a whole feature was dead in production with a green suite over it.
+    // project keeps finding â€” twice a whole feature was dead in production with a green suite over it.
     const person = linkIdentity(db, "oidc", id.subject,
                                 { name: id.name, email: id.email, emailVerified: id.emailVerified });
     if (!person) return redirect(res, "/signin?unknown=1", { "Set-Cookie": clearCookieHeader({ secure }) });
     redirect(res, "/", { "Set-Cookie": setSession({ personId: person.personId }) });
   });
 
+  // This GET asks; it does not accept. It used to redeem the invitation, and the link arrives BY EMAIL â€” mail
+  // security gateways fetch links to scan them before the recipient ever sees them. Measured, not theorised: one
+  // anonymous GET created the person, marked the invitation spent, and handed the session cookie to the fetcher.
+  // The volunteer's own click then got /signin?unknown=1, and re-inviting did not help, because the next link
+  // went down the same pipe. A volunteer who cannot get in is the one failure this whole app cannot absorb.
+  //
+  // Accepting is a POST below, which no scanner, prefetcher or link unfurler issues.
   app.get("/invite/:token", ({ req, res, params }) => {
     const key = clientKey(req);
     if (limiter.blocked(key)) return send(res, 429, renderErrorPage(t, 429), { "Retry-After": "600" });
+    const s = inviteStatus(db, params.token);
+    if (!s.ok) {
+      limiter.fail(key, "invite");
+      return redirect(res, "/signin?unknown=1");
+    }
+    // Deliberately NOT limiter.succeed(): nothing has been proven yet, and a scanner walking a bad token then a
+    // good one should not have its failure forgiven by a page view.
+    send(res, 200, renderInvite({ t, token: params.token, email: s.email }));
+  });
+
+  // No CSRF token, for the same reason /auth/dev has none: there is no session yet to carry one. Possession of
+  // the invitation token IS the authorization here â€” anyone who could forge this POST could simply follow the
+  // link themselves. test/csrf-audit.test.mjs names both as decisions rather than omissions.
+  app.post("/invite/:token/accept", async ({ req, res, params }) => {
+    const key = clientKey(req);
+    if (limiter.blocked(key)) return send(res, 429, renderErrorPage(t, 429), { "Retry-After": "600" });
+    await readForm(req);   // drain the body; nothing in it is used
     const r = redeemInvite(db, params.token, {});
     if (!r.ok) {
       limiter.fail(key, "invite");
@@ -217,7 +241,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   });
 
   // Bulk answer. Builds the same field names the per-date form posts and hands them to the SAME writer, so
-  // there is one place that validates a date and one place that writes — a second writer here would be
+  // there is one place that validates a date and one place that writes â€” a second writer here would be
   // where the "fabricated date" guard quietly stopped applying.
   app.post("/availability/bulk", async ({ req, res }) => {
     const c = await postGate({ req, res });
@@ -257,7 +281,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     send(res, 200, renderPlan({ t, roles: c.roles, who: c.who, personId: c.personId, rows: sid ? planForSeason(db, sid) : [] }));
   });
 
-  // ---- the vagtbørs (increment D) ----------------------------------------------------------------------
+  // ---- the vagtbÃ¸rs (increment D) ----------------------------------------------------------------------
   app.get("/board", ({ req, res, query }) => {
     const c = gate({ req, res });
     if (!c) return;
@@ -311,7 +335,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const sid = seasonId();
     let rows = sid ? planForSeason(db, sid).filter((r) => r.date >= today()) : [];
 
-    // A HORIZON, defaulting to four weeks. Measured at a realistic size — 200 volunteers, six slots a week —
+    // A HORIZON, defaulting to four weeks. Measured at a realistic size â€” 200 volunteers, six slots a week â€”
     // the whole-season view rendered 490 KB of HTML, because every open slot carries a dropdown of every
     // eligible person. Half a megabyte on a phone on mobile data is not a planner screen. Four weeks is also
     // simply the right amount of work to look at; the links below extend it when needed.
@@ -326,7 +350,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const gapsOnly = query.get("gaps") === "1";
     if (gapsOnly) rows = rows.filter((r) => r.personId == null);
 
-    // Look up candidates only for the open slots on screen — one query per gap, not per row. Gaps are the
+    // Look up candidates only for the open slots on screen â€” one query per gap, not per row. Gaps are the
     // minority, and the alternative is a single query returning every person for every slot in the season.
     const eligibleByAssignment = new Map();
     // And for the slots that came back with NOBODY, why. Only for those: a season is mostly staffable, so this
@@ -398,14 +422,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
         JOIN timeslots t ON t.id=s.timeslot_id JOIN activities act ON act.id=s.activity_id
        WHERE a.id = ?`).get(id);
     const r = unassignSlot(db, id, { expectPersonId: c.form.expect ? Number(c.form.expect) : null });
-    // A planner freeing a slot puts it on the børs exactly like a volunteer handing it back, so it gets the
-    // same announcement — otherwise the two paths would behave differently for no reason a volunteer could see.
+    // A planner freeing a slot puts it on the bÃ¸rs exactly like a volunteer handing it back, so it gets the
+    // same announcement â€” otherwise the two paths would behave differently for no reason a volunteer could see.
     if (r.ok && detail) announceOpenSlot(id, detail).catch(() => {});
     redirect(res, `/planner?r=${r.ok ? "unassigned" : r.reason}`);
   });
 
   // ---- admin (increment H) -------------------------------------------------------------------------------
-  // The raw invite token is shown ONCE, right after creation, and never stored — only its hash is. So it is
+  // The raw invite token is shown ONCE, right after creation, and never stored â€” only its hash is. So it is
   // held in memory keyed by the admin's person id until they navigate away.
   const freshInvites = new Map();
   // Same one-shot pattern for a freshly minted calendar link, and for the same reason: only the hash is
@@ -447,8 +471,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // app had worked. Every other outcome on this screen reports itself, which is what made this one the odd path
     // out rather than a deliberate quiet success.
     //
-    // Deliberately NOT a format check. This app sends no email — the admin copies the link and delivers it
-    // themselves — so the address is a label plus the key `linkIdentity` later matches an OIDC claim against, and
+    // Deliberately NOT a format check. This app sends no email â€” the admin copies the link and delivers it
+    // themselves â€” so the address is a label plus the key `linkIdentity` later matches an OIDC claim against, and
     // a wrong one is fixable by editing the person's contact. Rejecting valid-but-unusual addresses would do more
     // harm than accepting a typo, which is the usual outcome of hand-written email validation.
     if (!email) return redirect(res, "/admin?r=no_email");
@@ -461,7 +485,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // else's origin, the admin emails it in good faith, and the volunteer clicks it and hands their invite to
     // whoever owns that host. It is the poisoned-password-reset-link attack with extra steps.
     //
-    // tools/bootstrap.mjs already used FOURWATER_BASE_URL for exactly this, and so does the calendar feed —
+    // tools/bootstrap.mjs already used FOURWATER_BASE_URL for exactly this, and so does the calendar feed â€”
     // this route was the odd one out, and two link builders with two different policies is the tell. When the
     // variable is unset the page shows the path and says to prefix the address, which is the honest answer:
     // the app does not know its own public name unless somebody tells it.
@@ -512,7 +536,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       calendar: {
         exists: hasCalendarToken(db, c.personId),
         // Shown ONCE, immediately after creation, exactly like an invite token: only its hash is stored, so
-        // there is nothing to show later. Held in memory keyed by person, not in the URL — a capability URL in
+        // there is nothing to show later. Held in memory keyed by person, not in the URL â€” a capability URL in
         // a query string ends up in logs and browser history.
         fresh: freshCalendarLinks.get(c.personId) ?? null,
         // The feed puts events at a real instant, which needs a real time zone. If nobody set one the app
@@ -530,7 +554,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (limiter.blocked(key)) return send(res, 429, "", { "Retry-After": "600", "Content-Type": "text/plain" });
     const who = personByCalendarToken(db, params.token);
     if (!who) {
-      // A wrong token is a failed authentication, so it counts toward the same limiter that guards sign-in —
+      // A wrong token is a failed authentication, so it counts toward the same limiter that guards sign-in â€”
       // this endpoint is the one an attacker can hammer without an account. 404, not 403: "that token is
       // wrong" and "there is no such feed" must be indistinguishable.
       limiter.fail(key, "calendar-token");
@@ -567,7 +591,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const made = calendarTokenFor(db, c.personId, { rotate: true });
     if (made?.token) {
       // Absolute when the deployment says what it is called: a calendar client cannot resolve a relative path.
-      // Without FOURWATER_BASE_URL the path is still correct and the page says to prefix the site address —
+      // Without FOURWATER_BASE_URL the path is still correct and the page says to prefix the site address â€”
       // guessing an origin from the Host header would let a proxied request mint a link pointing anywhere.
       const base = String(env.FOURWATER_BASE_URL || "").replace(/\/+$/, "");
       freshCalendarLinks.set(c.personId, `${base}/calendar/${made.token}.ics`);
@@ -589,35 +613,35 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     // Read the cached discovery result so the page can say whether sign-in found the IdP's own metadata or is
     // running on the NextCloud-shaped fallback. Cached, so this does not make loading /status hit the network
-    // on every view — and a failure here must not take the status page down with it.
+    // on every view â€” and a failure here must not take the status page down with it.
     let oidcState = null;
     if (oidc.enabled) {
       try { oidcState = { enabled: true, ...(await discoverOidc(oidc)) }; }
       catch (e) { oidcState = { enabled: true, source: "fallback", error: e.message }; }
     }
-    // `channel` only — never the webhook, whose path is the credential. The page needs to know whether one is
+    // `channel` only â€” never the webhook, whose path is the credential. The page needs to know whether one is
     // configured so it does not tell an operator "no webhook is configured" while one plainly is.
     const status = collectStatus(db, {
       pattern: cfg, today: today(), backupDir: backupConfig(env).dir, oidc: oidcState,
       notify: { channel: notifyConfig(env).channel },
-      // The nudge job's own account of itself. Optional here for the same reason `notifier` is — a test builds
-      // an app without a timer — and that is exactly how the notifier came to be missing in production, so
+      // The nudge job's own account of itself. Optional here for the same reason `notifier` is â€” a test builds
+      // an app without a timer â€” and that is exactly how the notifier came to be missing in production, so
       // test/journey.test.mjs asserts this line renders on a real boot rather than trusting this call site.
       jobs,
     });
     send(res, 200, renderStatus({ t, session: c.session, roles: c.roles, who: c.who, status }));
   });
 
-  // The outbox. Without this, every message the app composes with no webhook configured — which is the default
-  // — went into a table nobody could read, and /status could only report the count.
+  // The outbox. Without this, every message the app composes with no webhook configured â€” which is the default
+  // â€” went into a table nobody could read, and /status could only report the count.
   app.get("/outbox", ({ req, res, query }) => {
     const c = gate({ req, res }, "planner");
     if (!c) return;
     const wanted = query.get("status");
     const status = ["queued", "failed", "sent"].includes(wanted) ? wanted : null;
     const outbox = listOutbox(db, { status });
-    // Derived from `channel`, never from `webhook`. The webhook URL IS the credential — its path is the
-    // secret — so it must not travel into a render function at all, not even to be tested for truthiness.
+    // Derived from `channel`, never from `webhook`. The webhook URL IS the credential â€” its path is the
+    // secret â€” so it must not travel into a render function at all, not even to be tested for truthiness.
     send(res, 200, renderOutbox({
       t, roles: c.roles, who: c.who, outbox,
       webhookConfigured: notifyConfig(env).channel !== "outbox",
@@ -672,11 +696,11 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/retention", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    // The LIVE config, for the same reason the admin forms use it — and here it decides what gets DELETED.
+    // The LIVE config, for the same reason the admin forms use it â€” and here it decides what gets DELETED.
     //
     // This ran with `cfg`, the copy loaded at boot. `retention.seasons` and `retention.notificationDays` are
     // file-only settings, so the way an operator raises them is to edit config/pattern.json. Measured: put four
-    // seasons in the database, hand-edit the file to keep six, press "run the clean-up now" without restarting —
+    // seasons in the database, hand-edit the file to keep six, press "run the clean-up now" without restarting â€”
     // and two seasons were deleted, because the process still believed its own copy said two. The operator raised
     // the number for exactly the purpose the button then defeated.
     //
@@ -694,13 +718,13 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // The base every admin form edits: what is ON DISK, not what this process loaded at boot.
   //
   // Each form does `structuredClone(current)` and `savePattern` writes the clone back, so `current` decides what
-  // survives. It was `cfg`, the in-memory copy — which meant an operator's hand edit that the process had not
+  // survives. It was `cfg`, the in-memory copy â€” which meant an operator's hand edit that the process had not
   // picked up was silently destroyed by the next ordinary admin action. Measured: set `notify.remindDaysBefore`
   // in the file, then add a weekly slot from the Administration screen, and the value is GONE. No error, no
   // warning, and the admin who pressed the button has no idea they overwrote anything.
   //
-  // RUNBOOK sends an operator to that file for five values — the clock times, `board.cutoffDays`,
-  // `calendar.eventMinutes`, `export.csvDelimiter`, `notify.remindDaysBefore` — so hand edits are not a misuse,
+  // RUNBOOK sends an operator to that file for five values â€” the clock times, `board.cutoffDays`,
+  // `calendar.eventMinutes`, `export.csvDelimiter`, `notify.remindDaysBefore` â€” so hand edits are not a misuse,
   // they are the documented way to set most of them. Only a value the in-memory copy happened to share survived,
   // which is why `export.csvDelimiter` came through in that measurement and the other did not: the repository
   // config already carries the delimiter.
@@ -710,7 +734,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   // whatever the operator was in the middle of typing. `readJson` names the file in its error, so the admin is
   // told which one.
   // `loadPattern` already validates, so this catches both a file that will not parse and one whose contents the
-  // app would refuse at boot — either way the right answer is to tell the admin rather than write over it.
+  // app would refuse at boot â€” either way the right answer is to tell the admin rather than write over it.
   const baseForEdit = () => {
     try { return loadPattern(patternFile); }
     catch (e) { return { __unreadable: e.message }; }
@@ -745,10 +769,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/weekly/add", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    // Refused explicitly rather than left to `Number("")`, which is 0 — so a POST with no `time` silently meant
+    // Refused explicitly rather than left to `Number("")`, which is 0 â€” so a POST with no `time` silently meant
     // MIDNIGHT and validation accepted it, because 0 is a legal hour. Measured by omitting the field: it created a
     // slot at 00:00 and seeded 26 sessions for it, reporting success. The form marks the input `required` and
-    // pre-fills 19:00, so a browser cannot do this — but `required` is a client-side courtesy, and the CSRF audit
+    // pre-fills 19:00, so a browser cannot do this â€” but `required` is a client-side courtesy, and the CSRF audit
     // exists in this project precisely because what the server accepts is the only thing that counts.
     //
     // `retention.mjs` already warns about this exact trap in prose: its `atLeastOne` is "written out rather than
@@ -774,7 +798,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     applyPattern(next, res, { okCode: "weekly_removed" });
   });
 
-  // How many OTHER people could take this slot — the number is what makes the message actionable rather
+  // How many OTHER people could take this slot â€” the number is what makes the message actionable rather
   // than noise. Uses the same eligibility definition as the board.
   async function announceOpenSlot(assignmentId, detail) {
     if (!notifier) return;
@@ -794,8 +818,8 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       kind: "slot_open",
       body: slotOpenMessage(t, {
         when: `${formatDate(t, detail.date)} ${formatTime(detail.hour, detail.minute)}`,
-        // WITH the role. Increment U put "Salsa · leader" on the board, the plan and the planner and left the
-        // announcement saying only "Salsa" — so the one place the message has to stand alone, in a chat channel
+        // WITH the role. Increment U put "Salsa Â· leader" on the board, the plan and the planner and left the
+        // announcement saying only "Salsa" â€” so the one place the message has to stand alone, in a chat channel
         // away from the app, was the one place a volunteer could not tell whether it was theirs to take.
         // formatRole returns "" for a slot with no role, so a workshop reads exactly as it did before.
         activity: `${detail.label}${formatRole(t, detail.role)}`,
@@ -809,22 +833,22 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
 // Entry point. Use pathToFileURL rather than building the URL by hand: on Windows an absolute path becomes
 // file:///C:/... with THREE slashes, so `file://${path}` never matches and `node src/server.mjs` exits 0
-// having done nothing — no error, no output. Caught by running it, not by any unit test.
+// having done nothing â€” no error, no output. Caught by running it, not by any unit test.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // Cleanly, the same as a failed bind below. openDb now explains itself, but an uncaught throw still buries that
-  // explanation under a stack trace naming db.mjs — and the operator reading a container log has no use for the
+  // explanation under a stack trace naming db.mjs â€” and the operator reading a container log has no use for the
   // line number of a file they are not going to open.
   let db;
   try {
     db = openDb();
   } catch (e) {
-    console.error(`\n✖ ${e.message}\n`);
+    console.error(`\nâœ– ${e.message}\n`);
     process.exit(1);
   }
   migrate(db);
 
-  // Materialise the season from config. This was MISSING and the app booted completely inert — no season, no
-  // activities, no sessions, every page an empty state — because every test builds its world through
+  // Materialise the season from config. This was MISSING and the app booted completely inert â€” no season, no
+  // activities, no sessions, every page an empty state â€” because every test builds its world through
   // tools/testkit.mjs, which seeds explicitly. The harness was doing what production did not.
   // seedStructure is idempotent, so running it on every boot is safe and keeps a config edit from needing a
   // separate migration step.
@@ -839,44 +863,44 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // is nothing to claim, assign or propose. Cheap to check, and it must never be true again.
   const naked = db.prepare(`SELECT COUNT(*) n FROM sessions s
                              WHERE NOT EXISTS (SELECT 1 FROM assignments a WHERE a.session_id = s.id)`).get().n;
-  if (naked > 0) console.warn(`⚠ ${naked} session(s) have no slots — the plan will look populated and be unusable.`);
+  if (naked > 0) console.warn(`âš  ${naked} session(s) have no slots â€” the plan will look populated and be unusable.`);
 
   // Say so loudly if nobody can get in yet, rather than serving a working-looking app that refuses everyone.
   const admins = db.prepare(`SELECT COUNT(*) n FROM person_roles pr JOIN roles r ON r.id = pr.role_id
                               WHERE r.name = 'admin'`).get().n;
   if (admins === 0) {
-    console.warn(`\n⚠ There is no administrator yet, so nobody can sign in or invite anyone.`);
+    console.warn(`\nâš  There is no administrator yet, so nobody can sign in or invite anyone.`);
     console.warn(`  Create the first one:  node tools/bootstrap.mjs <email> "<name>"\n`);
   }
   // The notifier and the nudge timer, WIRED HERE, because nothing else does it.
   //
   // Until this existed, makeNotifier and startJobs were called only from tests. buildApp defaults notifier to
   // null and announceOpenSlot opens with `if (!notifier) return`, so on a real deployment no "a shift became
-  // free" announcement ever fired and the availability nudge never ran once — while seventeen tests proved the
+  // free" announcement ever fired and the availability nudge never ran once â€” while seventeen tests proved the
   // machinery worked, because the test harness passed a notifier that production did not. Same generator as the
   // missing slots: the harness doing setup the real boot path skipped.
   //
-  // With no MATTERMOST_WEBHOOK the channel is the outbox, which is not a degraded mode — messages are written
+  // With no MATTERMOST_WEBHOOK the channel is the outbox, which is not a degraded mode â€” messages are written
   // and a planner reads them at /outbox. That is the default and it is fine; silence was the bug.
   const notifyCfg = notifyConfig(process.env);
   const notifier = makeNotifier({ db, config: notifyCfg });
   const bootT = makeT(boot.locale ?? "en");
   // The LIVE pattern, not the booted one. `boot` is loaded once and never reassigned, so a season getter closed
-  // over it goes stale the moment an admin rolls the season over from the Administration screen — and both
+  // over it goes stale the moment an admin rolls the season over from the Administration screen â€” and both
   // notification features then work a season that is entirely in the past. buildApp calls `onPatternChange` from
   // its reloadPattern, which is the only thing that keeps this in step.
   let live = boot;
   const currentSeasonId = () => db.prepare("SELECT id FROM seasons WHERE key = ?").get(live.season.key)?.id ?? null;
   // The formatters go in from here, where the view layer is already imported. jobs.mjs contains no date wording
   // and no role vocabulary on purpose, and a shift reminder that read "2026-03-15 19:00 Salsa l" would be worse
-  // than none — it is read in a chat channel with none of the app's context around it.
+  // than none â€” it is read in a chat channel with none of the app's context around it.
   const jobs = startJobs({
     db, notifier, t: bootT, seasonId: currentSeasonId,
     today: () => new Date().toISOString().slice(0, 10),
     remindDaysBefore: notifyTimingConfig(boot).remindDaysBefore,
     formatDate, formatTime, formatRole,
   });
-  console.log(`notifications: ${notifyCfg.describe()}`);   // describe() never reveals the URL — its path is the secret
+  console.log(`notifications: ${notifyCfg.describe()}`);   // describe() never reveals the URL â€” its path is the secret
 
   const port = Number(process.env.PORT) || 8080;
   const host = process.env.HOST || "127.0.0.1";
@@ -891,8 +915,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     },
   }).listen(port, host, () => console.log(`4water listening on http://${host}:${port}`));
 
-  // listen() is ASYNCHRONOUS, so the success line has to be its callback. Printed on the next statement — which
-  // it was — the app announces "4water listening on ..." and then dies of EADDRINUSE, and the log reads as a
+  // listen() is ASYNCHRONOUS, so the success line has to be its callback. Printed on the next statement â€” which
+  // it was â€” the app announces "4water listening on ..." and then dies of EADDRINUSE, and the log reads as a
   // clean start followed by an unrelated crash. That is exactly how a stale copy of this app on the same port
   // cost a round of debugging: the output said it was up, so the wrong process got measured.
   //
@@ -900,12 +924,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // so it described something other than what happened.
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
-      console.error(`\n✖ ${host}:${port} is already in use — another copy is probably still running.`);
+      console.error(`\nâœ– ${host}:${port} is already in use â€” another copy is probably still running.`);
       console.error(`  Stop that one, or choose another port:  PORT=${port + 1} node src/server.mjs\n`);
     } else if (err.code === "EACCES") {
-      console.error(`\n✖ Not allowed to bind ${host}:${port}. Ports below 1024 need privileges; use a proxy instead.\n`);
+      console.error(`\nâœ– Not allowed to bind ${host}:${port}. Ports below 1024 need privileges; use a proxy instead.\n`);
     } else {
-      console.error(`\n✖ Could not start: ${err.message}\n`);
+      console.error(`\nâœ– Could not start: ${err.message}\n`);
     }
     process.exit(1);
   });

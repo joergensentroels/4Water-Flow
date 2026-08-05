@@ -95,6 +95,29 @@ export function navFor(t, roles, current) {
   return items.map((i) => ({ ...i, current: i.key === current }));
 }
 
+// The invitation landing page. Its whole reason for existing is that it does NOT accept the invitation — a GET of
+// the emailed link used to redeem it, so a mail gateway fetching that link to scan it spent the invitation and
+// locked the volunteer out. Accepting is a POST, which nothing fetches on anybody's behalf.
+//
+// The address is shown because an invitation is addressed to somebody. A person sent a forwarded link should be
+// able to see it is not theirs before taking an account with another volunteer's address on it.
+export function renderInvite({ t, token, email }) {
+  return layout({
+    t,
+    title: t("invite.title"),
+    nav: [],
+    body: html`
+      <h2>${t("invite.title")}</h2>
+      <div class="card">
+        <p>${t("invite.intro", { email })}</p>
+        <p class="hint">${t("invite.hint")}</p>
+        <form method="post" action="/invite/${token}/accept">
+          <button type="submit">${t("invite.accept")}</button>
+        </form>
+      </div>`,
+  });
+}
+
 // The volunteer-facing privacy notice. Deliberately short and in their language: docs/PRIVACY.md is the
 // board's document, and pointing a volunteer at a markdown file full of GDPR vocabulary is not telling them
 // anything. Gap 5 of that document was that nobody was told at all.

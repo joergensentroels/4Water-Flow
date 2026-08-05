@@ -8,10 +8,15 @@ import path from "node:path";
 import { ROOT } from "../src/config.mjs";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
 
-// The one deliberate exception, named here so it is a decision rather than an oversight. /auth/dev runs
-// BEFORE any session exists, so there is no token to carry; it is gated instead by assertDevAllowed(), which
-// throws under NODE_ENV=production, and test/deploy.test.mjs proves it issues no session there.
-const NO_SESSION_YET = new Set(["/auth/dev"]);
+// The deliberate exceptions, named here so each is a decision rather than an oversight. Both run BEFORE any
+// session exists, so there is no token to carry, and both are authorized by something else instead.
+//
+//   /auth/dev             gated by assertDevAllowed(), which throws under NODE_ENV=production; test/deploy.test.mjs
+//                         proves it issues no session there.
+//   /invite/:token/accept possession of the invitation token IS the authorization — anyone who could forge this
+//                         POST could just follow the link. It is a POST precisely so that a link scanner or
+//                         prefetcher, which only issues GETs, cannot spend somebody's invitation for them.
+const NO_SESSION_YET = new Set(["/auth/dev", "/invite/:token/accept"]);
 
 // Plausible values for path parameters, so a route with :id is actually exercised rather than 404ing before
 // the CSRF check can run.
@@ -62,6 +67,8 @@ test("every registered POST route refuses a missing and a wrong CSRF token", asy
 const THROTTLED = {
   "/auth/callback": "OIDC state comes back in a URL an attacker can supply; a wrong one is a failed sign-in.",
   "/invite/:token": "The invite token IS the credential, and the route is reachable by anyone with the link.",
+  "/invite/:token/accept": "Same credential as the page above, and this is the half that writes — so a caller " +
+                           "guessing tokens must be slowed down here even more than on the page that only looks.",
   "/calendar/:token.ics": "The feed URL is the credential — a calendar client cannot present a cookie — and it " +
                           "is the one of the three that is polled repeatedly by real software.",
 };
@@ -97,13 +104,31 @@ test("exactly the unauthenticated secret-in-the-URL routes are throttled, and ea
   }
 });
 
-test("the exception list is exactly one route, and it is the one that cannot have a token", async () => {
+// This used to assert the list held exactly one route, so that "a growing exception list is how a CSRF guard
+// becomes optional". A second route genuinely needed to be here — invitation acceptance, which has no session and
+// therefore no token — and bumping a 1 to a 2 would have retired the guard rather than satisfied it.
+//
+// So the count is derived instead. The exception is allowed for exactly one reason, "there is no session yet", and
+// the source already says which routes those are: the ones whose handler calls no gate. Both directions, so the
+// list can neither grow past that reason nor keep an entry that has since acquired a gate.
+test("the CSRF exception list is exactly the POSTs that have no session to carry a token", async () => {
   const w = await makeWorld({});
   try {
+    const src = readFileSync(path.join(ROOT, "src", "server.mjs"), "utf8");
+    const ungated = new Set();
+    const parts = src.split(/\bapp\.(get|post)\(\s*"([^"]+)"/);
+    for (let i = 1; i < parts.length; i += 3) {
+      if (parts[i] !== "post") continue;
+      if (!/\b(postGate|gate)\(\s*\{/.test(parts[i + 2] ?? "")) ungated.add(parts[i + 1]);
+    }
+    assert.ok(parts.length > 20, "the route split found almost nothing — this check is not looking at anything");
+
     const patterns = w.routes().filter((r) => r.method === "POST").map((r) => r.pattern);
     for (const skipped of NO_SESSION_YET) {
       assert.ok(patterns.includes(skipped), `the exception list names ${skipped}, which is not a route any more`);
     }
-    assert.equal(NO_SESSION_YET.size, 1, "a growing exception list is how a CSRF guard becomes optional");
+    assert.deepEqual([...NO_SESSION_YET].sort(), [...ungated].sort(),
+      "every POST reachable without a session must be named here — and nothing else may be. An entry that has " +
+      "since gained a gate is a CSRF check being skipped for no reason.");
   } finally { w.close(); }
 });

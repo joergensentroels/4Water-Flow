@@ -284,7 +284,12 @@ test("every claim the documents make about the code is true", () => {
       const name = m[1];
       if (!/^[a-z]/.test(name)) continue;                                   // SQL keywords, constructors
       if (["npm", "node", "curl", "git", "docker", "openssl"].includes(name)) continue;   // shell, not ours
-      claim(facts.exported.has(name) || facts.all.includes(`function ${name}`),
+      // Also `const name = (…) =>`, which is how every helper scoped inside buildApp is written — gate and
+      // postGate among them. Only exports and `function name` counted before, so documenting the two functions
+      // that decide who may reach what was reported as a false claim. The checker was the narrow one: a rule
+      // that a document may not name a closure-scoped helper pushes documentation away from the code.
+      const scoped = new RegExp(`\\b(?:const|let)\\s+${name}\\s*=`).test(facts.all);
+      claim(facts.exported.has(name) || facts.all.includes(`function ${name}`) || scoped,
         `${doc} refers to ${name}(), which does not exist in src/ or tools/`);
     }
   }

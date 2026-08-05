@@ -300,8 +300,14 @@ test("end to end: fresh database, bootstrap, sign in, reach the admin screen", a
     assert.ok(await waitHealthy(port, b.child), `never became healthy:\n${b.out()}`);
     assert.ok(!/no administrator yet/i.test(b.out()), "with an admin present the warning must not appear");
 
-    // Redeem the link exactly as a browser would.
-    const redeem = await fetch(`http://127.0.0.1:${port}/invite/${r.inviteToken}`, { redirect: "manual" });
+    // Open the link exactly as a browser would: a page offering the invitation, and no session yet.
+    const offer = await fetch(`http://127.0.0.1:${port}/invite/${r.inviteToken}`, { redirect: "manual" });
+    assert.equal(offer.status, 200, "the emailed link shows the invitation rather than spending it");
+    assert.ok(!offer.headers.get("set-cookie"), "so a scanner that fetched it gets no account");
+
+    // Then accept it, which is the POST the page's button submits.
+    const redeem = await fetch(`http://127.0.0.1:${port}/invite/${r.inviteToken}/accept`,
+      { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "" });
     assert.equal(redeem.status, 303);
     assert.equal(redeem.headers.get("location"), "/availability");
     const cookie = (redeem.headers.getSetCookie?.() ?? [redeem.headers.get("set-cookie")])[0].split(";")[0];

@@ -23,7 +23,10 @@ const PUBLIC = new Map([
   ["POST /auth/dev", "the dev sign-in, refused outright under NODE_ENV=production by assertDevAllowed"],
   ["GET /auth/oidc", "starts the redirect to the provider; there is no session yet by definition"],
   ["GET /auth/callback", "returns from the provider carrying the state and code, still with no session"],
-  ["GET /invite/:token", "an invitation is how somebody who has no account gets one"],
+  ["GET /invite/:token", "an invitation is how somebody who has no account gets one. Shows the offer and writes "
+    + "nothing — a mail gateway fetching the link to scan it must not be able to spend the invitation"],
+  ["POST /invite/:token/accept", "the half that redeems. Authorized by possession of the token, and a POST so that "
+    + "nothing fetching links on the recipient's behalf can accept for them"],
   ["GET /calendar/:token.ics", "authenticated by an unguessable rotatable token instead of a session, because a "
     + "calendar client cannot sign in. NOT the same thing as ungated, and the only entry here that is a "
     + "different authentication mechanism rather than an absence of one"],

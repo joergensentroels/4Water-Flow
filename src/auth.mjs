@@ -259,12 +259,24 @@ export function createInvite(db, { email, roleName = "volunteer", now = new Date
 
 const hashToken = (t) => createHash("sha256").update(t).digest("hex");
 
-export function redeemInvite(db, token, { name, now = new Date() } = {}) {
+// Whether a token could still be used, WITHOUT using it. Separated out because the invitation link arrives by
+// email and a GET of it must change nothing: mail security gateways fetch links to scan them before the
+// recipient ever sees them, and a GET that redeemed spent the invitation on that fetch. Redemption is a POST
+// now, and this is what the GET asks so it can either offer the button or say no.
+export function inviteStatus(db, token, { now = new Date() } = {}) {
   const row = db.prepare("SELECT * FROM invitations WHERE token = ?").get(hashToken(String(token || "")));
   if (!row) return { ok: false, reason: "unknown" };
   if (row.accepted_at) return { ok: false, reason: "already_used" };
-  const ageDays = (now - Date.parse(row.created_at)) / 86400000;
-  if (ageDays > INVITE_TTL_DAYS) return { ok: false, reason: "expired" };
+  if ((now - Date.parse(row.created_at)) / 86400000 > INVITE_TTL_DAYS) return { ok: false, reason: "expired" };
+  return { ok: true, row, email: row.email };
+}
+
+export function redeemInvite(db, token, { name, now = new Date() } = {}) {
+  // The three refusals are shared with the GET rather than restated. Two copies of "is this token still good"
+  // is how a page and the write behind it come to disagree about an expiry boundary.
+  const checked = inviteStatus(db, token, { now });
+  if (!checked.ok) return { ok: false, reason: checked.reason };
+  const row = checked.row;
 
   let personId;
   db.exec("BEGIN");

@@ -60,8 +60,14 @@ this**:
 docker compose exec app node tools/bootstrap.mjs you@4water.org "Your Name"
 ```
 
-It prints a single-use link. Open it once to sign in; you get administrator and planner. From there, invite
-everyone else from the Administration screen. Running it twice is harmless.
+It prints a single-use link. Open it and press **Accept invitation**; you get administrator and planner. From
+there, invite everyone else from the Administration screen. Running it twice is harmless.
+
+Opening the link does not spend it — only the button does. That is deliberate, and it matters for the invitations
+you send by email: mail security gateways fetch links to scan them before the recipient sees them, and while this
+route redeemed on the fetch, the scanner got the account and the volunteer got *"We could not find you on the
+list of volunteers"*. Re-inviting did not help, because the next link went down the same pipe. If a volunteer
+reports that their invitation link does not work, this is no longer the cause.
 
 If you skip this, the app starts and answers `/healthz` perfectly while letting nobody in — so it also prints
 a warning at boot saying exactly this. Check `docker compose logs app` if sign-in seems impossible.

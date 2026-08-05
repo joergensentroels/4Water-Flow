@@ -128,10 +128,17 @@ test("a real deployment can be set up and used end to end", async () => {
     assert.equal((await admin.post("/auth/dev", { personId: "1" })).status, 404,
       "the developer sign-in must not exist in production");
 
-    const redeemed = await admin.get(`/invite/${invite}`);
+    // Opening the link offers the invitation and spends nothing: the emailed link has to survive being fetched by
+    // whatever scans mail on the way in, and this one is the bootstrap administrator's. Accepting is the POST
+    // behind the button on that page, which nothing fetches on the recipient's behalf.
+    const offered = await admin.get(`/invite/${invite}`);
+    assert.equal(offered.status, 200, "the link shows the invitation rather than spending it");
+    assert.ok(!admin.cookie(), "and starts no session, so a scanner cannot end up holding the admin account");
+
+    const redeemed = await admin.post(`/invite/${invite}/accept`, {});
     assert.equal(redeemed.status, 303);
     assert.equal(redeemed.headers.get("location"), "/availability");
-    assert.ok(admin.cookie(), "redeeming an invite must start a session");
+    assert.ok(admin.cookie(), "accepting an invite must start a session");
     assert.equal((await admin.get("/admin")).status, 200, "the bootstrapped account is an administrator");
 
     // ---- 3. the admin invites a volunteer, and the link is absolute and one-shot ----
@@ -145,8 +152,16 @@ test("a real deployment can be set up and used end to end", async () => {
     assert.ok(!new RegExp(`${BASE}/invite/[A-Za-z0-9_-]+`).test(await (await admin.get("/admin")).text()),
       "and only once — it is a credential");
 
+    // The volunteer's link, fetched first by something that is not them — the case that used to lock them out —
+    // and then accepted by them. Both halves in the journey, because this is the only test that runs the real
+    // binary in production mode, and a broken invitation is the one failure the app cannot work around.
+    const scanner = client();
+    assert.equal((await scanner.get(`/invite/${volLink[1]}`)).status, 200, "a fetch of the link must not spend it");
+    assert.ok(!scanner.cookie(), "and must not sign anything in");
+
     const vol = client();
-    assert.equal((await vol.get(`/invite/${volLink[1]}`)).status, 303, "the volunteer's invite must work");
+    assert.equal((await vol.get(`/invite/${volLink[1]}`)).status, 200, "the volunteer still sees the invitation");
+    assert.equal((await vol.post(`/invite/${volLink[1]}/accept`, {})).status, 303, "the volunteer's invite must work");
     const volId = (() => {
       const db = new DatabaseSync(dbFile, { readOnly: true });
       const id = db.prepare("SELECT id FROM people WHERE contact='vol@4water.org'").get().id;

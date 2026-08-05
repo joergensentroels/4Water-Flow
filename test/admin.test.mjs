@@ -163,12 +163,33 @@ test("creating an invite shows the link exactly once, and it works", withAdmin({
   assert.ok(!link.includes(stored));
   assert.match(stored, /^[0-9a-f]{64}$/);
 
-  // Redeeming it signs the newcomer in and lands them on the screen they need.
+  // Opening the link OFFERS the invitation and changes nothing. It used to redeem on the GET, which meant a mail
+  // gateway fetching the link to scan it — routine for corporate email — spent the invitation before the volunteer
+  // ever clicked, and re-inviting only fed the same pipe another link.
   const inviteToken = link.split("/").pop();
-  const redeem = await w.get(`/invite/${inviteToken}`);
+  const offer = await w.get(`/invite/${inviteToken}`);
+  assert.equal(offer.status, 200, "opening an invitation shows it; it does not accept it");
+  assert.ok(!offer.headers.get("set-cookie"), "and hands no session to whoever fetched the link");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("newcomer@example.org").n, 0,
+    "nobody exists yet — the fetch created no account");
+  assert.equal(w.db.prepare("SELECT accepted_at FROM invitations").get().accepted_at, null,
+    "and the invitation is still unspent, which is the whole point");
+  const offered = await offer.text();
+  assert.match(offered, /newcomer@example\.org/, "the page says who was invited");
+  assert.match(offered, /action="\/invite\/[^"]+\/accept"/, "and offers the POST that accepts it");
+
+  // Accepting signs the newcomer in and lands them on the screen they need.
+  const redeem = await w.post(`/invite/${inviteToken}/accept`, null, new URLSearchParams({}));
   assert.equal(redeem.status, 303);
   assert.equal(redeem.headers.get("location"), "/availability", "a new volunteer's first task is their availability");
+  assert.ok(redeem.headers.get("set-cookie"), "and they are signed in");
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("newcomer@example.org").n, 1);
+
+  // Single-use survives the split: the token cannot be accepted twice.
+  const reused = await w.post(`/invite/${inviteToken}/accept`, null, new URLSearchParams({}));
+  assert.equal(reused.headers.get("location"), "/signin?unknown=1", "a spent invitation cannot be spent again");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("newcomer@example.org").n, 1,
+    "and no second account was created");
 }));
 
 // An empty address used to redirect with no `?r=` at all, so the Administration page reloaded unchanged and said
@@ -206,9 +227,14 @@ test("a revoked invite cannot be redeemed afterwards", withAdmin({}, async (w) =
 
   assert.equal(reasonOf(await w.post("/admin/invite/revoke", admin, new URLSearchParams({ csrf: token, id: String(id) }))), "revoked");
 
+  // Both halves, because a revoke that closed the page and left the accept open would be a door nobody looks at:
+  // the token is all that route needs, and whoever had the link never has to load the page again.
   const inviteToken = link.split("/").pop();
   const redeem = await w.get(`/invite/${inviteToken}`);
   assert.equal(redeem.headers.get("location"), "/signin?unknown=1");
+  const accept = await w.post(`/invite/${inviteToken}/accept`, null, new URLSearchParams({}));
+  assert.equal(accept.headers.get("location"), "/signin?unknown=1", "a revoked invitation cannot be accepted directly");
+  assert.ok(!accept.headers.get("set-cookie"), "and issues no session");
   assert.equal(w.db.prepare("SELECT COUNT(*) n FROM people WHERE contact=?").get("gone@example.org").n, 0);
 }));
 
