@@ -20,7 +20,34 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
 
-const DOCS = ["README.md", "RUNBOOK.md", "CONTRIBUTING.md", "PLAN.md", "docs/PRIVACY.md", "docs/OIDC.md"];
+// The documents checked here, FOUND rather than listed. This was a hand-written array of six paths, and it did
+// happen to name all six — but a seventh document added later would have been unchecked and nothing would have
+// said so. That is the same shape as the notification kinds, the board reasons and the planner reasons: a list of
+// what to check cannot notice something absent from itself. This file guards the largest defect class in the
+// project, so it is the last place that shape should have survived.
+//
+// Only `.git` and `node_modules` are skipped, so a document added under `.github` is covered too.
+const docFiles = () => {
+  const out = [];
+  const walk = (rel) => {
+    for (const f of readdirSync(rel ? path.join(ROOT, rel) : ROOT, { withFileTypes: true })) {
+      if (f.name === ".git" || f.name === "node_modules") continue;
+      const next = rel ? `${rel}/${f.name}` : f.name;
+      if (f.isDirectory()) walk(next);
+      else if (f.name.endsWith(".md")) out.push(next);
+    }
+  };
+  walk("");
+  return out.sort();
+};
+const DOCS = docFiles();
+
+// The floor, and it is deliberately not the same thing as the old array. That was a CEILING — only these are
+// checked. This is a FLOOR: these must be among what was found, and anything else found is checked as well. It
+// exists because a walk that returns nothing makes every assertion below loop zero times and pass, which is the
+// failure mode this whole file was written to argue against.
+const MUST_COVER = ["CONTRIBUTING.md", "PLAN.md", "README.md", "RUNBOOK.md", "docs/OIDC.md", "docs/PRIVACY.md"];
+
 const read = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
 
 function sourceFacts() {
@@ -69,6 +96,20 @@ function sourceFacts() {
 // note at the top of this file), so this asserts the STRUCTURE instead: exactly one document may carry a number,
 // which makes the external check a single-place check rather than a hunt. Same fix as the Node floor and the
 // webhook timeout — one fact, one home.
+// Before anything else: the set of documents being checked has to be non-empty and has to include the ones that
+// carry real claims. Every test below iterates DOCS, so a walk that finds nothing would make all of them pass
+// while checking not one sentence — the exact shape of vacuous success this file exists to prevent.
+test("the documents checked here are found on disk, and none of the known ones went missing", () => {
+  assert.ok(DOCS.length >= MUST_COVER.length,
+    `the walk found ${DOCS.length} markdown files; every check in this file iterates that list, so a short one ` +
+    `means the checks below are looking at less than they claim: ${DOCS.join(", ")}`);
+  const missing = MUST_COVER.filter((d) => !DOCS.includes(d));
+  assert.deepEqual(missing, [],
+    `these documents carry claims and are no longer being read — renamed, moved, or deleted: ${missing}`);
+  // And every found document must be readable, since a claim check that throws is not a claim check that passes.
+  for (const d of DOCS) assert.ok(read(d).length > 0, `${d} is empty`);
+});
+
 test("only PLAN.md states a test count, so there is one number to keep true", () => {
   const COUNTISH = /\b\d{2,4}\+?\s+(?:automated\s+)?(?:tests?|checks?)\b/gi;
   const offenders = [];
