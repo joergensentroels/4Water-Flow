@@ -192,6 +192,70 @@ test("every declared Node floor agrees with what node:sqlite actually needs", as
   }
 });
 
+// FOURWATER_PATTERN is a seam, and a runnable tool that ignores it reads a DIFFERENT config from the app it
+// operates on. `tools/backup.mjs` did, on the path that deletes: it called `loadPattern()` with no argument, so
+// pruneSeasons was told to protect the default file's season key rather than the one in use, and pruned
+// notifications by the default file's window. server.mjs resolved it correctly and the tool did not — two readers
+// of one seam with two policies, the same shape as the invite link that built an origin from the Host header while
+// every other link builder used FOURWATER_BASE_URL.
+//
+// The exemption is declared with a reason rather than left as a silent difference, like the CSRF audit's one route
+// and PLANNER_WRITE_HONOURS.
+const PATTERN_READERS = {
+  "src/server.mjs": "resolves",
+  "tools/backup.mjs": "resolves",
+  "tools/bootstrap.mjs": "resolves",
+  "tools/demo.mjs": "DEFAULT, deliberately — the demo derives a demo pattern FROM the real one as its base, so " +
+                    "reading config/pattern.json is the input to its job rather than a mistake about which " +
+                    "config is live. It then writes demo-pattern.json and tells you to run with that.",
+};
+
+test("every runnable tool resolves the config through the seam, or says why not", () => {
+  // Only files that can be executed as a process: a library taking `pattern` as an argument is a different case.
+  const runnable = ["src/server.mjs", "tools/backup.mjs", "tools/bootstrap.mjs", "tools/demo.mjs"];
+  for (const f of runnable) {
+    const text = read(f);
+    assert.ok(/import\.meta\.url/.test(text) || /export function/.test(text),
+      `${f} does not look like the file this check thinks it is`);
+    const declared = PATTERN_READERS[f];
+    assert.ok(declared, `${f} is runnable and not listed in PATTERN_READERS`);
+
+    // Comments stripped BEFORE either check. Probing the second one caught this: with the import removed and the
+    // call neutered, the test still passed, because the comment explaining the fix contains the word
+    // `patternFileFor(`. A gate satisfied by its own documentation is the same defect as one that fails on it —
+    // both mean the gate is reading prose instead of code.
+    const code = text.replace(/^\s*\/\/.*$/gm, "");
+
+    if (declared === "resolves") {
+      assert.match(code, /patternFileFor\(/,
+        `${f} runs as a process and must resolve the config through patternFileFor(), or it reads a different ` +
+        `file from the app it is operating on`);
+
+      // And no bare `loadPattern()` in the part that RUNS. Scoped to the main block on purpose: a bare call is
+      // legitimate as a library default — `buildApp({ pattern = loadPattern() })` is how a test builds a world,
+      // and the boot block always passes its own resolved pattern — but inside the main block it is a process
+      // deciding for itself which config is live, which is exactly what went wrong in backup.mjs.
+      //
+      // The limit, stated rather than implied: this looks only at the main block, so a bare call added to an
+      // exported function that the main block then calls would not be caught. What catches that is the same thing
+      // that caught it this time, which is somebody reading the file.
+      const guard = code.indexOf("import.meta.url");
+      if (guard !== -1) {
+        const main = code.slice(guard);
+        assert.ok(!/loadPattern\(\)/.test(main),
+          `${f}'s main block calls loadPattern() with no argument — it would read the default config rather than ` +
+          `the one this instance runs on`);
+      }
+    } else {
+      assert.ok(declared.length >= 60, `${f}: record WHY the default is right, not just that it is used`);
+    }
+  }
+  // Nothing may be listed that is not actually runnable — a stale exemption is how one becomes permanent.
+  for (const f of Object.keys(PATTERN_READERS)) {
+    assert.ok(runnable.includes(f), `PATTERN_READERS lists ${f}, which this check does not treat as runnable`);
+  }
+});
+
 // `roles` looks like a seam and is not: which roles EXIST is fixed by the code, and config only lists them. The
 // validator required just `volunteer`, so a config declaring only that validated, seeded one role, and left an
 // instance where `setRole(…, "admin", true)` answers `no_such_role`, every admin route 403s, and the boot warning

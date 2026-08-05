@@ -151,11 +151,30 @@ if (process.argv[1] && (await import("node:url")).pathToFileURL(process.argv[1])
   // Both are scheduled clean-ups, so one command is one thing for an operator to remember.
   if (!process.argv.includes("--no-retention")) {
     const { openDb } = await import("../src/db.mjs");
-    const { loadPattern } = await import("../src/config.mjs");
+    const { loadPattern, patternFileFor } = await import("../src/config.mjs");
     const { runRetention } = await import("../src/retention.mjs");
     const live = openDb(cfg.db);
     try {
-      const pattern = loadPattern();
+      // patternFileFor(), NOT the default file. This read `loadPattern()` with no argument, so on any deployment
+      // that sets FOURWATER_PATTERN — the multi-department plan this variable exists for, and the demo, which sets
+      // it — the retention step read a DIFFERENT config from the one the app runs on. Measured against a second
+      // department's file:
+      //
+      //   the app's season key           : LYON-2026-Q3Q4
+      //   the backup's currentKey        : 2026-Q1Q2       <- what pruneSeasons was told to protect
+      //   the app's retention config     : {"seasons":5,"notificationDays":30}
+      //   the backup's retention config  : {"seasons":2,"notificationDays":90}
+      //
+      // Two consequences on a path that DELETES. `pruneSeasons` refuses to touch `currentKey`, so the season
+      // actually in use had nothing protecting it — at risk once three seasons exist and the current one is not
+      // among the newest two by from_date, which a rollover plus a pre-created next season produces. And the
+      // notification window came from the wrong file, so messages were kept for ninety days where the deployment
+      // had said thirty, or the reverse.
+      //
+      // server.mjs resolves the config this way and this did not. Two readers of one seam with two different
+      // policies is the tell — the same shape as the invite link that built an origin from the Host header while
+      // every other link builder used FOURWATER_BASE_URL.
+      const pattern = loadPattern(patternFileFor());
       const r = runRetention(live, { pattern, currentKey: pattern.season.key });
       const bits = [
         `${r.notifications.removed} message(s) older than ${r.config.notificationDays} days`,

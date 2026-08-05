@@ -6,7 +6,7 @@
 //
 // Idempotent. Safe to run twice, and safe to run on a live system — it never removes anything.
 import { openDb, migrate } from "../src/db.mjs";
-import { loadPattern } from "../src/config.mjs";
+import { loadPattern, patternFileFor } from "../src/config.mjs";
 import { seedRoles } from "../src/seed.mjs";
 import { createInvite } from "../src/auth.mjs";
 
@@ -16,7 +16,11 @@ export function bootstrapAdmin(db, { email, name, baseUrl = "", roles = null }) 
   if (!email || !/.+@.+/.test(email)) return { ok: false, reason: "bad_email" };
 
   migrate(db);                                  // still safe to point at a database that has never been migrated
-  seedRoles(db, roles ?? loadPattern().roles);  // the roles table, and deliberately nothing else
+  // patternFileFor() for consistency with every other entry point, not because it changes an outcome today:
+  // `validatePattern` now requires the same three role names of every config, so which file this reads cannot
+  // alter the result. Honouring the seam anyway costs one call and removes the need to reason about that each
+  // time somebody looks — which is the reasoning that let backup.mjs read the wrong file on a deleting path.
+  seedRoles(db, roles ?? loadPattern(patternFileFor()).roles);  // the roles table, and deliberately nothing else
 
   const adminRole = db.prepare("SELECT id FROM roles WHERE name='admin'").get();
   if (!adminRole) return { ok: false, reason: "no_admin_role" };
