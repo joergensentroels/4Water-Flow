@@ -30,12 +30,15 @@ const OUTCOME = {
   holiday_unchanged: { key: "admin.holidayUnchanged" },
   holiday_taken: { key: "admin.holidayTaken", bad: true },
   holiday_bad_date: { key: "admin.holidayBadDate", bad: true },
+  // Not a failure — the removal happened — and not a plain success either, because the person is still on the
+  // plan for it and the planner is the one who would have to find cover.
+  capability_kept: { key: "admin.capabilityKept", warn: true },
   holiday_outside: { key: "admin.closeDateOutside", bad: true },
 };
 
 export function adminFlash(t, code, vars) {
   const o = OUTCOME[code];
-  return o ? { text: t(o.key, vars), bad: !!o.bad } : null;
+  return o ? { text: t(o.key, vars), bad: !!o.bad, warn: !!o.warn } : null;
 }
 
 // `roster` carries the counts and the search term. Defaults describe an unfiltered, uncapped list so a caller

@@ -585,3 +585,82 @@ test("the roster is capped by default, searchable, and honest about what it is n
   const cards = (body.match(/href="\/admin\/person\/\d+\/export\.json"/g) ?? []).length;
   assert.equal(cards, PEOPLE_PAGE, `rendered ${cards} person cards, expected ${PEOPLE_PAGE}`);
 }));
+
+// ---- removing a capability from somebody already rostered for it (increment AP) ------------------------------
+//
+// Walked as a lifecycle transition rather than read: an admin unchecks an activity for a volunteer who is confirmed
+// to teach it in three days. Two sibling admin actions disagreed about what the admin is told.
+//
+//   stand down       -> future shifts RELEASED, banner says "N shifts released"
+//   remove capability -> future shifts KEPT,     banner said "Saved."
+//
+// The behaviour is right and stays: cancelling a class somebody has committed to teach is worse than a stale flag,
+// and src/admin.mjs says so beside the delete. The SILENCE was the defect. The plan showed that person teaching an
+// activity the app now says they cannot do, and the planner — the only person who could find cover — was told
+// nothing. That is the same shape as a deactivation reporting a bare "saved" over fifty released shifts, which this
+// project already fixed once next door.
+test("removing a capability says how many future shifts the person still holds for it",
+  withAdmin({}, async (w) => {
+  const cookie = await w.signIn(w.people[0]);
+  const person = w.people[1];
+  const key = w.pattern.activities[0].key;
+
+  const slot = w.db.prepare(`SELECT a.id FROM assignments a
+                               JOIN sessions s ON s.id = a.session_id
+                              WHERE a.person_id IS NULL AND s.activity_id =
+                                    (SELECT id FROM activities WHERE key = ?) AND s.date >= ?
+                              ORDER BY s.date LIMIT 1`).get(key, w.today);
+  assert.ok(slot, "the fixture must have a future slot for that activity, or this test asserts nothing");
+  w.db.prepare("UPDATE assignments SET person_id=?, state='confirmed' WHERE id=?").run(person, slot.id);
+
+  const res = await w.post("/admin/capability", cookie,
+    new URLSearchParams({ csrf: csrfFromCookie(cookie), personId: String(person), key, on: "0" }));
+  assert.equal(reasonOf(res), "capability_kept",
+    "a bare 'saved' here reads as nothing needing attention, over a shift somebody now has to look at");
+
+  // The count reaches the page, and the banner is styled as needing attention rather than as a failure.
+  const { body } = await w.follow(res, cookie);
+  assert.match(body, /still on 1 future shift\b|står stadig på 1 kommende vagt\b/,
+    `the count and its singular must both be right: ${body.match(/<p class="flash[^>]*>[^<]*/)?.[0]}`);
+  assert.match(body, /class="flash warn"/, "nothing failed, and somebody still has to act on it");
+
+  // And the behaviour is unchanged: the commitment survives.
+  assert.equal(w.db.prepare("SELECT person_id FROM assignments WHERE id=?").get(slot.id).person_id, person,
+    "removing a capability must NOT cancel a class they agreed to teach — only stop matching them for more");
+  assert.equal(w.db.prepare(`SELECT COUNT(*) n FROM capabilities c JOIN activities a ON a.id=c.activity_id
+                              WHERE c.person_id=? AND a.key=?`).get(person, key).n, 0, "and the flag is gone");
+}));
+
+test("and it reports a plain success when they hold none, so the warning means something",
+  withAdmin({}, async (w) => {
+  const cookie = await w.signIn(w.people[0]);
+  const person = w.people[2];
+  const key = w.pattern.activities[0].key;
+  // Deliberately NOT rostered. Without this the assertion above would pass on a build that warns every time.
+  assert.equal(w.db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              WHERE a.person_id=? AND s.date >= ?`).get(person, w.today).n, 0);
+
+  const res = await w.post("/admin/capability", cookie,
+    new URLSearchParams({ csrf: csrfFromCookie(cookie), personId: String(person), key, on: "0" }));
+  assert.equal(reasonOf(res), "saved", "no held shifts means nothing to warn about");
+  const { body } = await w.follow(res, cookie);
+  assert.doesNotMatch(body, /class="flash warn"/, "or the warn state stops carrying information");
+}));
+
+test("the audit entry records the held shifts too, since that is what a planner would ask about",
+  withAdmin({}, async (w) => {
+  const cookie = await w.signIn(w.people[0]);
+  const person = w.people[1];
+  const key = w.pattern.activities[0].key;
+  const slot = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id = a.session_id
+                              WHERE a.person_id IS NULL AND s.activity_id =
+                                    (SELECT id FROM activities WHERE key = ?) AND s.date >= ?
+                              ORDER BY s.date LIMIT 1`).get(key, w.today);
+  w.db.prepare("UPDATE assignments SET person_id=?, state='confirmed' WHERE id=?").run(person, slot.id);
+  await w.post("/admin/capability", cookie,
+    new URLSearchParams({ csrf: csrfFromCookie(cookie), personId: String(person), key, on: "0" }));
+
+  const row = w.db.prepare("SELECT detail FROM audit WHERE action='admin.capability' ORDER BY id DESC LIMIT 1").get();
+  assert.match(row.detail, /still on 1 future shift/,
+    `the log is where somebody looks months later, and "cannot salsa" alone does not say what it left behind: ${row.detail}`);
+}));

@@ -703,10 +703,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   app.post("/admin/capability", async ({ req, res }) => {
     const c = await postGate({ req, res }, "admin");
     if (!c) return;
-    const r = setCapability(db, Number(c.form.personId), String(c.form.key), c.form.on === "1");
+    const r = setCapability(db, Number(c.form.personId), String(c.form.key), c.form.on === "1", { today: today() });
     logAudit(c, "admin.capability", `person:${Number(c.form.personId)}`,
-             `${c.form.on === "1" ? "can" : "cannot"} ${String(c.form.key)}${r.ok ? "" : ` (refused: ${r.reason})`}`);
-    redirect(res, `/admin?r=${r.ok ? "saved" : r.reason}`);
+             `${c.form.on === "1" ? "can" : "cannot"} ${String(c.form.key)}` +
+             `${r.ok ? (r.stillHeld ? `, still on ${r.stillHeld} future shift(s) for it` : "") : ` (refused: ${r.reason})`}`);
+    // A separate code when they are still rostered for it, so the banner can say so rather than reporting a bare
+    // success over shifts somebody now has to look at.
+    const code = !r.ok ? r.reason : r.stillHeld ? "capability_kept" : "saved";
+    redirect(res, `/admin?r=${code}${r.stillHeld ? `&n=${r.stillHeld}` : ""}`);
   });
 
   app.post("/admin/status", async ({ req, res }) => {

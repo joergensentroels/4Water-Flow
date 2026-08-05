@@ -401,5 +401,7 @@
   "admin.closeDateHint": "Til en dato, der ikke er en helligdag: lokalet er lukket, der er ferie, ingen kan undervise. En dato med vagter, nogen har taget, bliver afvist.",
   "admin.closeDateWhich": "Dato",
   "admin.closeDateDo": "Ingen undervisning den dato",
-  "admin.closeDateOutside": "Datoen ligger uden for sæsonen."
+  "admin.closeDateOutside": "Datoen ligger uden for sæsonen.",
+  "admin.capabilityKept": "Fjernet — og de står stadig på {n} kommende vagter med det. Frigør dem under Planlægning, hvis en anden skal tage dem.",
+  "admin.capabilityKept.one": "Fjernet — og de står stadig på {n} kommende vagt med det. Frigør den under Planlægning, hvis en anden skal tage den."
 }

@@ -401,5 +401,7 @@
   "admin.closeDateHint": "For a date that is not a public holiday: the venue is closed, the term breaks, nobody can teach. A date with slots somebody has already taken is refused.",
   "admin.closeDateWhich": "Date",
   "admin.closeDateDo": "No classes on that date",
-  "admin.closeDateOutside": "That date is outside the season."
+  "admin.closeDateOutside": "That date is outside the season.",
+  "admin.capabilityKept": "Removed — and they are still on {n} future shifts for it. Free those under Planning if somebody else should take them.",
+  "admin.capabilityKept.one": "Removed — and they are still on {n} future shift for it. Free it under Planning if somebody else should take it."
 }

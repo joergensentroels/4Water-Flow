@@ -76,17 +76,29 @@ export function setRole(db, personId, roleName, on) {
   return { ok: true };
 }
 
-export function setCapability(db, personId, activityKey, on) {
+export function setCapability(db, personId, activityKey, on, { today = null } = {}) {
   const act = db.prepare("SELECT id FROM activities WHERE key = ?").get(activityKey);
   if (!act) return { ok: false, reason: "no_such_activity" };
   if (on) {
     db.prepare("INSERT OR IGNORE INTO capabilities (person_id, activity_id) VALUES (?,?)").run(personId, act.id);
-  } else {
-    db.prepare("DELETE FROM capabilities WHERE person_id=? AND activity_id=?").run(personId, act.id);
-    // Note what is deliberately NOT done: existing assignments are left alone. Removing a capability says
-    // "do not give them more of these", not "erase the ones they already agreed to".
+    return { ok: true, stillHeld: 0 };
   }
-  return { ok: true };
+  db.prepare("DELETE FROM capabilities WHERE person_id=? AND activity_id=?").run(personId, act.id);
+  // Existing assignments are deliberately left alone. Removing a capability says "do not give them more of these",
+  // not "erase the ones they already agreed to" — and cancelling a class somebody has committed to teach next week
+  // would be worse than a stale flag. The note next door explains why the same reasoning is WRONG for a deactivation.
+  //
+  // But it is COUNTED and reported now, which it was not. Measured: an admin unchecked an activity for somebody
+  // confirmed to teach it three days later, and got "Saved." The plan then showed that person teaching an activity
+  // the app says they cannot do, the planner who would have to find cover was told nothing, and there was no way to
+  // discover it except by reading the grid. Standing the same person down reports "N shifts released"; this reported
+  // a bare success over the same kind of consequence. The behaviour is right and the silence was not.
+  const stillHeld = today
+    ? db.prepare(`SELECT COUNT(*) n FROM assignments a JOIN sessions s ON s.id = a.session_id
+                   WHERE a.person_id = :pid AND s.activity_id = :aid AND s.date >= :today`)
+        .get({ pid: personId, aid: act.id, today }).n
+    : 0;
+  return { ok: true, stillHeld };
 }
 
 // Going inactive RELEASES the shifts they had not yet done. The note above about capabilities — "do not give them
