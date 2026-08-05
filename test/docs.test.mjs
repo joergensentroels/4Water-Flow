@@ -55,10 +55,15 @@ function sourceFacts() {
 
 // One place may state the test count, and it is PLAN.md.
 //
-// Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK said
-// "129+ automated checks", RUNBOOK said "330 tests" further down, PLAN said "330", and the suite had 338. My own
-// doc-claims sweep missed two of them because it only matched PLAN's exact phrasing — a checker with a blind spot
-// shaped like the thing it was checking.
+// Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK claimed a
+// hundred-and-something automated checks, RUNBOOK claimed a different three-hundred-and-something further down,
+// PLAN claimed that same wrong number, and the suite was a fourth. My own doc-claims sweep missed two of them
+// because it only matched PLAN's exact phrasing — a checker with a blind spot shaped like the thing it was
+// checking.
+//
+// The numbers are described rather than quoted on purpose: the source scan below now covers this file too, and
+// quoting them here would make this comment an offender. That is not a workaround, it is the rule applying to
+// itself — the point was never the specific digits, it was that four places disagreed.
 //
 // The count cannot be verified from inside the suite (running it from within itself does not terminate — see the
 // note at the top of this file), so this asserts the STRUCTURE instead: exactly one document may carry a number,
@@ -79,6 +84,84 @@ test("only PLAN.md states a test count, so there is one number to keep true", ()
   assert.deepEqual(offenders, [],
     `these documents state a test count as well as PLAN.md, so at least one of them will be stale:\n  ` +
     `${offenders.join("\n  ")}\n  Say "the whole suite" instead, and leave the number to PLAN.md.`);
+});
+
+// And the same rule for SOURCE, because the test above only ever looked at the six markdown files — so the rule
+// had a hole exactly the size of a code comment. `src/config.mjs` sat in it, justifying the `-rc.1` suffix with a
+// count that was two dozen out of date.
+//
+// It hid behind a second thing worth naming: the number and the word were split across a line wrap, with a `// `
+// between them. A scan extended to source but not taught about comment continuations walks straight past that — I
+// ran exactly that scan first and it reported the file as clean.
+//
+// So there are TWO patterns rather than one clever normalisation. The first draft unwrapped continuations before
+// matching, which sounds tidier and was wrong twice: `\s*` swallowed blank lines and joined unrelated paragraphs
+// into sentences neither had said, and even fixed it still matched starting at the second newline of a blank line.
+// Matching the wrapped shape directly cannot do that, because it requires the digits and the word to be adjacent
+// across exactly one break. Both controls below were written to fail first.
+// `\r?\n`, and that is not defensive boilerplate. The first version was `[ \t]*\n`, which passed its unit control
+// — built with `\n` in a template literal — and then failed to catch a wrapped count planted in a real file,
+// because the working copy on the machine this was written on uses CRLF and `\r` is neither a space nor a tab. The
+// control looked at something production does not have. Exactly the shape of the two defects that shipped from
+// this repo: a harness supplying what the real thing lacks. The CRLF control below exists for that reason.
+const COUNT_SAME_LINE = /\b\d{2,4}\+?[ \t]+(?:automated[ \t]+)?(?:tests?|checks?)\b/gi;
+const COUNT_WRAPPED = /\b\d{2,4}\+?[ \t]*\r?\n[ \t]*\/\/[ \t]*(?:automated[ \t]+)?(?:tests?|checks?)\b/gi;
+const countsIn = (text) => [...text.matchAll(COUNT_SAME_LINE), ...text.matchAll(COUNT_WRAPPED)]
+  .map((m) => m[0].replace(/\s*\n\s*\/\/\s*/, " ").trim());
+
+test("no source comment states a test count either, however it is wrapped", () => {
+  const files = [];
+  const walk = (rel) => {
+    for (const f of readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+      if (f.isDirectory()) walk(`${rel}/${f.name}`);
+      else if (f.name.endsWith(".mjs")) files.push(`${rel}/${f.name}`);
+    }
+  };
+  for (const d of ["src", "test", "tools"]) walk(d);
+  assert.ok(files.length >= 20, `only ${files.length} source files — this is not looking properly`);
+
+  const offenders = [];
+  for (const rel of files) {
+    for (const hit of countsIn(read(rel))) offenders.push(`${rel}: "${hit}"`);
+  }
+  assert.deepEqual(offenders, [],
+    `source states a test count, which PLAN.md alone is allowed to do — it will be stale within an increment:\n  ` +
+    `${offenders.join("\n  ")}\n  Say "the whole suite".`);
+});
+
+test("and that scan sees through a line wrap, which is how the last one was missed", () => {
+  // The fixtures are ASSEMBLED, never written out, so this file does not contain the thing it forbids — the same
+  // reason seams.test.mjs builds its planted activity name from config at runtime instead of typing it. Writing
+  // the literal here would make the scan above fail on its own control, which is a special kind of silly. It did,
+  // twice, before the fixtures were built this way.
+  const n = 300 + 30;
+  const word = "tests";
+
+  // Exactly the shape that was in config.mjs: the digits end one line, the word begins the next behind a `//`.
+  const wrapped = `// this is feature-complete and covered by ${n}\n// ${word}, and it has never been built\n`;
+  assert.equal([...wrapped.matchAll(COUNT_SAME_LINE)].length, 0, "control: a same-line scan really does miss this");
+  assert.deepEqual(countsIn(wrapped), [`${n} ${word}`], "and the wrapped pattern is what catches it");
+
+  // It must NOT invent a claim by joining two unrelated comments. The first version of this check normalised
+  // continuations away before matching, and did exactly that: a blank line between two paragraphs was swallowed
+  // and their text glued into a sentence neither had said. Fixing `\s*` to `[ \t]*` was not enough either — the
+  // pattern could still start matching at the SECOND newline of the blank line. Requiring adjacency across one
+  // break is what actually closes it.
+  assert.deepEqual(countsIn(`// there were ${n}\n\n// ${word} are green\n`), [],
+    "a blank line between them is two separate statements, not a wrapped one");
+  assert.deepEqual(countsIn(`// there were ${n}\n//\n// ${word} are green\n`), [],
+    "and an empty comment line is a paragraph break, not a wrap");
+
+  // The plain same-line case still has to work, or the wrapped pattern has quietly replaced it.
+  assert.deepEqual(countsIn(`// the suite has ${n} ${word} today\n`), [`${n} ${word}`]);
+
+  // CRLF, because that is what defeated the first version. This fixture is the whole reason the pattern carries
+  // `\r?`: with `\n` only, the scan reported a real file containing a planted wrapped count as clean, while this
+  // test's LF fixture passed. A control built from different bytes than the thing under test is not a control.
+  assert.deepEqual(countsIn(`// covered by ${n}\r\n// ${word}, and it has never been built\r\n`),
+    [`${n} ${word}`], "a Windows working copy must not be invisible to this scan");
+  assert.deepEqual(countsIn(`// there were ${n}\r\n\r\n// ${word} are green\r\n`), [],
+    "and the blank-line rule has to hold with CRLF too");
 });
 
 // The commands the RUNBOOK tells an operator to type, checked against what exists.

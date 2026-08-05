@@ -8,10 +8,17 @@ const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
 
 // Which build is running, read once at load and shown on /status.
 //
-// `1.0.0-rc.1`, not `1.0.0`, and the suffix is the honest part: this is feature-complete and covered by 330
-// tests, and it has never been built as a container, never spoken to a real NextCloud, and never been used by a
+// `1.0.0-rc.1`, not `1.0.0`, and the suffix is the honest part: this is feature-complete and the whole suite
+// passes, and it has never been built as a container, never spoken to a real NextCloud, and never been used by a
 // volunteer. A version number that claims otherwise is the same overstatement as a comment asserting a cause the
 // code contradicts. What makes it 1.0.0 is written in RUNBOOK.md.
+//
+// That sentence used to state a test count. PLAN.md is the only place allowed to, and a test enforces it — but
+// the test scanned the markdown documents only, and this is source. Worse, the number and the word were split
+// across a line wrap with a `// ` between them, so even a scan extended to source would have walked past it. It
+// was stale by two dozen before anybody looked. Both holes are closed now, and the number is described rather
+// than quoted here: writing it out to explain its own removal is how the first draft of this comment became an
+// offender against the check it was documenting.
 //
 // This is also the only thing that reads package.json at runtime. Until now the Dockerfile copied it for no
 // reason a running app could detect — which test/image.test.mjs said out loud rather than implying coverage it
