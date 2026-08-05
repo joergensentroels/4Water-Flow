@@ -162,7 +162,7 @@
   "privacy.calendar": "If you create a calendar link, the link itself is what grants access — a calendar app cannot log in. Anyone you give it to, or who finds it, can see when you are helping. It is yours to replace or switch off at any time on your own page, and doing so stops the old link working immediately.",
   "privacy.rights": "You can always see and correct your own details. If you want them deleted, contact an administrator.",
   "invite.title": "You have been invited",
-  "invite.intro": "This invitation was sent to {email}. Accept it to set up your volunteer page and say when you can help.",
+  "invite.intro": "This invitation was sent to {email}. Accept it, and the next screen asks when you can help.",
   "invite.hint": "If that is not your address, do not accept — ask a planner for your own invitation.",
   "invite.accept": "Accept invitation",
   "privacy.back": "Back",

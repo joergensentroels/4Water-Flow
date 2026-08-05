@@ -7,7 +7,7 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 391 tests green** — and, as of the AB increment, green on an actual `git clone`
+Status: **✅ A–AH complete plus the commits since, 392 tests green** — and, as of the AB increment, green on an actual `git clone`
 rather than only in the working copy where they were written.
 
 **Read "Still not verified" below before trusting that number.** A green suite twice reported success over a
@@ -167,6 +167,13 @@ up, add it there too.**
   available without a remote. **Push, and confirm the first run is green, before trusting that line.**
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
+- **No first-language Danish speaker has read the Danish.** `test/strings.test.mjs` checks that both locales carry
+  the same keys and the same placeholders, and `test/claims.test.mjs` now checks that no string names a screen the
+  app does not show — but nothing has an opinion about whether a sentence reads naturally, and no test can stand in
+  for that. Terminology was checked against the app's own established words (`Planlægger` for the role, `Inaktiv`
+  for the status, `vagt`/`vagtbørs` throughout, plain Danish over loanwords), and one inconsistency was found and
+  fixed that way. Register and phrasing are still one person's judgement. Ask somebody at 4water to read
+  `strings/da.json` end to end — 268 strings, and the fastest review in this handover.
 - **The newest two screens have not been photographed, and one has not been pressed.** The invitation landing page
   was read in a real browser at 375×812 — its button measures 309×48 CSS px, the page does not scroll sideways, and
   a second GET of the link still offers it and sets no cookie, which is the whole point of it existing. What could

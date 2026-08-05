@@ -215,6 +215,39 @@ test("each justification names a condition rather than restating the string", ()
   }
 });
 
+// A different way for a string to be false: sending somebody to a screen that does not exist under that name.
+//
+// invite.intro — the first sentence a new volunteer ever reads — said "Accept it to set up your volunteer page".
+// This app has no volunteer page. Its own name for that screen is "Me", its title is "Your details", and the
+// established way of pointing at it is board.why.fixMe, "Go to your own page". The sentence also misdescribed what
+// happens: accepting lands on Availability. Written while I was updating the record that names this the largest
+// defect class in the project, which is the third time that has happened and the reason this is a test now rather
+// than a resolution to be careful.
+//
+// The names the app shows are derivable — the nav labels and the page titles — so this needs no list of its own.
+test("no string sends somebody to a page the app never names", () => {
+  const en = loadStrings("en");
+  const shown = new Set(Object.entries(en)
+    .filter(([k]) => /^nav\./.test(k) || /\.title$/.test(k))
+    .map(([, v]) => String(v).toLowerCase()));
+  assert.ok(shown.size >= 8, `only ${shown.size} names found — this check would pass by knowing nothing`);
+
+  // "your own page" and "the next screen" are positional rather than names, which is exactly why the four strings
+  // that already did this used them. Anything else reading like a screen name has to be one the app shows.
+  const POSITIONAL = new Set(["own", "same", "next", "previous", "planning"]);
+  const bad = [];
+  for (const [key, value] of Object.entries(en)) {
+    if (typeof value !== "string") continue;
+    for (const m of value.matchAll(/\b(?:your|the|a)\s+([a-z][a-z ]{2,28}?)\s+(?:page|screen|tab|section)\b/gi)) {
+      const name = m[1].trim().toLowerCase();
+      if (!shown.has(name) && !POSITIONAL.has(name)) bad.push(`${key}: "${m[0]}"`);
+    }
+  }
+  assert.deepEqual(bad, [],
+    "these strings name a page the app does not show anywhere — a volunteer would go looking for it:\n  " +
+    bad.join("\n  "));
+});
+
 // The Danish strings are translations of the English ones, so they inherit the claims rather than making new
 // ones. What must hold is that a translation does not ADD an explanation the English does not make — which is
 // how a locale ends up asserting something the code never guaranteed.
