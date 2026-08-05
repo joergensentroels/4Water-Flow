@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, makeAvailableEverywhere, csrfFromCookie } from "../tools/testkit.mjs";
 import { autoRoster } from "../src/roster.mjs";
+import { recordAudit } from "../src/audit.mjs";
 
 // aria-label wins over text content — that is how a browser resolves an accessible name, and it is why counting
 // visible button text says nothing about what a screen reader announces.
@@ -123,22 +124,78 @@ const populated = async () => {
     const r = await w.post("/admin/invite", admin, new URLSearchParams({ csrf: csrfFromCookie(admin), email }));
     assert.equal(r.status, 303, `inviting ${email} must succeed, or the invite list is not being audited`);
   }
-  return { w, admin };
+
+  // TWO NOTES BY THE SAME PERSON on one session, so /session renders two Delete buttons.
+  //
+  // Deriving the page list brought /session and /audit into this audit for the first time, and they arrived with
+  // ONE control each: a link on the audit page, a link and a button on the session page. One control cannot collide
+  // with anything, so both pages were covered in name only — the same vacuous pass this file's second test was
+  // written to prevent, reintroduced by the change that was supposed to widen coverage.
+  //
+  // Two notes is the shape that matters, because two Delete buttons doing different things is precisely the fault
+  // audited here: each must say WHICH note it deletes. notes.mjs puts the note's first words in the aria-label, so
+  // the app is right — it had simply never been asked.
+  const session = w.db.prepare("SELECT id FROM sessions WHERE season_id=? ORDER BY date LIMIT 1").get(w.seasonId).id;
+  for (const body of ["bringing the spare cable", "can arrive fifteen minutes early"]) {
+    const r = await w.post(`/session/${session}/note`, admin,
+      new URLSearchParams({ csrf: csrfFromCookie(admin), body }));
+    assert.equal(r.status, 303, "posting a note must succeed, or /session has nothing to audit");
+  }
+
+  // And enough audit rows to spill past one page, so /audit renders BOTH its Newest and Older links rather than
+  // neither. The rows come from the invites and notes above plus this padding; recordAudit is called directly
+  // because driving 100 real actions through HTTP would take longer than the rest of this file.
+  for (let i = 0; i < 120; i++) {
+    recordAudit(w.db, { actorId: w.people[0], actorName: "Padding Admin", action: "admin.status",
+                        subject: `person:${w.people[1]}`, detail: "padding so the log paginates" });
+  }
+  return { w, admin, session };
 };
 
-// Every page an authenticated person can reach, not just the ones a defect has been found on. The read-only
-// pages joined the list once links came into scope, because that is all they have.
-const PAGES = ["/", "/availability", "/planner?weeks=all", "/board", "/plan", "/admin", "/me",
-               "/status", "/outbox", "/privacy"];
+// Query strings for the pages that need one to show their interesting state. Everything else is fetched bare, and
+// `:id` placeholders are filled with 1.
+const WITH_QUERY = { "/planner": "/planner?weeks=all" };
+
+// DERIVED from the route table, not listed.
+//
+// This was a hand-written array of ten paths under a comment reading "every page an authenticated person can
+// reach" — and by the time anybody read that comment again it was false. `/session/:id` and `/audit` had been added
+// since, so the two NEWEST screens in the app were the only ones this audit had never seen, which is precisely the
+// wrong way round. A list of pages to check cannot notice a page absent from itself; that shape has now been
+// removed from six checks in this repository and it keeps arriving in a new place.
+//
+// A GET route counts as a page when it answers 200 with HTML. That drops /healthz, the calendar feed, the CSV and
+// the JSON exports without naming any of them, so a new non-HTML route needs no entry here either.
+// The OIDC endpoints are skipped by name rather than by their status code. They are protocol steps, not screens:
+// /auth/oidc answers 503 unless a provider is configured, which the server logs as an error, and both count a
+// failure against the same limiter that guards sign-in. Excluding them keeps this audit from filling the test output
+// with errors about a thing it is not testing, and from spending throttle budget to learn they are not pages.
+const NOT_A_SCREEN = /^\/auth\//;
+
+async function pagesToAudit(w, cookie) {
+  const out = [];
+  for (const r of w.routes()) {
+    if (r.method !== "GET" || NOT_A_SCREEN.test(r.pattern)) continue;
+    const path = WITH_QUERY[r.pattern] ?? r.pattern.replace(/:(\w+)/g, () => "1");
+    const res = await w.get(path, cookie);
+    if (res.status !== 200) continue;                      // a bounce to /signin or a 404 is not a page
+    const body = await res.text();
+    if (/<html/i.test(body)) out.push({ path, body });
+  }
+  return out;
+}
 
 test("no two controls on a page share an accessible name while doing different things", async () => {
   const { w, admin: cookie } = await populated();
   try {
-    for (const page of PAGES) {
-      const res = await w.get(page, cookie);
-      assert.equal(res.status, 200, `${page} must render`);
-      const bad = faults(await res.text());
-      assert.deepEqual(bad, [], `${page}:\n  ${bad.join("\n  ")}`);
+    const pages = await pagesToAudit(w, cookie);
+    // Class-J guard: "no faults" must not be able to mean "no pages". The list this replaced held ten.
+    assert.ok(pages.length >= 10,
+      `only ${pages.length} HTML pages were reached, so this audit now covers less than the list it replaced: ` +
+      pages.map((p) => p.path).join(", "));
+    for (const { path, body } of pages) {
+      const bad = faults(body);
+      assert.deepEqual(bad, [], `${path}:\n  ${bad.join("\n  ")}`);
     }
   } finally { w.close(); }
 });
@@ -147,7 +204,7 @@ test("no two controls on a page share an accessible name while doing different t
 // invite list — carry MORE THAN ONE of the repeating ones. A page rendering a single Revoke button satisfies
 // the audit while telling it nothing. So this asserts the fixture's shape, not the app's behaviour.
 test("the audited pages really do carry repeated controls for the audit to collide", async () => {
-  const { w, admin: cookie } = await populated();
+  const { w, admin: cookie, session } = await populated();
   try {
     const on = async (page) => controls(await (await w.get(page, cookie)).text());
     const repeats = (cs) => {
@@ -168,5 +225,17 @@ test("the audited pages really do carry repeated controls for the audit to colli
       "two pending invites, or the invite list's Revoke buttons cannot collide and are not being audited");
     assert.ok((await on("/admin")).filter((c) => c.kind === "link" && c.does.includes("/export.json")).length >= 2,
       "two per-person export links, or the link half of the audit is not looking at the one place it caught");
+
+    // The two pages the derived page list brought in. They arrived with ONE control each — a link on the audit page,
+    // a link and a button on the session page — so widening the coverage had covered them in name only. These
+    // assertions are what stop that happening again silently, and they are the reason the fixture now writes two
+    // notes and pads the log past a page.
+    const sessionControls = await on(`/session/${session}`);
+    assert.ok(sessionControls.filter((c) => c.does.startsWith("/note/")).length >= 2,
+      "two notes by the same person, or /session's Delete buttons cannot collide and the page is audited vacuously");
+    const auditControls = await on("/audit");
+    assert.ok(auditControls.filter((c) => c.kind === "link" && c.does.startsWith("/audit")).length >= 2,
+      "the log must spill past one page, or /audit renders neither its Newest nor its Older link and has nothing " +
+      "for the audit to look at");
   } finally { w.close(); }
 });
