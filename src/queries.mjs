@@ -179,9 +179,20 @@ export function eligiblePeopleFor(db, assignmentId) {
   `).all({ aid: assignmentId });
 }
 
-// ---- Score --------------------------------------------------------------------------------------------
-// Always computed, never stored. Only CONFIRMED assignments count: an auto-roster proposal the planner has
-// not locked in yet is not something the volunteer has done.
+// ---- Two numbers, and they must not be one -------------------------------------------------------------
+// Always computed, never stored, as the spec requires. But there are TWO questions here and one number cannot
+// answer both:
+//
+//   LOAD (`score`)     — how many confirmed shifts does this person HOLD this season, past and future?
+//                        Forward-looking. This is what auto-roster balances and what the planner's candidate
+//                        list orders by, so that filling a gap by hand and filling it by machine agree.
+//   RECORD (`attendedCount`) — how many did they actually TURN UP for? Backward-looking. This is the
+//                        contribution number a planner eyeballs and a report would use.
+//
+// Feeding the RECORD to auto-roster is the trap, and it is not subtle: somebody holding four future shifts has
+// attended none of them, so an auto-roster balancing on attendance sees an under-loaded volunteer and hands them
+// a fifth. Every unstarted shift makes them look emptier. So auto-roster and the candidate list stay on load,
+// deliberately, and the two are named differently here so a later change cannot conflate them by accident.
 export function score(db, personId, seasonId) {
   return db.prepare(`
     SELECT COUNT(*) AS n
@@ -190,7 +201,54 @@ export function score(db, personId, seasonId) {
   `).get({ pid: personId, sid: seasonId }).n;
 }
 
-// "Active volunteter" in the spreadsheet's sense: has done at least `threshold` activities this season.
+// Shifts they turned up for. `attended IS 1` rather than `= 1` so NULL — nobody has said — counts as neither
+// attended nor missed, which is the whole reason that column is nullable.
+export function attendedCount(db, personId, seasonId) {
+  return db.prepare(`
+    SELECT COUNT(*) AS n
+      FROM assignments a JOIN sessions s ON s.id = a.session_id
+     WHERE a.person_id = :pid AND s.season_id = :sid AND a.state = 'confirmed' AND a.attended IS 1
+  `).get({ pid: personId, sid: seasonId }).n;
+}
+
+// Marking it. Only for a shift whose date has PASSED: recording that somebody attended next Wednesday is not a
+// fact, and a planner who can do it will eventually do it by accident on the wrong row.
+//
+// `attended` may be 1, 0, or null — the third is how a planner undoes a mistake, and it has to be reachable or
+// the only fix for a mis-click is a database edit.
+export function markAttendance(db, assignmentId, attended, { today }) {
+  if (![0, 1, null].includes(attended)) return { ok: false, reason: "bad_attendance" };
+  const row = db.prepare(`SELECT a.person_id AS personId, s.date
+                            FROM assignments a JOIN sessions s ON s.id = a.session_id
+                           WHERE a.id = ?`).get(assignmentId);
+  if (!row) return { ok: false, reason: "no_such_slot" };
+  if (row.personId == null) return { ok: false, reason: "nobody_on_it" };
+  if (row.date >= today) return { ok: false, reason: "not_yet" };
+
+  db.prepare("UPDATE assignments SET attended = :a WHERE id = :id").run({ a: attended, id: assignmentId });
+  return { ok: true, personId: row.personId, date: row.date, attended };
+}
+
+// Shifts in the past that nobody has marked either way — the planner's to-do list, and the reason attendance
+// does not silently stay empty forever. Capped, because a season of unmarked shifts is not a page.
+export const unmarkedShifts = (db, seasonId, today, limit = 50) =>
+  db.prepare(`
+    SELECT a.id AS assignmentId, s.date, t.hour, t.minute, act.label AS activityLabel,
+           COALESCE(a.role, '') AS role, p.name AS personName, a.person_id AS personId
+      FROM assignments a
+      JOIN sessions   s   ON s.id = a.session_id
+      JOIN timeslots  t   ON t.id = s.timeslot_id
+      JOIN activities act ON act.id = s.activity_id
+      JOIN people     p   ON p.id = a.person_id
+     WHERE s.season_id = :sid AND s.date < :today AND a.state = 'confirmed' AND a.attended IS NULL
+     ORDER BY s.date DESC, t.hour LIMIT :n
+  `).all({ sid: seasonId, today, n: limit });
+
+// "Active volunteer" in the spreadsheet's sense: has done at least `threshold` activities this season.
+//
+// Deliberately still LOAD rather than attendance. This feeds nothing that gates eligibility — `people.status` does
+// that, for the bootstrapping reason recorded in PLAN.md — and switching it to attendance would make a volunteer
+// who has signed up but not yet run anything read as inactive, which is the same paradox one layer along.
 export const isActive = (db, personId, seasonId, threshold = 1) => score(db, personId, seasonId) >= threshold;
 
 // ---- The vagtbørs -------------------------------------------------------------------------------------
@@ -371,7 +429,11 @@ export function planForSeason(db, seasonId) {
   return db.prepare(`
     SELECT s.id AS sessionId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,
            act.key AS activityKey, act.label AS activityLabel,
-           a.id AS assignmentId, a.role, a.state, a.person_id AS personId, p.name AS personName
+           a.id AS assignmentId, a.role, a.state, a.person_id AS personId, p.name AS personName,
+           -- Carried so the grid can offer the attendance control on shifts that have happened. Without it the
+           -- view cannot tell "marked as absent" from "nobody has said", which are the two states a planner most
+           -- needs to distinguish when working through a backlog.
+           a.attended
       FROM sessions s
       JOIN timeslots  t ON t.id = s.timeslot_id
       JOIN activities act ON act.id = s.activity_id

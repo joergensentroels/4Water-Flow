@@ -21,6 +21,10 @@ const OUTCOME = {
   already_booked: { key: "planner.alreadyBooked", bad: true },
   no_such_slot: { key: "board.noSuchSlot", bad: true },
   no_such_person: { key: "planner.noSuchPerson", bad: true },
+  attendance_saved: { key: "planner.attendanceSaved" },
+  not_yet: { key: "planner.notYet", bad: true },
+  nobody_on_it: { key: "planner.nobodyOnIt", bad: true },
+  bad_attendance: { key: "planner.badAttendance", bad: true },
 };
 
 // `vars` carries the counts for the roster outcomes ({filled}, {gaps}, {n}), so the message can say what
@@ -43,7 +47,7 @@ function byDate(rows) {
 // `emptyReasons` maps assignmentId -> reason code, only for slots with no candidates. Defaults to an empty Map
 // so a caller that does not compute it still renders — falling back to the one honest generic reason.
 export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignment, flash, gapsOnly, weeks = 4,
-                                pendingProposals = 0, emptyReasons = new Map(), review = null }) {
+                                pendingProposals = 0, emptyReasons = new Map(), review = null, today = null, unmarked = [] }) {
   const days = byDate(rows);
 
   // Auto-roster controls. Lock-in and discard only appear when there is something to decide about, because a
@@ -106,6 +110,57 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
   const slotName = (r) =>
     `${formatDate(t, r.date)} ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}`;
 
+  // Did they turn up? Offered only on a shift that has already happened and been confirmed — recording attendance
+  // for next Wednesday is not a fact, and a control that lets a planner do it will eventually be used by accident
+  // on the wrong row. `markAttendance` refuses a future date as well, so this is the visible half of one rule.
+  //
+  // Three states, not two: attended, did not, and NOBODY HAS SAID. The third is the honest default and has to be
+  // reachable, because a mis-click marking somebody a no-show is exactly the mistake worth undoing without a
+  // database edit. The current state is shown with aria-pressed rather than by hiding the button that is already
+  // chosen — a planner working through a backlog needs to see what a row says, not infer it from what is missing.
+  const attendance = (r) => {
+    if (!today || r.date >= today) return "";
+    const choice = (value, key) => html`
+      <button type="submit" name="attended" value="${value}" class="secondary"
+              aria-pressed="${String(r.attended === null || r.attended === undefined
+                ? value === "" : String(r.attended) === value)}"
+              aria-label="${t(key)} — ${r.personName} — ${slotName(r)}">${t(key)}</button>`;
+    return html`
+      <form method="post" action="/planner/attendance" class="attendrow">
+        ${csrfField(session)}
+        <input type="hidden" name="assignmentId" value="${r.assignmentId}">
+        <input type="hidden" name="weeks" value="${weeks ?? "all"}">
+        <span class="bulklabel">${t("planner.attended")}:</span>
+        ${choice("1", "planner.attendedYes")}
+        ${choice("0", "planner.attendedNo")}
+        ${choice("", "planner.attendedUnknown")}
+      </form>`;
+  };
+
+  // Shifts that have happened and nobody has marked — the planner's to-do list, and the only place the attendance
+  // control lives.
+  //
+  // It is NOT on the grid, and finding that out was the useful part: the grid filters to `date >= today` because
+  // planning is about the future, so a control rendered per row could never appear for a shift that had already
+  // happened. The first version of this put it there and rendered nothing at all — a route with no reachable UI,
+  // which is a defect this project has shipped twice. A backlog list is also simply the right shape: a planner
+  // marking last month wants what is outstanding, not to scroll backwards through a season.
+  const unmarkedCard = unmarked.length === 0 ? "" : html`
+    <details class="card">
+      <summary>${t("planner.toMark", { n: unmarked.length })}</summary>
+      <p class="hint">${t("planner.toMarkHint")}</p>
+      <ul class="dates">
+        ${unmarked.map((r) => html`
+          <li><div class="daterow">
+            <span class="when">
+              <b>${formatDate(t, r.date)}</b>
+              <small>${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)} · ${r.personName}</small>
+            </span>
+            ${attendance(r)}
+          </div></li>`)}
+      </ul>
+    </details>`;
+
   const filled = (r) => html`
     <span class="when">
       ${formatTime(r.hour, r.minute)} · ${r.activityLabel}${formatRole(t, r.role)}
@@ -154,6 +209,7 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
     : html`
       <h2>${t("planner.title")}</h2>
       ${rosterControls}
+      ${unmarkedCard}
       ${reviewCard}
       <p class="hint">
         <a href="/planner?weeks=${weeks ?? "all"}${gapsOnly ? "" : "&gaps=1"}">${gapsOnly ? t("planner.showAll") : t("planner.showGaps")}</a>

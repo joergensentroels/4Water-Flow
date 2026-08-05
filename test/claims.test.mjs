@@ -132,6 +132,14 @@ const JUSTIFIED = {
   "calendar.noTimezone":
     "Shown only when calendarConfig(pattern).configured is false, in which case the feed really does fall back " +
     "to UTC — the fallback is UTC precisely so that being wrong is visible.",
+  "planner.notYet":
+    "markAttendance refuses with not_yet only when the session's date is >= today, so 'has not happened yet' is " +
+    "the actual condition that produced the message rather than a guess at it. The control is not even rendered " +
+    "on a future row — this string is what a stale page or a hand-made request gets.",
+  "planner.nobodyOnIt":
+    "Returned only when the assignment row exists and person_id IS NULL, which is precisely 'nobody is on it'. " +
+    "Distinguished from no_such_slot, which is a row that does not exist at all — conflating the two would send a " +
+    "planner looking for a slot that is right there in front of them.",
   "outbox.noWebhook":
     "Scoped to rows still marked not-sent. It must NOT claim anything about the whole page: with history, or " +
     "after a webhook is removed, 'sent' rows are visible in the list directly beneath this banner.",

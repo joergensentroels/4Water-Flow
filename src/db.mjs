@@ -98,6 +98,13 @@ export function openDb(file = process.env.FOURWATER_DB || "4water.db") {
 // to run against a populated table, exactly as it will on the real one.
 const ADDED_COLUMNS = [
   { table: "assignments", column: "role", ddl: "ALTER TABLE assignments ADD COLUMN role TEXT" },
+  // Did they turn up? NULL means nobody has said — which is the honest majority state, because a planner marks
+  // this after the fact and most shifts will never be marked at all. 1 attended, 0 did not.
+  //
+  // Nullable and no default, deliberately: see the warning above about NOT NULL on an existing table, and because
+  // "not recorded" and "did not attend" are different facts. Defaulting to 0 would turn every unmarked shift into
+  // a no-show and quietly wreck the number this column exists to feed.
+  { table: "assignments", column: "attended", ddl: "ALTER TABLE assignments ADD COLUMN attended INTEGER" },
   // The calendar subscription's credential, stored only as a SHA-256 hash — a copy of this database must not
   // yield working calendar URLs. NULL means the volunteer has not asked for a feed.
   { table: "people", column: "calendar_token_hash", ddl: "ALTER TABLE people ADD COLUMN calendar_token_hash TEXT" },
@@ -228,7 +235,13 @@ export function migrate(db) {
       -- A partner-dance class needs one of each, so it gets TWO rows; a workshop gets one NULL-role row.
       -- Nullable on purpose, so rows written before roles existed remain valid and read as "anyone".
       role       TEXT CHECK (role IN ('l','f')),
-      state      TEXT NOT NULL DEFAULT 'confirmed' CHECK (state IN ('proposed','confirmed'))
+      state      TEXT NOT NULL DEFAULT 'confirmed' CHECK (state IN ('proposed','confirmed')),
+      -- Did they turn up? NULL means nobody has said, and that is the honest majority state: a planner marks
+      -- this after the fact, and most shifts will never be marked at all. 1 attended, 0 did not.
+      --
+      -- NULL rather than a default of 0, because "not recorded" and "did not attend" are different facts.
+      -- Defaulting to 0 would turn every unmarked shift into a no-show and wreck the number this exists to feed.
+      attended   INTEGER CHECK (attended IN (0,1))
     );
 
     CREATE TABLE IF NOT EXISTS invitations (

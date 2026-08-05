@@ -29,7 +29,8 @@ import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
 import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
-         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason, slotEmptyReason } from "./queries.mjs";
+         eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason, slotEmptyReason,
+         attendedCount, markAttendance, unmarkedShifts } from "./queries.mjs";
 import { buildIcs, calendarTokenFor, revokeCalendarToken, hasCalendarToken,
          personByCalendarToken } from "./calendar.mjs";
 
@@ -377,6 +378,11 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
 
     send(res, 200, renderPlanner({
       t, session: c.session, roles: c.roles, who: c.who, rows, eligibleByAssignment, emptyReasons, gapsOnly, weeks,
+      // The clock, and the backlog of shifts that have happened and nobody has marked. Both whole-season and
+      // independent of the `weeks` horizon, because the grid deliberately shows only the future — a control per
+      // grid row could never appear for a past shift, which is how the first attempt at this rendered nothing.
+      today: today(),
+      unmarked: sid ? unmarkedShifts(db, sid, today()) : [],
       pendingProposals: sid ? countProposals(db, sid, today()) : 0,
       // Whole-season and independent of the `weeks` horizon on purpose: the fairness question is "how much has
       // this person got this season", which a 4-week window cannot answer.
@@ -416,6 +422,28 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const n = sid ? discardProposals(db, sid, today()) : 0;
     logAudit(c, "planner.discardProposals", `season:${sid}`, `${n} proposals discarded`);
     redirect(res, `/planner?r=discarded&n=${n}`);
+  });
+
+  // Marking who turned up. Score was one number counting shifts HELD, which measures commitment rather than
+  // contribution: somebody who takes four and attends one scored the same as somebody who did all four. So there
+  // are two numbers now — load, which auto-roster balances, and attendance, which is the record. src/queries.mjs
+  // explains why feeding the record to auto-roster would overload whoever holds unstarted shifts.
+  //
+  // `attended=""` clears it back to "nobody has said", because a mis-click on the wrong row must be undoable
+  // without a database edit, and marking the wrong volunteer as a no-show is exactly the mistake worth undoing.
+  app.post("/planner/attendance", async ({ req, res }) => {
+    const c = await postGate({ req, res }, "planner");
+    if (!c) return;
+    const raw = String(c.form.attended ?? "");
+    const attended = raw === "" ? null : raw === "1" ? 1 : raw === "0" ? 0 : "bad";
+    const id = Number(c.form.assignmentId);
+    const r = attended === "bad"
+      ? { ok: false, reason: "bad_attendance" }
+      : markAttendance(db, id, attended, { today: today() });
+    logAudit(c, "planner.attendance", `assignment:${id}`,
+             r.ok ? `person:${r.personId} on ${r.date} → ${r.attended === null ? "unmarked" : r.attended ? "attended" : "did not attend"}`
+                  : `refused: ${r.reason}`);
+    redirect(res, `/planner?weeks=${encodeURIComponent(String(c.form.weeks ?? "4"))}&r=${r.ok ? "attendance_saved" : r.reason}`);
   });
 
   app.post("/planner/assign", async ({ req, res }) => {

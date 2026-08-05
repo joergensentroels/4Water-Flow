@@ -19,6 +19,8 @@ export const AUDITED = {
   "/planner/auto-roster": "a machine wrote proposals across the season",
   "/planner/proposals/lock": "proposals became the plan",
   "/planner/proposals/discard": "proposals were thrown away",
+  "/planner/attendance": "somebody was recorded as having turned up, or not. This one is a statement ABOUT a "
+    + "volunteer that feeds their contribution record, so who made it matters as much as what it says",
   "/board/:id/claim": "a volunteer took an open shift — their own action, but it changes the plan",
   "/slot/:id/hand-back": "a volunteer gave a shift back, which is how a covered slot becomes uncovered",
   // another person's record

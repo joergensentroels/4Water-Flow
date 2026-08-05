@@ -7,7 +7,7 @@ shippable**; the app is usable by volunteers from D onward even while planners a
 Order follows `../4water-scheduling-spec.md` §5, which front-loads the pain that was actually reported (mobile,
 and chasing cover) rather than the part that is most interesting to build — auto-roster is eighth on purpose.
 
-Status: **✅ A–AH complete plus the commits since, 400 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 407 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
@@ -114,6 +114,22 @@ Nobody has asked 4water whether anything in their rhythm is fortnightly. If the 
 and the note can go. If the answer is yes, it is a schema change (a recurrence rule on `timeslots`) and much
 cheaper to know now than after a season has been planned. **This is the one gap found in the read-back that is a
 missing capability rather than a wording difference.**
+
+**5. Score is now two numbers, and the spec describes one.** §2 defines Score as *"the number of activities a
+person has had this season"* with two uses: balancing the load, and the contribution record. 4water asked for the
+record to count activities **attended**, which is right — somebody who takes four shifts and turns up to one has
+not contributed four. But attendance is backward-looking and the balancing number is forward-looking, so one
+column cannot do both jobs:
+
+> a volunteer holding four shifts next month has attended none of them. An auto-roster balancing on attendance
+> reads that as under-loaded and hands them a fifth. **Every unstarted shift makes them look emptier.**
+
+So `score()` stayed the count of confirmed assignments and now means **load** — what auto-roster balances, what
+the planner's candidate list orders by, and what the børs redistributes, exactly as §5's ⚠ note requires.
+`attendedCount()` is the new backward-looking figure. The spec's sentence is true of neither alone and both
+together; a planner sees load on the grid and marks attendance from a backlog card. `isActive` deliberately still
+reads load, for the same bootstrapping reason as item 3 — a newcomer who has signed up but not yet run anything
+must not read as inactive. **Nothing is missing; one number in the spec is two in the app, on purpose.**
 
 Checked and **held** in the same pass, so the list above is exhaustive rather than the part I happened to notice:
 Score is derived and never a stored column; locked assignments are immune to later auto-roster runs
