@@ -107,6 +107,110 @@ test("erasure pseudonymises the actor in the audit but keeps the rows", async ()
   }
 });
 
+// The test above passed over a broken bargain for three commits, and this is the half it could not see: it read
+// `actor_name` only, so a detail naming the same person by their EMAIL ADDRESS was invisible to it. Confirmed by
+// probe before being fixed — invite an address, erase the person, and the row still said `invited x@example.org`
+// beside a deleted people row and an invitations row scrubbed to 'erased'.
+//
+// A check that verifies one column of a two-column claim reads exactly like a check that verifies the claim.
+test("erasure removes the person's address from audit details too, not only the actor name", async () => {
+  for (const mode of ["anonymise", "remove"]) {
+    const w = await makeWorld({ volunteers: 2, roles: { 0: ["admin", "planner"] } });
+    try {
+      const admin = await w.signIn(w.people[0]);
+      const EMAIL = "gone@example.org";
+      // Through the route, not by calling recordAudit: the defect was in what a handler chose to write, and a
+      // fixture writing its own rows would test the fixture's choice instead.
+      const res = await w.post("/admin/invite", admin, new URLSearchParams({ csrf: csrfFromCookie(admin), email: EMAIL }));
+      assert.ok(res.status < 400, `inviting failed: ${res.status}`);
+      const inviteRow = listAudit(w.db).find((r) => r.action === "admin.invite");
+      assert.ok(inviteRow, "the invite must be audited, or there is nothing here to leak");
+
+      // The address must not be in the row in the first place. This is the fix; the sweep below is for history.
+      assert.ok(!(inviteRow.detail ?? "").includes(EMAIL) && !(inviteRow.subject ?? "").includes(EMAIL),
+        `the invited address is stored in the audit row itself: subject=${inviteRow.subject} detail=${inviteRow.detail}`);
+
+      // Now a row written the OLD way, which every existing deployment has, and erasure must reach it.
+      const pid = w.db.prepare("INSERT INTO people (name, contact, status) VALUES (?,?,'active') RETURNING id")
+        .get("Gone Person", EMAIL).id;
+      recordAudit(w.db, { actorId: w.people[0], actorName: "Alice", action: "admin.invite", detail: `invited ${EMAIL}` });
+      assert.equal(listAudit(w.db).filter((r) => (r.detail ?? "").includes(EMAIL)).length, 1,
+        "the fixture must actually plant the address, or the assertion below passes over nothing");
+
+      const r = erasePerson(w.db, pid, { mode, today: w.today });
+      assert.ok(r.ok, `erase ${mode} failed: ${r.reason}`);
+      assert.equal(listAudit(w.db).filter((x) => (x.detail ?? "").includes(EMAIL)).length, 0,
+        `${mode}: the erased person's address is still in an audit detail`);
+      assert.equal(r.auditScrubbed, 1, `${mode}: erasePerson must report how many details it swept`);
+      // Swept, not deleted — the row is what makes it an audit trail.
+      assert.ok(listAudit(w.db).some((x) => (x.detail ?? "").includes(`#${pid}`)),
+        `${mode}: the detail should now point at #${pid} rather than being blanked or dropped`);
+    } finally { w.close(); }
+  }
+});
+
+// The guard that stops the fix being worse than the defect. An empty needle matches every row, so a person with
+// no contact on file would sweep the whole table and report a satisfyingly large number.
+test("a person with no address on file sweeps nothing", async () => {
+  const w = await makeWorld({ volunteers: 2, roles: { 0: ["admin"] } });
+  try {
+    const pid = w.db.prepare("INSERT INTO people (name, contact, status) VALUES ('No Contact', NULL, 'active') RETURNING id").get().id;
+    recordAudit(w.db, { actorName: "Alice", action: "admin.invite", detail: "invited somebody@example.org" });
+    recordAudit(w.db, { actorName: "Alice", action: "planner.assign", detail: "to person:7" });
+
+    const r = erasePerson(w.db, pid, { mode: "remove", today: w.today });
+    assert.ok(r.ok, `erase failed: ${r.reason}`);
+    assert.equal(r.auditScrubbed, 0, "nothing should have been swept");
+    assert.deepEqual(listAudit(w.db).map((x) => x.detail).filter(Boolean).sort(),
+      ["invited somebody@example.org", "to person:7"].sort(),
+      "an erasure with no address must leave every detail exactly as it was");
+  } finally { w.close(); }
+});
+
+// Not a list of details to inspect — a journey that performs the audited actions ABOUT a person and then reads the
+// rows back. A new handler that writes somebody's name into a detail fails here without anybody remembering to
+// add it to a list. Deliberately stricter than the sweep in erasePerson, which only removes the address: a test
+// can afford a false alarm and a REPLACE over an audit trail cannot.
+test("no audit detail carries a person's name or address", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] }, today: "2026-03-01" });
+  try {
+    for (const p of w.people) makeAvailableEverywhere(w.db, p);
+    const admin = await w.signIn(w.people[0]);
+    const post = (url, body) => w.post(url, admin, new URLSearchParams({ csrf: csrfFromCookie(admin), ...body }));
+
+    const subject = w.people[1];
+    const NAME = w.db.prepare("SELECT name FROM people WHERE id=?").get(subject).name;
+    const EMAIL = "journey@example.org";
+    w.db.prepare("UPDATE people SET contact=? WHERE id=?").run(EMAIL, subject);
+
+    const slot = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                               WHERE s.date < ? AND a.person_id IS NULL LIMIT 1`).get(w.today)
+              ?? w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id=a.session_id
+                               WHERE s.date < ? LIMIT 1`).get(w.today);
+    assert.ok(slot, "the fixture needs a past slot to act on");
+
+    await post("/admin/invite", { email: EMAIL });
+    await post("/admin/role", { personId: String(subject), role: "planner", on: "1" });
+    await post("/admin/capability", { personId: String(subject), key: "salsa", on: "1" });
+    await post("/planner/assign", { assignmentId: String(slot.id), personId: String(subject) });
+    await post("/planner/attendance", { assignmentId: String(slot.id), attended: "1" });
+    await post("/admin/status", { personId: String(subject), status: "inactive" });
+
+    const rows = listAudit(w.db);
+    assert.ok(rows.length >= 5, `the journey must produce audit rows, got ${rows.length}`);
+    const leaks = rows.filter((r) => `${r.subject ?? ""} ${r.detail ?? ""}`.includes(NAME)
+                                  || `${r.subject ?? ""} ${r.detail ?? ""}`.includes(EMAIL));
+    assert.deepEqual(leaks.map((r) => `${r.action}: ${r.subject} | ${r.detail}`), [],
+      "these audit rows name a person directly. Refer to them as person:<id> or invitation:<id> instead, so that " +
+      "erasing the person empties the reference without anything having to sweep this column");
+
+    // The control: this check must be able to SEE a name in a detail, or its silence means nothing.
+    recordAudit(w.db, { actorName: "Alice", action: "planner.assign", detail: `to ${NAME}` });
+    assert.ok(listAudit(w.db).some((r) => (r.detail ?? "").includes(NAME)),
+      "the detector cannot find a planted name — the assertion above proves nothing");
+  } finally { w.close(); }
+});
+
 test("retention prunes the audit on its own window, which is longer than the notification one", async () => {
   const w = await makeWorld({ volunteers: 1 });
   try {

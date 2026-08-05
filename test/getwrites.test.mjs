@@ -51,7 +51,7 @@ test("no GET route writes to the database, except the one that authenticates", a
     // A real invitation, so /invite/:token takes its SUCCESS path. With a bogus token it redirects before reaching
     // anything, and a clean result there would be about the failure path only — which is exactly how a sweep
     // reports that nothing writes while never having run the code that does.
-    const token = createInvite(w.db, { email: "audited@example.org", invitedBy: w.people[0] });
+    const { token } = createInvite(w.db, { email: "audited@example.org" });
 
     const seen = watchWrites(w.db);
     const gets = w.routes().filter((r) => r.method === "GET");
@@ -81,7 +81,7 @@ test("the write detector sees writes, on a POST and on the route that used to be
   const w = await makeWorld({ volunteers: 2, roles: { 0: ["admin"] } });
   try {
     const admin = await w.signIn(w.people[0]);
-    const token = createInvite(w.db, { email: "control@example.org", invitedBy: w.people[0] });
+    const { token } = createInvite(w.db, { email: "control@example.org" });
     const form = await (await w.get("/availability", admin)).text();
     const slot = slotsIn(form)[0];
     assert.ok(slot, "the availability form must offer a date, or the control below writes nothing");

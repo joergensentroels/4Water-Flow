@@ -247,14 +247,21 @@ export function linkIdentity(db, provider, subject, { name, email, emailVerified
 // ---- invitations: the fallback for volunteers with no NextCloud identity -------------------------------
 const INVITE_TTL_DAYS = 14;
 
+// Returns `{ token, id }`. The id is what the audit trail records, and the reason is not tidiness: the audit
+// used to store `invited <address>` in its detail, and nothing in erasure reaches that column — so an erased
+// person's email address stayed in the log forever, next to a `people` row that had been deleted and an
+// `invitations` row whose address had been scrubbed to 'erased'. An id resolves to the invitation, which erasure
+// DOES scrub, so the same row reads as "invited somebody" afterwards without any code having to remember to
+// blank it. Every other audit detail already referred to people as `person:<id>` for this reason; this one was
+// the exception, and it was the one carrying the most identifying value.
 export function createInvite(db, { email, roleName = "volunteer", now = new Date() }) {
   const token = randomBytes(24).toString("base64url");
   const roleId = db.prepare("SELECT id FROM roles WHERE name = ?").get(roleName)?.id ?? null;
-  db.prepare("INSERT INTO invitations (email, token, role_id, created_at) VALUES (?,?,?,?)")
-    .run(email, hashToken(token), roleId, now.toISOString());
+  const { id } = db.prepare(`INSERT INTO invitations (email, token, role_id, created_at)
+                             VALUES (?,?,?,?) RETURNING id`).get(email, hashToken(token), roleId, now.toISOString());
   // The raw token is returned ONCE and stored only as a hash — a stolen database must not yield working
   // invite links. Same reasoning as never storing a password.
-  return token;
+  return { token, id };
 }
 
 const hashToken = (t) => createHash("sha256").update(t).digest("hex");

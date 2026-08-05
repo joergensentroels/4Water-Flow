@@ -46,7 +46,7 @@ export function bootstrapAdmin(db, { email, name, baseUrl = "", roles = null }) 
   if (plannerRole) db.prepare("INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?,?)").run(person.id, plannerRole.id);
 
   // An invite link is the way in when OIDC is not configured yet — which is the normal state on day one.
-  const token = createInvite(db, { email, roleName: "admin" });
+  const { token } = createInvite(db, { email, roleName: "admin" });
   return {
     ok: true, personId: person.id, created, alreadyAdmin: Boolean(already),
     inviteToken: token,

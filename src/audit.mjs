@@ -92,3 +92,28 @@ export function pseudonymiseAuditActor(db, personId) {
   return db.prepare("UPDATE audit SET actor_name = :label WHERE actor_id = :pid AND actor_name <> :label")
     .run({ label: `#${personId}`, pid: personId }).changes;
 }
+
+// The other half, and the half that was missing. Pseudonymising the ACTOR left `detail` alone, and one action
+// wrote an email address into it: after a hard erasure the log still said `invited someone@example.org` beside a
+// deleted `people` row and an `invitations` row scrubbed to 'erased'. Measured, not assumed — a probe invited an
+// address, erased the person, and found the row intact.
+//
+// The writer is fixed (see createInvite), so nothing new arrives here. This sweeps rows ALREADY written, which
+// matters because upgrading does not rewrite history and any deployment that has invited somebody has such a row.
+//
+// Derived rather than enumerated: it removes the address wherever it appears instead of naming the actions that
+// might carry one. A list of "details that mention people" cannot notice a new detail that mentions people.
+//
+// The NAME is deliberately not swept. Substring replacement on a short name corrupts unrelated text — "Ole"
+// occurs inside "role", which every one of these details is full of — and a corrupted audit trail is worse than
+// a frank one. Nothing writes a name into a detail, and test/audit.test.mjs holds that as an assertion rather
+// than leaving it to habit.
+export function scrubAuditDetail(db, personId, contact) {
+  const needle = String(contact ?? "").trim();
+  // A missing or trivially short contact must not sweep anything. Without this guard an empty needle matches
+  // every row — the failure mode where a fix quietly rewrites the whole table and reports a big tidy number.
+  if (needle.length < 5) return 0;
+  return db.prepare(`UPDATE audit SET detail = REPLACE(detail, :needle, :label)
+                      WHERE detail IS NOT NULL AND instr(detail, :needle) > 0`)
+    .run({ needle, label: `#${personId}` }).changes;
+}

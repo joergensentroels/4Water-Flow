@@ -328,7 +328,7 @@ test("an invite consumed mid-redemption rolls back completely, leaving no half-c
   const db = db0();
   const { seasonId } = seedStructure(db, loadPattern());
   const roleId = db.prepare("SELECT id FROM roles LIMIT 1").get().id;
-  const token = createInvite(db, { email: "two@4water.invalid", roleId });
+  const { token } = createInvite(db, { email: "two@4water.invalid", roleId });
 
   const before = {
     people: db.prepare("SELECT COUNT(*) n FROM people").get().n,
@@ -488,7 +488,7 @@ test("email_verified survives the trip from userinfo, including as a string", as
 test("an invite is single-use, expiring, and stored only as a hash", () => {
   const db = db0();
   seedStructure(db, loadPattern());
-  const token = createInvite(db, { email: "new@example.org" });
+  const { token } = createInvite(db, { email: "new@example.org" });
 
   const stored = db.prepare("SELECT token FROM invitations").get().token;
   assert.notEqual(stored, token, "the raw token must not be stored");
@@ -506,14 +506,14 @@ test("an expired invite is refused", () => {
   const db = db0();
   seedStructure(db, loadPattern());
   const long_ago = new Date(Date.now() - 60 * 86400000);
-  const token = createInvite(db, { email: "stale@example.org", now: long_ago });
+  const { token } = createInvite(db, { email: "stale@example.org", now: long_ago });
   assert.deepEqual(redeemInvite(db, token, {}), { ok: false, reason: "expired" });
 });
 
 test("a revoked invite cannot be redeemed", () => {
   const db = db0();
   seedStructure(db, loadPattern());
-  const token = createInvite(db, { email: "revoked@example.org" });
+  const { token } = createInvite(db, { email: "revoked@example.org" });
   assert.equal(revokeInvite(db, db.prepare("SELECT id FROM invitations").get().id), true);
   assert.deepEqual(redeemInvite(db, token, {}), { ok: false, reason: "already_used" });
 });

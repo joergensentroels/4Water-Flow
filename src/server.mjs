@@ -523,8 +523,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // a wrong one is fixable by editing the person's contact. Rejecting valid-but-unusual addresses would do more
     // harm than accepting a typo, which is the usual outcome of hand-written email validation.
     if (!email) return redirect(res, "/admin?r=no_email");
-    const token = createInvite(db, { email });
-    logAudit(c, "admin.invite", null, `invited ${email}`);
+    const { token, id: invitationId } = createInvite(db, { email });
+    // The subject is the invitation, NOT the address. The address lives on the invitation row, which erasure
+    // scrubs; a copy here would outlive the person it names, which is what it did until this was fixed.
+    logAudit(c, "admin.invite", `invitation:${invitationId}`, "as volunteer");
     // FOURWATER_BASE_URL, never the Host header.
     //
     // This used to build the absolute URL from req.headers.host, for the good reason that a relative path is

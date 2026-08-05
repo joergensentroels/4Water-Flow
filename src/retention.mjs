@@ -1,5 +1,5 @@
 import { releaseFutureShifts } from "./admin.mjs";
-import { pseudonymiseAuditActor } from "./audit.mjs";
+import { pseudonymiseAuditActor, scrubAuditDetail } from "./audit.mjs";
 
 // Deleting things on purpose. docs/PRIVACY.md admitted that nothing ever deleted anything, ever — which is
 // both a GDPR gap and the reason `notifications` would grow forever with volunteers' names in it.
@@ -131,7 +131,10 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
   if (!ERASURE_MODES.includes(mode)) return { ok: false, reason: "bad_mode" };
   let released = 0;
   let auditRenamed = 0;
-  const person = db.prepare("SELECT id, name FROM people WHERE id=?").get(personId);
+  let auditScrubbed = 0;
+  // `contact` is read here, before anything is deleted, because the audit sweep below needs the address and both
+  // modes destroy it — anonymise nulls the column, remove takes the row.
+  const person = db.prepare("SELECT id, name, contact FROM people WHERE id=?").get(personId);
   if (!person) return { ok: false, reason: "no_such_person" };
 
   // The same guard as removing an admin role: an organisation must not be able to erase its way out of having
@@ -195,12 +198,17 @@ export function erasePerson(db, personId, { mode, now = new Date(), today = now.
     // a human being. Pseudonymising rather than deleting is the whole bargain — the audit keeps its answer to
     // "who", erasure takes away "which human", and neither has to give up the thing it exists for.
     auditRenamed = pseudonymiseAuditActor(db, personId);
+    // And their address out of the details, which the line above does not touch. See scrubAuditDetail: one action
+    // used to write an email address into `detail`, and nothing here reached it — so the log kept naming a person
+    // whose row had just been deleted. Both modes, for the same reason as the actor rename.
+    auditScrubbed = scrubAuditDetail(db, personId, person.contact);
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
 
   const after = db.prepare("SELECT COUNT(*) n FROM assignments WHERE person_id=?").get(personId).n;
   return { ok: true, mode, was: person.name, availabilityRemoved: before.availability,
-           assignmentsBefore: before.assignments, assignmentsStillLinked: after, released, auditRenamed };
+           assignmentsBefore: before.assignments, assignmentsStillLinked: after, released, auditRenamed,
+           auditScrubbed };
 }
 
 // ---- export -------------------------------------------------------------------------------------------
