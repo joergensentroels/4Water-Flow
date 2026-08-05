@@ -197,6 +197,34 @@ was wrong, and the file on disk is left untouched.
 Removing an activity stops new sessions being created for it and **leaves existing ones alone**, because
 deleting sessions would destroy assignments volunteers have already agreed to.
 
+**`season.key` is the name the app uses to FIND the season in the database**, which makes it the one field on that
+screen worth being careful with. Changing it does not rename a season — it points the app at a different one. If the
+new name matches no season, or matches one that was never seeded, every screen empty-states and **the status page
+reports it as a fault naming both keys**. That is the thing to look at if the plan goes blank after an edit here.
+
+`season.from` and `season.to` are the season's first and last dates. Widening them and saving generates the missing
+sessions; narrowing them does **not** delete the ones already created, for the same reason removing an activity does
+not — deleting sessions would destroy assignments volunteers have agreed to.
+
+## Public holidays — no sessions on them unless you say otherwise
+
+**Administration** → **Public holidays** lists every public holiday inside the season and what the app has done
+about each. Nothing is created on those dates. If classes run anyway, say so there and the sessions are generated
+for that one date; the other button removes them again, and **refuses if somebody is already on one** rather than
+cancelling on a volunteer who agreed to teach. Both directions are in the change log.
+
+Three keys in `config/pattern.json`, under `holidays`:
+
+| key | what it does |
+|---|---|
+| `holidays.country` | `DK` or `FR`, an ISO 3166-1 alpha-2 code. An unrecognised code **suppresses nothing** rather than guessing a calendar, and the Administration screen says so — a wrong holiday table silently deletes real classes. |
+| `holidays.extra` | Dates 4water is closed but the country is not. 24 and 31 December are there as a suggestion and the board can remove them; Grundlovsdag is deliberately absent, because an evening class can run on it. |
+| `holidays.classesAnyway` | The planner's opt-back-in list. Written by the button on the Administration screen — no need to edit it by hand. |
+
+Adding `holidays.country` to a deployment whose season is **already seeded** does not remove the sessions that
+already exist, because seeding only ever adds. Those dates show up on the Administration screen saying how many
+slots are still on them, with the button that clears them.
+
 ## When something is wrong
 
 | Symptom | Look here |

@@ -118,7 +118,8 @@ a confident claim nobody checked. What follows is the current state.
 1. ~~No retention job.~~ `runRetention` prunes notifications older than the configured window, invitations that
    are spent or dead, and seasons beyond the keep count. It runs from `tools/backup.mjs`, so the nightly cron
    line in RUNBOOK is what makes it happen — **if that line is not installed, nothing is deleted.** The
-   two-season default is honoured; a zero or a typo falls back to the default rather than deleting everything.
+   `retention.seasons` default of two is honoured; a zero or a typo falls back to the default rather than deleting
+   everything.
 2. ~~No erasure button.~~ Administration → a person → Erase, in two modes. *Anonymise* keeps who-taught-what
    with an unidentifiable label and strips name, contact, dance role, sign-in linkage and the calendar
    credential; *remove* deletes the row. The last administrator cannot be erased.

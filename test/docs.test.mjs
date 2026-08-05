@@ -115,6 +115,43 @@ test("the documents checked here are found on disk, and none of the known ones w
   for (const d of DOCS) assert.ok(read(d).length > 0, `${d} is empty`);
 });
 
+// THE OTHER DIRECTION, and it is the one that finds omissions.
+//
+// The big claim check below runs documents → code: every dotted config key a document names must exist. That
+// cannot notice a key NO document names, because there is no claim to follow — the same asymmetry that let
+// docs/PRIVACY.md omit three tables while every sentence in it was true.
+//
+// Run once, it found five: `season.key`, which is how the app finds the season in the database and therefore the
+// most consequential field on the Administration screen; three `holidays.*` keys, undocumented by the commit that
+// added them; and `board.requiresApproval`, which was read by NOTHING — a switch wired to no lamp, since setting
+// it true would have looked like turning on approval-before-claim. That one was deleted rather than documented.
+//
+// SETTINGS, meaning the dotted keys. A section name on its own is a container, not a knob, and it is also an
+// ordinary English word — "activities", "roles", "season" — so requiring those to be "documented" would pass on
+// any document that happens to use the word. The leaves are where an operator's mistake lives.
+//
+// The rule is the DOTTED PATH VERBATIM, and getting there took two tries. The first version also accepted the leaf
+// appearing within 400 characters of its section name, on the reasoning that "under `holidays`: country, extra…" is
+// how a person writes. The mutation probe then showed the cost: deleting the RUNBOOK's entire holiday section left
+// the check green, because the words "holidays" and "country" still co-occurred elsewhere. A check satisfied by
+// vocabulary is a check that prose can silence — the failure this project keeps finding — so verbatim it is, and
+// three keys got a line of documentation rather than an exemption.
+test("every config setting is documented somewhere an operator reads", () => {
+  const prose = DOCS.map(read).join("\n");
+  const settings = [...sourceFacts().configKeys].filter((k) => k.includes("."));
+  assert.ok(settings.length >= 10, `only ${settings.length} dotted config keys found — the collector is not working`);
+
+  // Both controls, because "0 undocumented" from a blind detector reads exactly like a documented config.
+  assert.ok(prose.includes("retention.notificationDays"), "the detector cannot see a key that IS documented");
+  assert.ok(!prose.includes("nonsense.notAKey"), "the detector reports a key that does not exist as documented");
+
+  const undocumented = settings.filter((k) => !prose.includes(k));
+  assert.deepEqual(undocumented, [],
+    "these settings exist in config/pattern.json and no document names them. An operator can only find them by " +
+    "reading the source, and a setting nobody documents is one nobody can be told is wrong. Name it in RUNBOOK.md " +
+    "or docs/PRIVACY.md — the dotted path, so this check can see it:\n  " + undocumented.join("\n  "));
+});
+
 // config/pattern.json carries a long `_comment` that an operator is told to read before hand-editing, and it is
 // prose like any other — but it is not markdown, so nothing above reaches it.
 //

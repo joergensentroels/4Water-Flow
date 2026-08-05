@@ -143,8 +143,7 @@
     "volunteer"
   ],
   "board": {
-    "_comment": "Vagtbørs rules. cutoffDays is Q18 in the spec and still unanswered — 2 is a placeholder.",
-    "requiresApproval": false,
+    "_comment": "Vagtbørs rules. cutoffDays is Q18 in the spec and still unanswered — 2 is a placeholder. `requiresApproval` used to sit here and was read by NOTHING: setting it to true would have looked like turning on approval-before-claim and done nothing at all. Removed rather than left as a switch wired to no lamp; if 4water wants approval on claims, that is a feature and not a setting.",
     "cutoffDays": 2
   },
   "retention": {
