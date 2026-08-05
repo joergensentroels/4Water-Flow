@@ -130,6 +130,41 @@ test("the feed is a well-formed calendar with one event per shift", () => {
   assert.match(ics, /SUMMARY:Beta: Gamma\r\n/, "a slot with no role gets no parenthetical");
 });
 
+// foldLine was unit-tested above and its APPLICATION was not, which is a distinction this project has paid for
+// twice: makeNotifier and startJobs were called only from tests while production wired neither, and the notification
+// link strings existed for a whole increment with no call site passing the URL. Measured here the same way —
+// `lines.map(foldLine)` removed from buildIcs and the WHOLE SUITE still green.
+//
+// The consequence is not cosmetic. A department whose activity label is longer than a few words emits content lines
+// over 75 octets, and a client that enforces the limit rejects the file rather than the line — so the volunteer's
+// calendar simply stops updating, in an app nobody here can see. The shipped labels are short, which is exactly why
+// the unit test on the helper was never enough.
+test("buildIcs APPLIES the folding, not merely defines it", () => {
+  // Long enough to need folding, and non-ASCII so a character-based fold would corrupt it rather than just
+  // mis-measure. Built from repeated runs rather than a literal so no department vocabulary appears here.
+  const label = `Workshop: ${"øvelsesrække for begyndere ".repeat(3)}hold to`;
+  const ics = buildIcs({
+    rows: [oneRow({ activityLabel: label, role: null })],
+    calendarName: label, timeZone: CPH, eventMinutes: 90,
+    now: Date.parse("2026-07-01T00:00:00Z"), t,
+  });
+
+  const lines = ics.split("\r\n");
+  const over = lines.filter((l) => Buffer.byteLength(l, "utf8") > 75);
+  assert.deepEqual(over.map((l) => Buffer.byteLength(l, "utf8")), [],
+    `every content line must be at most 75 octets. Over-long: ${over.map((l) => l.slice(0, 40)).join(" | ")}`);
+
+  // The control: this fixture must actually PRODUCE a fold, or the assertion above holds for a feed that never
+  // needed one — which is the state the whole suite was in before this test existed.
+  assert.ok(lines.some((l) => l.startsWith(" ")), "the fixture must be long enough to fold, or it proves nothing");
+
+  // And the fold must be lossless: unfolding restores the escaped label exactly, with no replacement character
+  // from a UTF-8 sequence cut in half.
+  const unfolded = lines.map((l, i) => (l.startsWith(" ") ? l.slice(1) : (i ? "\n" + l : l))).join("");
+  assert.ok(unfolded.includes(escapeText(label)), "unfolding must restore the summary the client should read");
+  assert.ok(!ics.includes("�"), "a fold inside a multi-byte character would leave a replacement character");
+});
+
 test("the UID is stable per assignment, so a refresh updates rather than duplicates", () => {
   const a = buildIcs({ rows: [oneRow()], calendarName: "c", timeZone: CPH, now: 1, t });
   const b = buildIcs({ rows: [oneRow()], calendarName: "c", timeZone: CPH, now: 2_000_000, t });
