@@ -98,7 +98,12 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         </p>
         ${toggle("/admin/status", { personId: p.id, status: p.status === "active" ? "inactive" : "active" },
                  p.status === "active" ? t("admin.inactive") : t("admin.active"), p.name)}
-        <p class="hint"><a href="/admin/person/${p.id}/export.json">${t("admin.export")}</a></p>
+        <!-- The link names the person too. A screen reader user navigating by links list gets the names stripped
+             of every surrounding card, and this one pulls somebody's entire personal record — four of them read
+             "Download data" and went to four different volunteers. The buttons on this card were fixed first;
+             links were outside what that audit looked at, which is the only reason this survived it. -->
+        <p class="hint"><a href="/admin/person/${p.id}/export.json"
+                           aria-label="${t("admin.export")} — ${p.name}">${t("admin.export")}</a></p>
         <details>
           <summary>${t("admin.erase")}</summary>
           <p class="hint">${t("admin.eraseHint")}</p>

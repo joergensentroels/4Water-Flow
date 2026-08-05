@@ -62,22 +62,38 @@ function controls(body) {
                  does: `${action}?${attr(m[1], "name")}=${attr(m[1], "value")}` });
     }
   }
+  // Links are audited on the same footing as buttons, and were not at first. A screen reader user navigating by
+  // links list gets every name stripped of the card, row or paragraph that explained it — which is exactly the
+  // position a button is in. Skipping them left four "Download data" links pointing at four volunteers' personal
+  // records, on a screen whose buttons had just been fixed. The href is the whole href: two links named alike
+  // going to the same query differing only in a parameter are still two destinations.
+  for (const m of body.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)) {
+    out.push({ kind: "link", name: nameOf(m[1], m[2]), does: attr(m[1], "href") ?? "" });
+  }
   return out;
 }
 
-// Reports rather than asserts, so a failure can say which name is ambiguous and between what.
-function ambiguities(body) {
+// Both faults reported from one pass, rather than asserted one after the other. Asserting the ambiguities first
+// let them shadow the nameless report permanently: a control with no name at all is also a control sharing the
+// empty name with every other nameless control, so wherever there are two of them the first assertion throws and
+// the second never runs. Probing an emptied link proved that — it was reported as ambiguous both times, and the
+// check written for it had still never been seen to fire on a link. One list, so a failure says everything it knows.
+function faults(body) {
   const byName = new Map();
+  const out = [];
   for (const c of controls(body)) {
+    if (c.name === "") out.push(`${c.kind} with no accessible name → ${c.does}`);
     const key = `${c.kind}: ${c.name}`;
     if (!byName.has(key)) byName.set(key, new Set());
     byName.get(key).add(c.does);
   }
-  return [...byName].filter(([, does]) => does.size > 1)
-    .map(([key, does]) => `${key} — ${does.size} different actions, e.g. ${[...does].slice(0, 2).join("  vs  ")}`);
+  for (const [key, does] of byName) {
+    if (does.size > 1) {
+      out.push(`${key} — ${does.size} different actions, e.g. ${[...does].slice(0, 2).join("  vs  ")}`);
+    }
+  }
+  return out;
 }
-
-const nameless = (body) => controls(body).filter((c) => c.name === "").map((c) => `${c.kind} → ${c.does}`);
 
 // Everyone available and capable of everything, so the planner renders a candidate list for every open slot and
 // the season's whole set of controls exists to be audited. Both are ordinary admin grants, not a harness
@@ -110,23 +126,23 @@ const populated = async () => {
   return { w, admin };
 };
 
+// Every page an authenticated person can reach, not just the ones a defect has been found on. The read-only
+// pages joined the list once links came into scope, because that is all they have.
+const PAGES = ["/", "/availability", "/planner?weeks=all", "/board", "/plan", "/admin", "/me",
+               "/status", "/outbox", "/privacy"];
+
 test("no two controls on a page share an accessible name while doing different things", async () => {
   const { w, admin: cookie } = await populated();
   try {
-    for (const page of ["/availability", "/planner?weeks=all", "/board", "/plan", "/admin", "/me"]) {
+    for (const page of PAGES) {
       const res = await w.get(page, cookie);
       assert.equal(res.status, 200, `${page} must render`);
-      const body = await res.text();
-      const bad = ambiguities(body);
+      const bad = faults(await res.text());
       assert.deepEqual(bad, [], `${page}:\n  ${bad.join("\n  ")}`);
-      const unnamed = nameless(body);
-      assert.deepEqual(unnamed, [], `${page} has controls with no accessible name:\n  ${unnamed.join("\n  ")}`);
     }
   } finally { w.close(); }
 });
 
-// The audit above is only worth its runtime if the pages it visits actually carry controls. A page that
-// rendered none would satisfy it silently, which is the shape of a check that is not looking.
 // The audit above is only worth its runtime if the pages it visits carry controls, and — the lesson from the
 // invite list — carry MORE THAN ONE of the repeating ones. A page rendering a single Revoke button satisfies
 // the audit while telling it nothing. So this asserts the fixture's shape, not the app's behaviour.
@@ -150,5 +166,7 @@ test("the audited pages really do carry repeated controls for the audit to colli
     assert.ok(repeats(await on("/admin")) >= 4, "the admin screen must repeat its per-person controls");
     assert.ok((await on("/admin")).filter((c) => c.does.startsWith("/admin/invite/revoke")).length >= 2,
       "two pending invites, or the invite list's Revoke buttons cannot collide and are not being audited");
+    assert.ok((await on("/admin")).filter((c) => c.kind === "link" && c.does.includes("/export.json")).length >= 2,
+      "two per-person export links, or the link half of the audit is not looking at the one place it caught");
   } finally { w.close(); }
 });

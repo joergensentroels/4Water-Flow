@@ -171,10 +171,14 @@ fails 1.4.3, so `--accent` is a darker relative of it. Do not "correct" it back 
 
 The contrast check above measures colour and hit area. It says nothing about whether a control's *name*
 distinguishes it from the one below, and this app renders hundreds of near-identical controls: one per slot, one
-per date, twelve per person. `test/names.test.mjs` is the check for that. It fails when two controls on a page
-share an accessible name while submitting different things, and when a control resolves no name at all.
+per date, twelve per person. `test/names.test.mjs` is the check for that, over every page an authenticated person
+can reach. It fails when two controls on a page share an accessible name while doing different things, and when a
+control resolves no name at all. Buttons, selects, radios **and links** — a links list is how a screen reader user
+navigates a long page, and it strips the card or row that explained the link, so a link is in exactly the position
+a button is. Leaving links out is what let four "Download data" links to four volunteers' personal records
+survive an audit of the very screen they sit on.
 
-**Three things worth knowing before you change it or a page it covers:**
+**Four things worth knowing before you change it or a page it covers:**
 
 1. **`aria-label` is not the only name, and adding one is not always the fix.** A wrapping `<label>`, or a
    `<label for>` pointing at the control's id, names it just as well — the audit resolves all three because an
@@ -189,9 +193,14 @@ share an accessible name while submitting different things, and when a control r
    so removing the fix left the check green. It has a second test asserting the *fixture's* shape for that
    reason. If you add a page to the audit, add an assertion that the page renders more than one of whatever
    repeats on it, or you have added a check that cannot fail.
+4. **Both faults are reported from one pass, and that is deliberate.** They used to be two assertions, ambiguity
+   first — which shadowed the other permanently, because a control with no name also shares the empty name with
+   every other nameless control, so wherever there were two the first assertion threw and the second never ran.
+   Do not split them back apart to make the failure messages tidier.
 
-Probed by removing each of the five fixes in turn and confirming the audit names it — 6/6, including one
-mutation that had to be rewritten because the first version left the control a name and so proved nothing.
+Probed by removing each fix in turn and confirming the audit names it — 8/8. Two of those mutations had to be
+rewritten: one left the control a name and so proved nothing, and one was reported by the wrong half of the
+check, which is how the shadowing in point 4 came to light.
 
 ## Before opening a pull request
 
