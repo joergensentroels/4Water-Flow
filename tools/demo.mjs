@@ -13,6 +13,8 @@ import { formatDate, formatTime, formatRole } from "../src/views.mjs";
 import { seedSeason, seedPeople } from "../src/seed.mjs";
 import { setAvailabilityDay, setAvailabilityHour, assignSlot } from "../src/queries.mjs";
 import { bootstrapAdmin } from "./bootstrap.mjs";
+import { addNote } from "../src/notes.mjs";
+import { recordAudit, AUDITED } from "../src/audit.mjs";
 
 const NAMES = ["Demo One", "Demo Two", "Demo Three", "Demo Four", "Demo Five", "Demo Six",
                "Demo Seven", "Demo Eight", "Demo Nine", "Demo Ten", "Demo Eleven", "Demo Twelve"];
@@ -164,6 +166,37 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
       error: i === 0 ? null : "fetch failed: getaddrinfo ENOTFOUND chat.example.invalid",
       at: `${s.date}T18:30:00Z`,
     });
+  }
+
+  // NOTES AND A CHANGE LOG, for the reason stated at the top of this file about the season: a demo that shows the
+  // empty state demonstrates the empty state rather than the product. That reasoning was applied to the season dates
+  // and not to the features added after it — measured on the demo database this tool had been producing, the change log
+  // held ONE row and there were NO notes at all, so two of the newest screens showed a board nothing whatsoever.
+  //
+  // Notes go on UPCOMING sessions, because that is where a planner would write them, and through addNote so the length
+  // cap and the author stamp are the real ones.
+  // `dates` is this season's own session dates, so "upcoming" is derived from the fixture rather than from a clock
+  // that could disagree with it — the same reason demoSeason spans today in the first place.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const upcoming = db.prepare(`SELECT id, date FROM sessions WHERE season_id=? AND date >= ? ORDER BY date LIMIT 3`)
+    .all(seasonId, todayIso);
+  const noteTexts = [
+    "Bringing the speaker — no need for a second one.",
+    "Running 10 minutes late, start the warm-up without me.",
+    "New people expected, keep the first half gentle.",
+  ];
+  for (const [i, sess] of upcoming.entries()) {
+    addNote(db, sess.id, { personId: ids[i % ids.length], authorName: NAMES[i % ids.length],
+                           body: noteTexts[i], at: new Date(`${sess.date}T09:0${i}:00Z`) });
+  }
+
+  // And a change log with one row per KIND the audit vocabulary declares, so the screen shows its own range rather
+  // than three copies of one action. Derived from AUDITED — the same constant the app records against — so a new
+  // action appears in the demo without anybody remembering to add it here.
+  const auditDay = (n) => new Date(`${dates[Math.min(n, dates.length - 1)]}T1${n % 9}:15:00Z`);
+  for (const [i, action] of Object.keys(AUDITED).entries()) {
+    recordAudit(db, { actorId: ids[i % 2], actorName: NAMES[i % 2], action,
+                      subject: null, detail: null, at: auditDay(i) });
   }
 
   // Its own roles, not config/pattern.json's — otherwise creating the admin dragged 4water's real season into

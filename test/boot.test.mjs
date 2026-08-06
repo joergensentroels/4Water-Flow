@@ -29,18 +29,39 @@ test("the entry point starts a listening server and reports the port", async () 
 
   try {
     // Poll rather than sleep-and-hope: a fixed sleep is either flaky or slow, and usually both.
+    //
+    // AND WAIT FOR THE CHILD'S OWN OUTPUT, not merely for the port to answer. This test binds a fixed port, and a
+    // developer with the demo instance running on it — the command CONTRIBUTING prints uses 8123 — had `/healthz`
+    // answered 200 by that OTHER process. The child was still starting, so the exit-code check passed too, and the
+    // whole readiness probe was satisfied by somebody else's server. It failed one line later on the missing
+    // "listening" message, which is luck: a foreign responder that happened to print a similar line would have made
+    // this test pass while measuring a process it never started.
+    //
+    // So the child announcing itself is the readiness condition, and a port answering before that announcement is
+    // reported as what it is rather than as a broken entry point.
     let status = 0;
-    for (let i = 0; i < 50 && status !== 200; i++) {
+    for (let i = 0; i < 50 && !/listening on/.test(out); i++) {
       await new Promise((r) => setTimeout(r, 100));
       if (child.exitCode !== null) break;
       try { status = (await fetch(`http://127.0.0.1:${PORT}/healthz`)).status; } catch {}
     }
+    // No separate "somebody else is on this port" branch here, and that is deliberate. The first version of this fix
+    // added one — and tools/deadassert.mjs reported it as never executed on the very next run, correctly: once the
+    // cleanup below stopped hanging, a busy port makes the CHILD exit with EADDRINUSE, so the assertion two lines down
+    // fires first and prints the child's own message, which names the cause better than anything written here could.
+    // An unreachable branch that looks like a supported case is what rule 7 in CONTRIBUTING is about.
     assert.equal(child.exitCode, null, `the process exited early (code ${child.exitCode}) with output:\n${out}`);
     assert.equal(status, 200, `/healthz never answered. Process output was:\n${out || "(nothing at all — the classic symptom of a guard that never matched)"}`);
     assert.match(out, /listening on http:\/\/127\.0\.0\.1:8123/, "it should say where it is listening");
   } finally {
+    // ONLY WAIT IF IT IS STILL RUNNING. `once("exit")` on a process that has ALREADY exited never fires — the event is
+    // in the past — so this awaited forever in exactly the case worth reporting: the port was busy, the child died with
+    // EADDRINUSE, and the test hung for two minutes instead of failing with the child's own error message. A hang is the
+    // worst of the three outcomes, because it reads as a broken machine rather than a broken assumption, and it is the
+    // second time this project has paid for cleanup written on the happy path — see test/nextdest.test.mjs, where a
+    // failed assert leaked a listening socket and `node --test` never exited.
     child.kill();
-    await new Promise((r) => child.once("exit", r));
+    if (child.exitCode === null && child.signalCode === null) await new Promise((r) => child.once("exit", r));
     cleanup();
   }
 });
