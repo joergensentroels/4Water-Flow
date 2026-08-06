@@ -241,6 +241,9 @@ test("CI runs the suite, the fresh-deployment check, and the backup restore", ()
   assert.match(ci, /seeded no sessions|COUNT\(\*\) n FROM sessions/, "CI must catch an inert deployment");
   // An assertion that never runs is invisible to a green suite, so the gate has to ask. See tools/deadassert.mjs.
   assert.match(ci, /deadassert/, "CI must check that no assertion in the suite is one that never executes");
+  // Same reason, other tool: a check satisfied by prose about the thing it checks is this project's most
+  // repeated defect, and the sweep for it only counts if the gate runs it.
+  assert.match(ci, /proseproof/, "CI must check that no check in the suite is satisfied by a comment");
   assert.ok(!/npm (install|ci)\b/.test(ci), "there is nothing to install");
 });
 

@@ -44,3 +44,4 @@ node_modules/
 *.md
 !README.md
 tools/deadassert.mjs
+tools/proseproof.mjs

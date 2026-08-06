@@ -31,6 +31,14 @@ jobs:
         # commands, and only because nobody had compared them. There is no npm install: `npm test` here is still just
         # two node processes.
         run: npm test
+      - name: No check in the suite may be satisfied by a comment
+        # tools/proseproof.mjs strips every comment — JS, YAML, and config/pattern.json's _comment — in a throwaway
+        # worktree, then runs the suite. A check whose needle lived in prose loses it and fails. This class has cost
+        # about a dozen defects here, the most recent being a CI assertion satisfied by the comment explaining the
+        # change it was supposed to be checking. It plants its own control on every run and refuses to report a clean
+        # result if that control does not fail. Needs the git history, so no shallow checkout.
+        if: matrix.node == '22.14'
+        run: node tools/proseproof.mjs
       - name: No assertion in the suite may be one that never runs
         # tools/deadassert.mjs reads the raw V8 coverage and reports every assert() call site that never executed.
         # Its first run found five, four of them real — a horizon check looping over an empty list, a boundary case

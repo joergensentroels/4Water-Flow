@@ -82,6 +82,14 @@ same-time clash the fixture could not express, and one branch of a partition. An
 marked in place with `// deadassert: dormant — reason` on the line above; a marker on an assertion that DOES run is
 reported too, so the markers cannot become a list of stale excuses.
 
+**`node tools/proseproof.mjs` answers the other one: is any check satisfied by a COMMENT?** It strips every comment —
+JS (tokenised, so a `//` inside a string survives), `#` lines in the workflow, and `config/pattern.json`'s `_comment` —
+in a throwaway worktree, then runs the suite. A check whose needle lived in prose loses it and fails; a check that reads
+code is unaffected. That class has cost about a dozen defects here, most recently an assertion looking for `node --test`
+that was satisfied by the comment explaining why CI no longer runs it. **It audits HEAD, not your working tree**, so run
+it after committing. One declared exception, with its reason: the test whose subject IS the config comment. It plants its
+own comment-only needle every run and refuses to report anything if that planted check does not fail.
+
 ## If you add a route, five audits will have an opinion
 
 They all walk `app.routes()` or `src/server.mjs` rather than a list somebody maintains, so a new route is covered
