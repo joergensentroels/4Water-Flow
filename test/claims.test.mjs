@@ -214,6 +214,7 @@ const JUSTIFIED = {
     "'past slots read as unfilled too' true of remove alone. The sentence used to describe only the effect on " +
     "past slots and say nothing about the future shifts either mode frees, which is the half an admin needs " +
     "before pressing something irreversible.",
+
 };
 
 test("every string that explains a cause is justified, and no new one slips in unexplained", () => {

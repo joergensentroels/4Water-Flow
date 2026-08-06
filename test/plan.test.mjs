@@ -99,3 +99,67 @@ test("home is a bounded number of queries regardless of season size", withWorld(
   c.restore();
   assert.equal(c.n, 1, "one query for a volunteer's own slots");
 }));
+
+// ---- the horizon on the page every volunteer opens --------------------------------------------------------------
+//
+// MEASURED IN A BROWSER at 375px on the demo instance, which is the only way this was ever going to surface: /plan
+// rendered 46 dates, 59 KB and 15,012 pixels of page — eighteen phone screens — starting six weeks IN THE PAST. So
+// "am I on this Wednesday" was eighteen screens down, behind a month and a half of history.
+//
+// The planner's grid has had a four-week window with widen links since the whole-season view was measured at 490 KB.
+// The page with twenty times the readers got none of it: the same fix applied to the back-office screen and not to
+// the volunteers'. The windowing is now one definition in queries.mjs and both pages call it.
+test("the plan opens on the next four weeks, not on the start of the season", withWorld({}, async (w) => {
+  const cookie = await w.signIn(w.people[0]);
+  const shown = async (q = "") => {
+    const body = await (await w.get(`/plan${q}`, cookie)).text();
+    // The dates are read back through the session links the page renders, resolved in the database — the page prints
+    // them in a human format (formatDate) and parsing that back would be testing the formatter, not the horizon.
+    const ids = [...new Set([...body.matchAll(/\/session\/(\d+)/g)].map((m) => Number(m[1])))];
+    const dates = ids.length === 0 ? []
+      : w.db.prepare(`SELECT DISTINCT date FROM sessions WHERE id IN (${ids.join(",")}) ORDER BY date`)
+          .all().map((r) => r.date);
+    return { body, dates };
+  };
+
+  // The fixture's season starts ON today, so there is no past to exclude and half of this test would be unaskable.
+  // Its own control caught that on the first run — it refused with the two ranges printed. So a handful of sessions are
+  // moved behind today, which is also the realistic state: a season in progress has history.
+  const early = w.db.prepare("SELECT DISTINCT date FROM sessions ORDER BY date LIMIT 2").all().map((r) => r.date);
+  w.db.prepare(`UPDATE sessions SET date = date(date, '-60 days') WHERE date IN ('${early.join("','")}')`).run();
+
+  // And now the fixture must span the horizon in both directions, or the assertions below cannot fail.
+  const until = new Date(Date.parse(`${w.today}T00:00:00Z`) + 28 * 86400000).toISOString().slice(0, 10);
+  const all = w.db.prepare("SELECT MIN(date) lo, MAX(date) hi FROM sessions").get();
+  assert.ok(all.lo < w.today && all.hi > until,
+    `the season must reach either side of the window (${all.lo}..${all.hi} around ${w.today}..${until})`);
+
+  const dflt = await shown();
+  assert.ok(dflt.dates.length > 0, "the default view must show something");
+  assert.ok(dflt.dates.every((d) => d >= w.today && d <= until),
+    `the default view must be this window only, got ${dflt.dates[0]}..${dflt.dates.at(-1)}`);
+  // The way out has to be on the page, or a four-week default is a feature nobody can turn off.
+  assert.match(dflt.body, /\/plan\?weeks=all/, "and a link to the whole season");
+  assert.match(dflt.body, /aria-current="true"/, "with the current horizon marked, so the page cannot lie about itself");
+
+  const everything = await shown("?weeks=all");
+  assert.ok(everything.dates.some((d) => d < w.today),
+    "the whole-season view includes the past, because 'who taught in September' is a fair question here");
+  assert.ok(everything.dates.length > dflt.dates.length, "and it is genuinely wider than the default");
+}));
+
+// The regression the four-week default introduced, and the reason a real deployment caught it rather than a unit test:
+// 4water's shipped config covers January to June, so on any date after that the next four weeks are empty — and the
+// page announced "there are no activities in this season yet" about a season with 223 of them.
+test("a season entirely outside the window shows the season, with the chips saying so", withWorld({}, async (w) => {
+  const cookie = await w.signIn(w.people[0]);
+  // Move every session far into the past, so the default window is empty while the season is not.
+  w.db.prepare("UPDATE sessions SET date = date(date, '-400 days')").run();
+  const body = await (await w.get("/plan", cookie)).text();
+  assert.doesNotMatch(body, /no activities in this season/,
+    "a season with sessions must never describe itself as empty just because they are outside the default window");
+  assert.match(body, /\/session\/\d+/, "the sessions must be on the page");
+  // And the chip that is current must be the whole-season one, since that is what is being shown.
+  const current = body.match(/<a class="chip" href="\/plan\?weeks=(\w+)" aria-current="true"/);
+  assert.equal(current?.[1], "all", `the current chip should be "all", markup says ${current?.[1]}`);
+}));

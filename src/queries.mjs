@@ -468,6 +468,27 @@ export function handBackSlot(db, assignmentId, personId, { today, cutoffDays = 0
 }
 
 // ---- Reading the plan ---------------------------------------------------------------------------------
+// ---- the horizon, defined once ------------------------------------------------------------------------------
+//
+// Measured in a browser at 375px on the demo instance: `/plan` rendered 46 dates, 59 KB and **15,012 pixels** of page —
+// eighteen phone screens — starting six weeks IN THE PAST, so a volunteer opening "The plan" had to scroll past a month
+// and a half of history to find out who is on this Wednesday.
+//
+// The planner's grid had a four-week window with links to widen it, added after the whole-season view was measured at
+// 490 KB. The page every VOLUNTEER opens got none of it: the same fix, applied to the back-office screen and not to the
+// one with twenty times the readers. So the windowing lives here now and both pages call it.
+//
+// `weeks = null` means "all". On the planner that still means future-only, because a grid of past shifts is not work to
+// do; on the read-only plan it includes the past, because "who taught in September" is a question that page should be
+// able to answer. That is the one difference, and it is a parameter rather than two copies of the arithmetic.
+export const horizonWeeks = (raw) => (raw === "all" ? null : Math.max(1, Number(raw) || 4));
+
+export function withinHorizon(rows, { today, weeks, past = false }) {
+  const until = weeks === null ? null
+    : new Date(Date.parse(`${today}T00:00:00Z`) + weeks * 7 * 86400000).toISOString().slice(0, 10);
+  return rows.filter((r) => (past || r.date >= today) && (until === null || r.date <= until));
+}
+
 export function planForSeason(db, seasonId) {
   return db.prepare(`
     SELECT s.id AS sessionId, s.date, t.day_of_week AS dayOfWeek, t.hour, t.minute,

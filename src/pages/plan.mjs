@@ -1,6 +1,6 @@
 // Read-only views: the volunteer's own slots, and the whole season. Both are one query each — a per-row
 // lookup would be invisible at 40 volunteers and painful at 200, and the fix is much cheaper written now.
-import { html } from "../http.mjs";
+import { html, raw } from "../http.mjs";
 import { layout, formatDate, formatTime, formatRole, csrfField, navFor } from "../views.mjs";
 
 // Group a flat result set by date so the markup can be a list of days rather than a table nobody can read
@@ -58,12 +58,26 @@ export function renderHome({ t, session, roles, who, mine, score, status = "acti
   return layout({ t, title: t("home.title"), who, nav: navFor(t, roles, "home"), flash, body });
 }
 
-export function renderPlan({ t, roles, who, rows, personId, notes = new Map() }) {
+export function renderPlan({ t, roles, who, rows, personId, notes = new Map(), weeks = 4 }) {
   const days = byDate(rows);
+  // The same horizon chips the planner's grid has, with the same strings and the same aria-current — because the
+  // measured problem was worse here: 15,012 pixels of page opening six weeks in the past. The chips render even when
+  // the window is empty, since "nothing in the next four weeks" is exactly when somebody needs to widen it, and an
+  // empty state with no way out is how the four-week default would turn into a page that looks broken.
+  const chips = html`
+      <p class="hint" id="plan-horizon-label">${t("planner.horizon")}</p>
+      <div class="chiprow" role="group" aria-labelledby="plan-horizon-label">
+        ${[4, 12, "all"].map((wk) => {
+          const current = String(weeks ?? "all") === String(wk);
+          return html`<a class="chip" href="/plan?weeks=${wk}"${current ? raw(' aria-current="true"') : ""}>${
+            wk === "all" ? t("planner.horizonAll") : t("planner.horizonWeeks", { n: wk })}</a>`;
+        })}
+      </div>`;
   const body = days.length === 0
-    ? html`<p class="empty">${t("plan.empty")}</p>`
+    ? html`<h2>${t("plan.title")}</h2>${chips}<p class="empty">${t("plan.empty")}</p>`
     : html`
       <h2>${t("plan.title")}</h2>
+      ${chips}
       ${days.map((d) => {
         // ONE LINK PER SESSION, not per row. A partner dance needs a leader and a follower, which is two assignment
         // rows on one session — so the first version rendered two adjacent links to the same page with different

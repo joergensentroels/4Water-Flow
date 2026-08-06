@@ -33,7 +33,7 @@ import { myProfile, saveProfile, renderProfile, profileFlash } from "./pages/pro
 import { collectStatus, renderStatus } from "./pages/status.mjs";
 import { listOutbox, renderOutbox } from "./pages/outbox.mjs";
 import { backupConfig } from "../tools/backup.mjs";
-import { myUpcoming, planForSeason, score, openSlotsFor, claimSlot, handBackSlot,
+import { myUpcoming, planForSeason, horizonWeeks, withinHorizon, score, openSlotsFor, claimSlot, handBackSlot,
          eligiblePeopleFor, assignSlot, unassignSlot, calendarRowsFor, boardEmptyReason, slotEmptyReason,
          attendedCount, markAttendance, unmarkedShifts,
          sessionDetail, peopleOnSession } from "./queries.mjs";
@@ -359,13 +359,35 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     }));
   });
 
-  app.get("/plan", ({ req, res }) => {
+  app.get("/plan", ({ req, res, query }) => {
     const c = gate({ req, res });
     if (!c) return;
     const sid = seasonId();
-    const rows = sid ? planForSeason(db, sid) : [];
+    // The same four-week horizon the planner's grid has had all along, and for a stronger reason: measured at 375px on
+    // the demo, this page was 15,012 pixels tall and opened six weeks in the past, so the first thing a volunteer saw
+    // was late June and the answer to "am I on this week" was eighteen screens down. `weeks=all` includes the past here,
+    // because looking back is a legitimate thing to want from a read-only plan — see withinHorizon.
+    const weeks = horizonWeeks(query.get("weeks"));
+    const all = sid ? planForSeason(db, sid) : [];
+    let rows = withinHorizon(all, { today: today(), weeks, past: weeks === null });
+    // IF THE WINDOW IS EMPTY AND THE SEASON IS NOT, show the season and say so. The horizon is an ergonomic default,
+    // not a filter anybody asked for, and the first version of it broke the shipped configuration: 4water's real export
+    // covers January to June, so on any date after that the next four weeks are empty and this page said "There are no
+    // activities in this season yet" about a season with 223 of them. test/firstrun.test.mjs caught it by booting a real
+    // deployment — the assertion is literally that a bootstrapped install must not look empty.
+    //
+    // Widening automatically is what a person would do; the hint is what stops the chips lying about which view is on
+    // screen, which is the mistake the planner's own horizon made once already.
+    // Expressed through the chips rather than a sentence: when it widens, the effective horizon IS "the whole
+    // season", so that chip carries aria-current and the page describes its own state without a new claim. The first
+    // version added a string saying "nothing in the next four weeks, so the whole season is shown" — accurate, and
+    // test/claims.test.mjs refused it: causal strings must each be justified, and the list is capped at twenty on the
+    // grounds that a longer one gets rubber-stamped. A cap that forces a better answer rather than a longer list is
+    // doing its job, and the better answer was to let the control tell the truth.
+    let effectiveWeeks = weeks;
+    if (rows.length === 0 && all.length > 0) { rows = all; effectiveWeeks = null; }
     send(res, 200, renderPlan({
-      t, roles: c.roles, who: c.who, personId: c.personId, rows,
+      t, roles: c.roles, who: c.who, personId: c.personId, rows, weeks: effectiveWeeks,
       // ONE query for every session on the page. The per-row alternative is the N+1 this project has fixed twice,
       // and this page renders the whole season — 173 sessions in the measured fixture.
       notes: noteCounts(db, [...new Set(rows.map((r) => r.sessionId))]),
@@ -472,11 +494,10 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // the whole-season view rendered 490 KB of HTML, because every open slot carries a dropdown of every
     // eligible person. Half a megabyte on a phone on mobile data is not a planner screen. Four weeks is also
     // simply the right amount of work to look at; the links below extend it when needed.
-    const weeks = query.get("weeks") === "all" ? null : Math.max(1, Number(query.get("weeks")) || 4);
-    if (weeks) {
-      const until = new Date(Date.parse(`${today()}T00:00:00Z`) + weeks * 7 * 86400000).toISOString().slice(0, 10);
-      rows = rows.filter((r) => r.date <= until);
-    }
+    // withinHorizon rather than the arithmetic inline, so this page and /plan cannot drift. `past` stays false: a
+    // grid of shifts that already happened is not work to do.
+    const weeks = horizonWeeks(query.get("weeks"));
+    rows = withinHorizon(rows, { today: today(), weeks, past: false });
 
     // "Gaps only" is the view a planner actually wants most of the time: the whole season is noise when the
     // question is "what is still unfilled".
