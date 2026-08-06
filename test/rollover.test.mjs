@@ -214,15 +214,34 @@ test("package.json describes something runnable, with no dependencies", () => {
 });
 
 test("CI runs the suite, the fresh-deployment check, and the backup restore", () => {
-  const ci = readFileSync(path.join(ROOT, ".github", "workflows", "test.yml"), "utf8");
-  assert.match(ci, /node --test/, "the suite must run");
+  const raw = readFileSync(path.join(ROOT, ".github", "workflows", "test.yml"), "utf8");
+  // COMMENTS STRIPPED FOR EVERY ASSERTION, not just one of them. This test used to read the raw file for six checks
+  // and strip comments for the seventh, and the divergence cost exactly what it looks like it would: the workflow's
+  // suite step was changed from `node --test` to `npm test`, a comment was added explaining why, and
+  // `assert.match(ci, /node --test/, "the suite must run")` went on passing — satisfied by the comment, with the
+  // phrase appearing nowhere in anything CI executes. That is the same defect this project has now paid for about a
+  // dozen times: a check that reads source text can be silenced by prose about the thing it checks. Here the fix was
+  // already present in the same function, on one line, and had not been applied to its siblings.
+  const ci = raw.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+
+  // The suite command is compared to package.json rather than to a literal, because the two drifting apart IS the
+  // defect this assertion exists to catch. `npm test` runs tools/precheck.mjs first; CI ran `node --test` and skipped
+  // it, and precheck exists because a single unterminated template literal once left a quarter of the test files unrun
+  // with the suite going unreliable rather than red. The gate was running the weaker of the two available commands.
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  assert.match(pkg.scripts.test, /precheck/, "npm test must still be the command that parses everything first");
+  assert.ok(new RegExp(`run:\\s*(npm test|${pkg.scripts.test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*$`, "m").test(ci),
+    `CI must run the same command a developer runs (\`npm test\`, or literally \`${pkg.scripts.test}\`) — running a `
+    + "subset means the gate is weaker than the local check, which is the wrong way round");
+
   assert.match(ci, /22\.14/, "the version the Dockerfile pins is the one that matters");
   assert.match(ci, /healthz/, "and a fresh deployment must be proven to come up");
   assert.match(ci, /verifyBackup|integrity/, "and a backup proven to restore");
   // The bug that shipped was seeding-on-boot. CI has to check the thing the harness hides.
   assert.match(ci, /seeded no sessions|COUNT\(\*\) n FROM sessions/, "CI must catch an inert deployment");
-  assert.ok(!/npm (install|ci)\b/.test(ci.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n")),
-    "there is nothing to install");
+  // An assertion that never runs is invisible to a green suite, so the gate has to ask. See tools/deadassert.mjs.
+  assert.match(ci, /deadassert/, "CI must check that no assertion in the suite is one that never executes");
+  assert.ok(!/npm (install|ci)\b/.test(ci), "there is nothing to install");
 });
 
 test("the licence tells the board the choice is theirs", () => {
