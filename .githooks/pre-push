@@ -1,0 +1,32 @@
+#!/bin/sh
+# Run before every push what CI runs after it, because a push is the last moment a mistake is still private.
+#
+# WHY THIS EXISTS, and it is one specific sequence rather than a principle. Three commits in a row shipped with a figure
+# the tools would have caught: the version bump added two tests and left PLAN.md claiming the old count, and the commit
+# message that celebrated the check catching it then asserted "deadassert exits 0" without running it — it exited 1.
+# Over those three commits the habit failed three times out of three and the instrument failed none. The instrument was
+# only ever consulted after the fact.
+#
+# The three commands are the ones the workflow runs. test/rollover.test.mjs asserts that this file and the workflow
+# invoke the same set of tools, in both directions, so neither can quietly gain a check the other lacks — which is the
+# defect that was already found once here, when CI ran `node --test` while a developer ran `npm test`.
+#
+# Enable it once per clone (git does not do this for you, deliberately — a hook is executable code from a repository):
+#
+#     git config core.hooksPath .githooks
+#
+# To push anyway, in the one case that is legitimate — a broken tree you need off this machine and onto another:
+#
+#     git push --no-verify
+set -e
+
+echo "pre-push: the suite, with the parse check first"
+npm test
+
+echo "pre-push: no check in the suite may be satisfied by a comment"
+node tools/proseproof.mjs
+
+echo "pre-push: no assertion may be one that never runs, and no document may state a stale test count"
+node tools/deadassert.mjs
+
+echo "pre-push: all clear"

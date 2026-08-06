@@ -45,3 +45,4 @@ node_modules/
 !README.md
 tools/deadassert.mjs
 tools/proseproof.mjs
+.githooks/

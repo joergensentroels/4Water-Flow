@@ -303,3 +303,37 @@ test("and that check fires rather than merely passing on an untagged version", (
   assert.ok(!stale.some((t) => t === `v${pkg.version}` || t === pkg.version),
     `the version claims ${pkg.version}, which one of these tags already holds elsewhere: ${stale.join(", ")}`);
 });
+
+// ---- the local gate and CI must run the same checks ---------------------------------------------------------------
+//
+// CI already gained a check a developer did not have, in the other direction: it ran `node --test` while `npm test` ran
+// the parse check first, and nobody had compared them. So the two lists are compared here rather than maintained.
+//
+// The hook exists because of one specific sequence: three commits in a row shipped with something the tools would have
+// caught, including a message asserting "deadassert exits 0" that had never been run. Over those three the habit failed
+// three times out of three and the instrument failed none — it was simply consulted afterwards. A pre-push hook is the
+// last moment a mistake is still private.
+test("the pre-push hook runs the same tools as CI, in both directions", () => {
+  const hookPath = path.join(ROOT, ".githooks", "pre-push");
+  assert.ok(existsSync(hookPath), "there must be a pre-push hook, or the local gate is whatever somebody remembers");
+  const hook = readFileSync(hookPath, "utf8");
+  const ci = readFileSync(path.join(ROOT, ".github", "workflows", "test.yml"), "utf8")
+    .split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  // Comments stripped from BOTH, for the reason the CI check above records: a mention in prose is not an invocation.
+  const runnableHook = hook.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+
+  const toolsIn = (text) => [...new Set([...text.matchAll(/node tools\/([a-z-]+)\.mjs/g)].map((m) => m[1]))].sort();
+  const inHook = toolsIn(runnableHook);
+  const inCi = toolsIn(ci).filter((t) => t !== "backup");   // CI also proves a backup restores; that needs a live server
+  assert.ok(inHook.length >= 2, `the hook invokes only ${inHook.join(", ") || "nothing"} — it is not a gate`);
+  assert.deepEqual(inHook, inCi,
+    `the hook runs [${inHook.join(", ")}] and CI runs [${inCi.join(", ")}]. Whichever list is shorter is the gate that `
+    + "lets something through, and a developer discovering it on a push is the wrong way round");
+
+  // And the suite itself, by the same command a developer runs — the drift that was already found once.
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  assert.match(runnableHook, /^\s*npm test\s*$/m, "the hook must run the whole suite, not a subset");
+  assert.match(pkg.scripts.test, /precheck/, "and npm test must still be the command that parses everything first");
+  // `set -e`, or a failing check prints its complaint and the push proceeds anyway.
+  assert.match(runnableHook, /^set -e$/m, "without set -e the hook reports failures and lets the push through");
+});

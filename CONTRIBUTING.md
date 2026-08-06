@@ -7,6 +7,18 @@ that is the news — not a detail.
 npm test
 ```
 
+**Enable the pre-push hook once per clone.** Git will not do it for you — a hook is executable code out of a repository —
+and it runs before every push what CI runs after it:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It exists because of one sequence rather than a principle. Three commits in a row shipped with something the tools would
+have caught, including a commit message asserting `deadassert exits 0` that had never been run — it exited 1. Over those
+three the habit failed three times out of three and the instrument failed none; it was simply consulted afterwards. A push
+is the last moment a mistake is still private. `git push --no-verify` when you need a broken tree off this machine.
+
 It parses every module first (`npm run precheck`, about half a second) and refuses to start the suite if one cannot
 be parsed. That is not tidiness. A single unterminated template literal — a backtick inside a comment inside a
 template literal, which `src/db.mjs` warns about over the schema — left a quarter of the test files **unrun** and the
