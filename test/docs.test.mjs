@@ -597,3 +597,48 @@ test("every claim the documents make about the code is true", () => {
   assert.ok(checked >= 40, `only ${checked} claims were extracted — this test is not checking anything`);
   assert.deepEqual(problems, [], `${problems.length} documented claim(s) are not true:\n${problems.join("\n")}`);
 });
+
+// ---- the two lifetimes the documents state, measured rather than read ---------------------------------------------
+//
+// PLAN.md's test count was stale by sixty-five and nothing could check it, which prompted asking what OTHER numeric
+// claims these documents make. 58 of them, and almost all are deliberately HISTORICAL — "this measured 23px before the
+// fix" must not change, and a check that failed on those would be demanding the history be falsified. Two are claims
+// about the CURRENT system that a machine can settle, and both were unguarded:
+//
+//   RUNBOOK.md   "It is single-use and expires after 14 days."
+//   docs/OIDC.md "Sessions last 30 days, and the CSRF token lasts exactly as long."
+//
+// Both are read OUT OF THE PROSE and then measured against behaviour, not against a constant. Neither constant is
+// exported, and exporting one to let a test read it would widen a module's surface to make a weaker check: comparing
+// two literals proves they match, while driving the boundary proves the app does what the sentence promises. It also
+// means rewording the prose to a different number fails here rather than silently passing.
+test("the invitation lifetime RUNBOOK states is the one the code enforces", async () => {
+  const { createInvite, inviteStatus } = await import("../src/auth.mjs");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { migrate } = await import("../src/db.mjs");
+
+  const said = Number(/single-use and expires after (\d+) days/.exec(read("RUNBOOK.md"))?.[1]);
+  assert.ok(said > 0, "RUNBOOK no longer states an invitation lifetime — reword this pattern or the check is blind");
+
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrate(db);
+    const at = (days) => new Date(Date.now() - days * 86400000);
+    const fresh = createInvite(db, { email: "a@example.org", now: at(said - 1) });
+    const stale = createInvite(db, { email: "b@example.org", now: at(said + 1) });
+    assert.equal(inviteStatus(db, fresh.token).ok, true,
+      `an invitation ${said - 1} days old must still work, or the stated window is shorter than the document says`);
+    assert.equal(inviteStatus(db, stale.token).reason, "expired",
+      `an invitation ${said + 1} days old must be refused, or the window is longer than the document says`);
+  } finally { db.close(); }
+});
+
+test("the session lifetime docs/OIDC.md states is the one the cookie carries", async () => {
+  const { cookieHeader } = await import("../src/session.mjs");
+  const said = Number(/Sessions last (\d+) days/.exec(read("docs/OIDC.md"))?.[1]);
+  assert.ok(said > 0, "docs/OIDC.md no longer states a session lifetime — reword this pattern or the check is blind");
+  // The header a browser actually receives, which is the only place this promise is kept.
+  const maxAge = Number(/Max-Age=(\d+)/.exec(cookieHeader("token-value"))?.[1]);
+  assert.ok(maxAge > 0, "the cookie carries no Max-Age at all");
+  assert.equal(maxAge / 86400, said, `the cookie lasts ${(maxAge / 86400).toFixed(1)} days, the document says ${said}`);
+});

@@ -16,7 +16,7 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 525 tests green** — and green in a fresh `git clone` of the
+Status: **✅ A–AH complete plus the commits since, 527 tests green** — and green in a fresh `git clone` of the
 current commit, not only in the working copy where the tests were written.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
