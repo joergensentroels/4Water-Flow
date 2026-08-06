@@ -54,18 +54,41 @@ export function buildDemo(db, { pattern = demoPattern(), people = 12, reset = tr
     if (!reset) return { ok: false, reason: "already_populated", people: existing };
     // Order matters only in that assignments must lose their person before the person goes; the schema's
     // ON DELETE rules handle the rest.
+    //
+    // SEASONS GO TOO, and leaving them made this tool crash on any second run. `demoSeason` is anchored on today —
+    // six weeks back, four months forward — so its key changes every day. Reset deleted the PEOPLE and left the
+    // previous season's sessions; seedSeason then created the new season and skipped every session, because seeding
+    // only ever adds and those dates and timeslots were already taken. The new season came out with zero sessions,
+    // and the next step — reading the first session to build the blocked-hour case — died with "Cannot read
+    // properties of undefined (reading 'date')".
+    //
+    // Measured on the database it left behind: `demo-2026-06-24` with 117 sessions, `demo-2026-06-25` with none.
+    // Reachable by exactly the workflow CONTRIBUTING documents — run the demo, come back another day, run it again —
+    // and it left the file half-built, people deleted and re-seeded against a season with nothing in it.
+    //
+    // The demo owns its own database (demo.db, or FOURWATER_DB), so clearing every season is safe here and is what
+    // "reset" was always supposed to mean. CASCADE takes the sessions and their assignments.
     db.exec("BEGIN");
     try {
       db.prepare("UPDATE assignments SET person_id = NULL").run();
       db.prepare("DELETE FROM notifications").run();
       db.prepare("DELETE FROM invitations").run();
       db.prepare("DELETE FROM people").run();
+      db.prepare("DELETE FROM seasons").run();
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }
   }
   // seedSeason, so the demo builder cannot drift from what a real boot does — the whole point of that function
   // is that "structure but no slots" is no longer a state anyone can reach by forgetting a call.
   const { seasonId, slots: opened } = seedSeason(db, pattern);
+  // And a floor, because the failure above was a TypeError four lines later rather than a sentence. Everything below
+  // reads from these sessions, so a season with none is not a demo — it is a database to throw away, and whoever ran
+  // this needs to be told which of the two it is.
+  const seeded = db.prepare("SELECT COUNT(*) n FROM sessions WHERE season_id=?").get(seasonId).n;
+  if (seeded === 0) {
+    throw new Error(`demo: season ${pattern.season.key} was created with no sessions. Either its dates contain no day `
+      + `the weekly rhythm uses, or another season already occupies them. Delete the database and run again.`);
+  }
   const keys = pattern.activities.map((a) => a.key);
 
   // Deterministic spread of capabilities — no randomness, so the demo looks the same every time and a

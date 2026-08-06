@@ -406,3 +406,52 @@ test("a real deployment actually writes notifications", async () => {
     assert.ok(rows[0].body.length > 0, "and it must have a body a planner could copy into the group chat");
   } finally { b.child.kill(); await new Promise((r) => b.child.once("exit", r)); cleanup(dir); }
 });
+
+// ---- and the second run, which is the one that broke ------------------------------------------------------------
+//
+// The test above asserts exactly one season, which is the right property — and it builds the demo ONCE in an empty
+// directory, so it could never reach the case that failed. CONTRIBUTING tells a maintainer to run `node tools/demo.mjs`
+// to look at the app; do that, come back another day, and run it again.
+//
+// `demoSeason` is anchored on today, so its key moves daily. Reset deleted the people and left the previous season's
+// sessions; seedSeason then made the new season and skipped every session, because seeding only ever adds and those
+// dates and timeslots were taken. Measured on the database the crash left behind: `demo-2026-06-24` with 117 sessions,
+// `demo-2026-06-25` with none — and then a TypeError from reading `.date` of undefined, four lines later, with nothing
+// naming the cause.
+test("the demo can be rebuilt on a later day, which is how anybody actually uses it", async () => {
+  const dir = freshDir();
+  try {
+    const { buildDemo, demoPattern } = await import("../tools/demo.mjs");
+    const db = new DatabaseSync(path.join(dir, "demo.db"));
+    const day1 = new Date("2026-03-10T12:00:00Z");
+    const day2 = new Date("2026-03-11T12:00:00Z");          // one day later: overlapping dates, a different key
+
+    const first = buildDemo(db, { pattern: demoPattern(undefined, day1) });
+    assert.ok(first.seasonId, "the first build must work — it always did");
+    const peopleAfterFirst = db.prepare("SELECT COUNT(*) n FROM people").get().n;
+    assert.ok(peopleAfterFirst > 0);
+
+    // The fixture's own control: the two patterns must genuinely differ in key and overlap in dates, or this test is
+    // just the one above run twice.
+    const p1 = demoPattern(undefined, day1), p2 = demoPattern(undefined, day2);
+    assert.notEqual(p1.season.key, p2.season.key, "the key must move, or nothing new is being asked");
+    assert.ok(p2.season.from <= p1.season.to && p1.season.from <= p2.season.to,
+      "the seasons must overlap, because the overlap is what made every session insert a skip");
+
+    const second = buildDemo(db, { pattern: p2 });
+    assert.ok(second.seasonId, "the second build must work too");
+
+    // One season, and it is the new one, with sessions in it.
+    const seasons = db.prepare("SELECT key FROM seasons").all().map((r) => r.key);
+    assert.deepEqual(seasons, [p2.season.key], `expected only ${p2.season.key}, found ${seasons.join(", ")}`);
+    const sessions = db.prepare("SELECT COUNT(*) n FROM sessions WHERE season_id=?").get(second.seasonId).n;
+    assert.ok(sessions > 0, "a season with no sessions is not a demo, it is a database to throw away");
+    // People are re-seeded, not duplicated — the property the reset existed for in the first place.
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, peopleAfterFirst,
+      "the second run must replace the people, not add another twelve");
+    // And the state the crash occurred in: somebody free all day with one hour blocked.
+    assert.ok(db.prepare("SELECT COUNT(*) n FROM availability_hour").get().n > 0,
+      "the blocked-hour case is the line that died; it must have been built");
+    db.close();
+  } finally { cleanup(dir); }
+});
