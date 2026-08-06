@@ -226,16 +226,33 @@ test("a real deployment can be set up and used end to end", async () => {
     // ---- 8. the planner fills the rest automatically, reviews, and locks it in ----
     const { token: rosterCsrf } = await admin.csrfFrom("/planner");
     const proposed = await admin.post("/planner/auto-roster", { csrf: rosterCsrf });
-    // Either code means it ran and proposed something; which one depends on whether every open slot could be
-    // filled, and on a real roster it usually cannot. What must hold is that it proposed, which the count below
-    // checks — not which of the two sentences the planner reads.
-    assert.ok(["roster_done", "roster_gaps"].includes(reasonOf(proposed)),
-      `auto-roster must have something to propose, got ${reasonOf(proposed)}`);
+    // Which code comes back depends on whether every open slot could be filled, and this fixture is realistic
+    // enough that it usually cannot — so pinning one outcome would make a real journey brittle. That is why the
+    // first version accepted either, with `["roster_done","roster_gaps"].includes(...)`. But that is a disjunction
+    // over the ONLY TWO possible answers: it holds whichever happened, and it would still hold if the numbers in
+    // the message contradicted the database. Record lens 11 — when a test holds two facts about one event, assert
+    // that they AGREE, rather than asserting each separately or neither.
+    //
+    // So whichever code it is, the count the planner is SHOWN must equal the number of proposals actually made,
+    // which is checkable without knowing this fixture's outcome in advance.
+    const loc = new URL(proposed.headers.get("location"), "http://x");
+    const code = loc.searchParams.get("r");
+    assert.ok(["roster_done", "roster_gaps"].includes(code), `auto-roster answered ${code}`);
     {
       const db = new DatabaseSync(dbFile, { readOnly: true });
       const n = db.prepare("SELECT COUNT(*) n FROM assignments WHERE state='proposed' AND person_id IS NOT NULL").get().n;
       db.close();
       assert.ok(n > 0, "a proposal that proposes nothing is not a proposal");
+      // roster_done carries the filled count as `n`; roster_gaps carries `filled`, and uses `n` for the gaps.
+      const shown = Number(loc.searchParams.get(code === "roster_done" ? "n" : "filled"));
+      assert.equal(shown, n, `the planner is told ${shown} proposals were made; the database holds ${n}`);
+      if (code === "roster_gaps") {
+        assert.ok(Number(loc.searchParams.get("n")) > 0,
+          "roster_gaps must report at least one gap, or it is the wrong code for what happened");
+      } else {
+        assert.equal(loc.searchParams.get("filled"), null,
+          "roster_done must not also carry a gaps-shaped parameter");
+      }
     }
     const { token: lockCsrf } = await admin.csrfFrom("/planner");
     assert.equal(reasonOf(await admin.post("/planner/proposals/lock", { csrf: lockCsrf })), "locked");

@@ -380,3 +380,55 @@ test("the lock and discard controls only appear when there is something to decid
   assert.ok(after.includes("/planner/proposals/lock"));
   assert.ok(after.includes("/planner/proposals/discard"));
 }));
+
+// ---- and the outcome nothing had ever produced: a roster that completes -----------------------------------------
+//
+// The gaps case above is the ordinary one and it is thoroughly covered. `roster_done` — the sentence a planner reads
+// on a good day — was reached by no test in the suite. The only other mention of it was a disjunction in the journey
+// test, `["roster_done","roster_gaps"].includes(...)`, which is an assertion over the only two possible answers and
+// therefore holds either way; it is now an agreement check instead.
+//
+// This matters beyond one banner. Splitting one message into three codes was a real fix, recorded as the case where
+// "0 slots could not be filled" was a double negative in a banner styled as neutral success. Two of the three
+// resulting codes were verified. The third was the SUCCESS case, which is both the one a planner most wants to
+// believe and the one no realistic fixture reaches — because every fixture in the suite is realistic, and a real
+// roster usually has gaps.
+//
+// The fixture difference is deliberately small: same four volunteers, all available, but capable of everything, so
+// every partner-dance slot has an eligible pair. That is what makes the contrast with the test above meaningful —
+// one flag, opposite outcome.
+test("a roster with no gaps says so, in a banner that is not a warning", withPlanner({ capableOfEverything: true },
+  async (w) => {
+    allAvailable(w);
+    const planner = await w.signIn(w.people[0]);
+    const { token } = await w.csrfFrom("/planner", planner);
+
+    const ran = await w.post("/planner/auto-roster", planner, new URLSearchParams({ csrf: token }));
+    const loc = new URL(ran.headers.get("location"), "http://x");
+    assert.equal(loc.searchParams.get("r"), "roster_done",
+      "with everyone capable and free, every slot is fillable — if this is roster_gaps the fixture stopped being the "
+      + "complete case and this test has quietly become a second copy of the one above");
+    assert.equal(loc.searchParams.get("filled"), null, "the complete case carries no gaps parameter");
+
+    // The count shown must be the count made — the same agreement the journey test now asserts.
+    const made = proposals(w).length;
+    assert.ok(made > 0, "the fixture must actually propose something");
+    assert.equal(Number(loc.searchParams.get("n")), made,
+      `the planner is told ${loc.searchParams.get("n")} proposals were made and there are ${made}`);
+
+    // The banner itself, captured rather than grepped for across the page. Both of the first attempts here were bad
+    // probes: `/class="flash"/` never matches, because with neither modifier the attribute renders as `class="flash "`
+    // with the empty slot still in it; and `doesNotMatch(body, /0/)` swept a page full of times like 19:00.
+    const { body } = await w.follow(ran, planner);
+    const banner = body.match(/<p class="flash([^"]*)">([^<]*)</);
+    assert.ok(banner, "a run must produce a banner — silence is not a result");
+    const [, modifier, text] = banner;
+    assert.equal(modifier.trim(), "",
+      `a complete roster must not be flagged "${modifier.trim()}": the warning style is how a planner spots the runs `
+      + "that need them, and it stops meaning anything when a good run wears it too");
+    assert.ok(text.trim().length > 0, "and the banner must have words in it");
+    // No double negative. The complete case must not tell a planner about slots that could not be filled, which is
+    // the exact sentence this three-way split was created to stop producing.
+    assert.doesNotMatch(text, /0/,
+      `the banner reads "${text.trim()}" — a message mentioning zero of anything is what the split removed`);
+  }));
