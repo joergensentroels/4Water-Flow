@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
-import { pruneNotifications, pruneSeasons, runRetention, retentionConfig,
+import { pruneNotifications, pruneSeasons, pruneOrphanedAvailability, runRetention, retentionConfig,
          erasePerson, exportPerson, exportSeasonCsv } from "../src/retention.mjs";
 import { rolesOf } from "../src/auth.mjs";
 import { setRole } from "../src/admin.mjs";
@@ -425,3 +425,61 @@ test("runRetention reports invitations, and the summary names them", withAdmin({
   const { body } = await w.follow(posted, admin);
   assert.match(body, /invitations|invitationer/i, "the summary must say how many invitations went");
 }));
+
+// ---- the sweep must run when NO season is dropped, which is every ordinary night ---------------------------------
+//
+// The test above proves the sweep works, and its own setup creates a droppable season — so it exercised the only path
+// on which the sweep could run. It sat below `if (doomed.length === 0) return`, so with the default of two seasons kept
+// and two seasons existing, it never ran at all. This is the same assertion from the other side, and it is the side
+// that matters, because dropping a season is rare and cancelling a class date is not.
+test("availability orphaned without a season expiring is still swept", withAdmin({}, async (w) => {
+  const date = w.pattern.season.from;
+  setAvailabilityDay(w.db, w.people[0], date, true);
+  assert.ok(w.db.prepare("SELECT COUNT(*) n FROM availability_day").get().n > 0, "the fixture must record an answer");
+
+  // Take the sessions on that date the way the app does — the holiday route's own statement — and leave the seasons
+  // alone, so nothing is prunable and the old sweep would never have been reached.
+  w.db.prepare("DELETE FROM sessions WHERE date=?").run(date);
+  const seasons = w.db.prepare("SELECT COUNT(*) n FROM seasons").get().n;
+
+  const r = runRetention(w.db, { pattern: w.pattern, currentKey: w.pattern.season.key });
+  assert.equal(r.seasons.removed.length, 0, "no season may be dropped here, or this is the other test again");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM seasons").get().n, seasons, "and none was");
+  assert.ok(r.availability.removed > 0, "the sweep must report what it removed");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM availability_day WHERE date=?").get(date).n, 0,
+    "an answer for a date with no sessions is personal data nothing in the app can show; it must not survive");
+
+  // The control: answers for dates that STILL have sessions must be untouched, or "swept" is also satisfied by a
+  // statement that deletes the table.
+  const live = w.db.prepare("SELECT date FROM sessions ORDER BY date LIMIT 1").get().date;
+  setAvailabilityDay(w.db, w.people[0], live, true);
+  const r2 = runRetention(w.db, { pattern: w.pattern, currentKey: w.pattern.season.key });
+  assert.equal(r2.availability.removed, 0, "a second run has nothing left to sweep");
+  assert.equal(w.db.prepare("SELECT COUNT(*) n FROM availability_day WHERE date=?").get(live).n, 1,
+    "an answer for a live date is the whole point of the table and must survive");
+}));
+
+// And the sequence that makes it reachable, driven through the routes rather than the functions: two ordinary admin
+// clicks orphan a volunteer's answers, and before this fix nothing would ever have removed them.
+test("cancelling a class date through the holiday route leaves answers that retention then removes", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const cookie = await w.signIn(w.people[0]);
+    const date = w.db.prepare("SELECT date FROM sessions ORDER BY date LIMIT 1").get().date;
+    setAvailabilityDay(w.db, w.people[1], date, true);
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM availability_day WHERE date=?").get(date).n, 1);
+
+    const res = await w.post("/admin/holiday", cookie,
+      new URLSearchParams({ csrf: csrfFromCookie(cookie), date, on: "" }));
+    assert.ok([200, 303].includes(res.status), `the holiday route answered ${res.status}`);
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM sessions WHERE date=?").get(date).n, 0,
+      "the route must actually remove the sessions, or this test proves nothing about orphans");
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM availability_day WHERE date=?").get(date).n, 1,
+      "and the answer is left behind, because availability is keyed by date and nothing cascades to it");
+
+    const r = runRetention(w.db, { pattern: w.pattern, currentKey: w.pattern.season.key });
+    assert.equal(r.seasons.removed.length, 0, "with no season expiring — the case the old sweep could not reach");
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM availability_day WHERE date=?").get(date).n, 0,
+      "the nightly run must clear it");
+  } finally { w.close(); }
+});

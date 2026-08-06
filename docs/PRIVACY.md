@@ -92,7 +92,11 @@ Roughly 40 volunteers per department. Ordinary contact data, no special categori
 - **Retention:** **two seasons of history, then delete**, which keeps "is this person active" answerable across
   a boundary without accumulating years of who-taught-what. Implemented and configurable in
   `config/pattern.json` under `retention`; it runs as part of the nightly backup, so it is only as reliable as
-  that cron line. Notifications and invitations are bounded separately, by days rather than seasons.
+  that cron line. Notifications, invitations and the change log are bounded separately, by days rather than seasons.
+  Availability answers are keyed by date rather than by season, so nothing in the database cascades to them: the
+  nightly run sweeps any answer for a date that no longer has sessions. That matters after a cancellation — mark a
+  class date as a holiday and the sessions go, leaving answers for a date the app can no longer show anybody. The
+  sweep used to happen only in the same run as a season expiring, which in normal operation is almost never.
 - **Transfers:** none outside the EU, provided the host stays in the EU. Worth confirming where Lyon's server
   physically is.
 

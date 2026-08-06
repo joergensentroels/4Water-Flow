@@ -60,17 +60,39 @@ export function pruneSeasons(db, { keep, currentKey = null }) {
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
 
-  // Availability rows are keyed by date, not by season, so cascade does not reach them. Sweep the ones that
-  // no longer belong to any session — otherwise a deleted season leaves every volunteer's answers behind,
-  // which is precisely the data the retention rule exists to remove.
-  const orphaned = db.prepare(`SELECT COUNT(*) n FROM availability_day
-                                WHERE date NOT IN (SELECT date FROM sessions)`).get().n
-                 + db.prepare(`SELECT COUNT(*) n FROM availability_hour
-                                WHERE date NOT IN (SELECT date FROM sessions)`).get().n;
-  db.prepare("DELETE FROM availability_day WHERE date NOT IN (SELECT date FROM sessions)").run();
-  db.prepare("DELETE FROM availability_hour WHERE date NOT IN (SELECT date FROM sessions)").run();
+  // Sweep what this cascade just orphaned. The same sweep also runs unconditionally from runRetention, for the reason
+  // written on pruneOrphanedAvailability below — a season being dropped is not the only way a date loses its sessions.
+  const orphaned = pruneOrphanedAvailability(db).removed;
 
   return { removed: counted, keptCount: all.length - doomed.length, orphanedAvailability: orphaned };
+}
+
+// Availability rows are keyed by DATE, not by season, so no foreign key reaches them: delete the sessions on a date
+// and every volunteer's answer for that date stays behind, personal data with nothing left to justify it.
+//
+// This used to be six lines inside pruneSeasons, BELOW its `if (doomed.length === 0) return` — so it ran only when a
+// season was dropped in the same call. Since the default is to keep two seasons and an association normally has two,
+// the steady state drops nothing, and in the steady state the sweep never ran at all.
+//
+// It is reachable in two ordinary clicks, which is what makes it worth fixing rather than noting: volunteers answer
+// availability for a date, an admin marks that date as a holiday with no classes, and `DELETE FROM sessions WHERE
+// season_id=? AND date=?` in the holiday route takes the sessions. Measured: with two seasons and keep=2 the answers
+// survive a retention run ten years later; with four seasons they are swept. Same data, same code, different day.
+//
+// The test that covered the sweep created a droppable season in its own setup, so it exercised the only path on which
+// the sweep could run. A check whose fixture only reaches the working case cannot report the broken one.
+//
+// Dates are not filtered to the past. An orphaned FUTURE date could in principle become live again — an admin who
+// cancels 24 December and then changes their mind re-seeds the sessions — and that volunteer would have to answer
+// again. That is the right trade: while the sessions are gone the answer is unreachable from every screen in the app,
+// because availability is rendered from sessions, so keeping it stores personal data nobody can see or use.
+export function pruneOrphanedAvailability(db) {
+  const orphan = "date NOT IN (SELECT date FROM sessions)";
+  const removed = db.prepare(`SELECT COUNT(*) n FROM availability_day WHERE ${orphan}`).get().n
+                + db.prepare(`SELECT COUNT(*) n FROM availability_hour WHERE ${orphan}`).get().n;
+  db.prepare(`DELETE FROM availability_day WHERE ${orphan}`).run();
+  db.prepare(`DELETE FROM availability_hour WHERE ${orphan}`).run();
+  return { removed };
 }
 
 // Spent and dead invitations. Found by asking where else an unbounded thing was hiding after two list-size
@@ -101,7 +123,11 @@ export function runRetention(db, { pattern, currentKey, now = new Date() }) {
   const invites = pruneInvitations(db, { olderThanDays: cfg.notificationDays, now });
   const seasons = pruneSeasons(db, { keep: cfg.seasons, currentKey });
   const audit = pruneAudit(db, { olderThanDays: cfg.auditDays, now });
-  return { config: cfg, notifications: notes, invitations: invites, seasons, audit };
+  // Unconditionally, and after the cascade above rather than before it: whatever pruneSeasons orphaned is already
+  // gone by now, so this call is a no-op in that case and the whole point of it is the case where pruneSeasons
+  // dropped nothing. A holiday cancellation orphans availability on a day no season is due to expire.
+  const availability = pruneOrphanedAvailability(db);
+  return { config: cfg, notifications: notes, invitations: invites, seasons, audit, availability };
 }
 
 // The audit trail holds names, so it cannot be kept forever without a reason — and it cannot be dropped after a
