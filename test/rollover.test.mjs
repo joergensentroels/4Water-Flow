@@ -281,6 +281,7 @@ test("package.json does not claim a version some other commit already holds", ()
   for (const tag of mine) {
     const at = execSync(`git rev-list -n 1 ${tag}`, { cwd: ROOT, encoding: "utf8" }).trim();
     const behind = execSync(`git rev-list --count ${tag}..HEAD`, { cwd: ROOT, encoding: "utf8" }).trim();
+    // deadassert: dormant — no tag names the current version between releases, which is the ordinary state; the test below is what stays live
     assert.equal(at, head,
       `package.json says ${pkg.version} and the tag ${tag} points ${behind} commit(s) earlier. Whatever is here is not `
       + `what that name means. Bump the version — tagging HEAD is a separate decision.`);
