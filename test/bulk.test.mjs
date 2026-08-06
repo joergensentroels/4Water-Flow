@@ -15,7 +15,7 @@ const withWorld = (opts, fn) => async () => {
 // ---- scope selection ----------------------------------------------------------------------------------
 test("bulk scopes are derived from the data, not assumed", withWorld({}, async (w) => {
   const t = makeT("en");
-  const rows = datesNeedingAnswer(w.db, w.seasonId);
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
   const scopes = bulkScopes(t, rows);
 
   const configured = new Set(w.pattern.weekly.map((x) => x.dayOfWeek));
@@ -28,7 +28,7 @@ test("bulk scopes are derived from the data, not assumed", withWorld({}, async (
 }));
 
 test("each scope selects exactly the dates it claims to", withWorld({}, async (w) => {
-  const rows = datesNeedingAnswer(w.db, w.seasonId);
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
   const all = bulkTargets(rows, { scope: "all", value: "1" });
   assert.equal(all.rows.length, rows.length);
 
@@ -53,7 +53,7 @@ test("each scope selects exactly the dates it claims to", withWorld({}, async (w
 test("one press answers every date, and the page says how many", withWorld({}, async (w) => {
   const cookie = await w.signIn(w.people[0]);
   const { token } = await w.csrfFrom("/availability", cookie);
-  const expected = datesNeedingAnswer(w.db, w.seasonId).length;
+  const expected = datesNeedingAnswer(w.db, w.seasonId, w.today).length;
 
   const r = await w.post("/availability/bulk", cookie, new URLSearchParams({ csrf: token, scope: "all", value: "1" }));
   assert.equal(r.status, 303);
@@ -193,3 +193,43 @@ test("every availability radio announces the answer AND the date it belongs to",
   assert.ok(glyphLabels.length > 30);
   for (const g of glyphLabels) assert.match(g, /aria-hidden="true"/, `glyph not hidden from the reader: ${g}`);
 }));
+
+// ---- the past is not answerable ---------------------------------------------------------------------------------
+//
+// MEASURED IN A BROWSER at 375px on the demo: this form offered 46 dates of which TWELVE were in the past — a quarter
+// of a 6,528-pixel form spent on questions with no answer worth giving. The earliest field was 2026-06-28 with today at
+// 2026-08-06. Availability for a session that already happened changes nothing: the roster is done, and the retention
+// sweep deletes the row once its date has no sessions.
+//
+// Both halves are asserted, because the form and the write path share one allow-list and a cutoff on one alone would
+// let a stale POST write what the screen has stopped offering.
+test("neither the form nor the write path offers a date that has already passed", async () => {
+  const w = await makeWorld({ volunteers: 2 });
+  try {
+    // Move two dates behind today, which is the realistic state of a season in progress.
+    const early = w.db.prepare("SELECT DISTINCT date FROM sessions ORDER BY date LIMIT 2").all().map((r) => r.date);
+    w.db.prepare(`UPDATE sessions SET date = date(date, '-60 days') WHERE date IN ('${early.join("','")}')`).run();
+    const past = w.db.prepare("SELECT DISTINCT date FROM sessions WHERE date < ? ORDER BY date").all(w.today)
+      .map((r) => r.date);
+    assert.equal(past.length, 2, "the fixture must have a past, or this test cannot fail");
+
+    const offered = datesNeedingAnswer(w.db, w.seasonId, w.today).map((r) => r.date);
+    assert.ok(offered.length > 0, "and a future, or it proves nothing either");
+    assert.deepEqual(offered.filter((d) => d < w.today), [],
+      `the form still offers ${offered.filter((d) => d < w.today).join(", ")}`);
+
+    // The write path: a hand-made POST naming a past date must be ignored, while the same shape on a live date works.
+    const cookie = await w.signIn(w.people[0]);
+    const live = offered[0];
+    const hour = w.db.prepare("SELECT t.hour FROM sessions s JOIN timeslots t ON t.id=s.timeslot_id WHERE s.date=? LIMIT 1")
+      .get(past[0]).hour;
+    const liveHour = w.db.prepare("SELECT t.hour FROM sessions s JOIN timeslots t ON t.id=s.timeslot_id WHERE s.date=? LIMIT 1")
+      .get(live).hour;
+    await w.post("/availability", cookie, new URLSearchParams({
+      csrf: csrfFromCookie(cookie), [`slot:${past[0]}:${hour}`]: "1", [`slot:${live}:${liveHour}`]: "1",
+    }));
+    const rows = w.db.prepare("SELECT date FROM availability_hour WHERE person_id=?").all(w.people[0]).map((r) => r.date);
+    assert.ok(rows.includes(live), "the live date must have been written — otherwise this test passes on a broken POST");
+    assert.ok(!rows.includes(past[0]), `a past date was written anyway: ${rows.join(", ")}`);
+  } finally { w.close(); }
+});

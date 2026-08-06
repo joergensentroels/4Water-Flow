@@ -28,14 +28,26 @@ import { layout, formatDate, formatTime, csrfField, navFor } from "../views.mjs"
 //
 // `saveAvailability`'s allow-list is keyed `${date}:${hour}`, so it is unchanged by this; `bulkScopes` uses the
 // date only.
-export function datesNeedingAnswer(db, seasonId) {
+// `from` is REQUIRED, not defaulted, and that is the fix rather than an ergonomic preference.
+//
+// Measured in a browser at 375px on the demo: this form offered 46 dates of which TWELVE were in the past — 6,528
+// pixels of form, and a quarter of it was dates a volunteer cannot change anything about. The earliest field was
+// 2026-06-28 with today at 2026-08-06. Answering availability for a session that has already happened does nothing:
+// the roster is done, the retention sweep deletes the row when its date loses its sessions, and a planner reading
+// "free" for last month learns nothing. So it is not merely clutter, it is a quarter of the most-used volunteer screen
+// spent on questions with no answer worth giving.
+//
+// A default of null would be a third arm nothing takes — both call sites have a clock — and this project's rule 7 is
+// that a conditional needs two reachable arms or it is not a conditional.
+export function datesNeedingAnswer(db, seasonId, from) {
+  if (!from) throw new Error("datesNeedingAnswer needs the date to count from — a season's past is not answerable");
   return db.prepare(`
     SELECT s.date, t.hour, MIN(t.minute) AS minute, COUNT(*) AS sessions
       FROM sessions s JOIN timeslots t ON t.id = s.timeslot_id
-     WHERE s.season_id = :sid
+     WHERE s.season_id = :sid AND s.date >= :from
      GROUP BY s.date, t.hour
      ORDER BY s.date, t.hour
-  `).all({ sid: seasonId });
+  `).all({ sid: seasonId, from });
 }
 
 export function currentAnswers(db, personId) {
@@ -147,8 +159,13 @@ export function renderAvailability({ t, session, roles, who, rows, answers, flas
 // Writing. The form names carry date and hour, and the person comes from the SESSION — never from the form.
 // That is the whole defence against writing someone else's availability, and it is why there is no personId
 // field to tamper with.
-export function saveAvailability(db, personId, form, seasonId) {
-  const allowed = new Set(datesNeedingAnswer(db, seasonId).map((r) => `${r.date}:${r.hour}`));
+// `from` is threaded through here too, and making it a required argument of datesNeedingAnswer is what found this
+// caller: the allow-list this function validates writes against IS the list the form offers, so a cutoff applied to
+// one and not the other would let a stale or hand-made POST write answers for dates the screen has stopped showing.
+// Twelve tests went red the moment the parameter became mandatory, all of them here, which is the argument against
+// giving it a default.
+export function saveAvailability(db, personId, form, seasonId, from) {
+  const allowed = new Set(datesNeedingAnswer(db, seasonId, from).map((r) => `${r.date}:${r.hour}`));
   const setHour = db.prepare(`INSERT INTO availability_hour (person_id, date, hour, available) VALUES (:pid,:d,:h,:a)
                               ON CONFLICT (person_id, date, hour) DO UPDATE SET available = :a`);
   const clearHour = db.prepare("DELETE FROM availability_hour WHERE person_id = :pid AND date = :d AND hour = :h");

@@ -307,7 +307,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const sid = seasonId();
     send(res, 200, renderAvailability({
       t, session: c.session, roles: c.roles, who: c.who,
-      rows: sid ? datesNeedingAnswer(db, sid) : [],
+      rows: sid ? datesNeedingAnswer(db, sid, today()) : [],
       answers: currentAnswers(db, c.personId),
       flash: query.get("saved") ? { text: t("availability.saved") }
             : query.get("bulk") ? { text: t("availability.bulkDone", { n: query.get("bulk") }) } : null,
@@ -318,7 +318,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     const c = await postGate({ req, res });
     if (!c) return;
     const sid = seasonId();
-    if (sid) saveAvailability(db, c.personId, c.form, sid);
+    if (sid) saveAvailability(db, c.personId, c.form, sid, today());
     redirect(res, "/availability?saved=1");
   });
 
@@ -330,11 +330,12 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     if (!c) return;
     const sid = seasonId();
     if (!sid) return redirect(res, "/availability");
-    const rows = datesNeedingAnswer(db, sid);
+    // The same cutoff as the form, or a bulk action would answer for dates the form no longer shows.
+    const rows = datesNeedingAnswer(db, sid, today());
     const { rows: targets, value } = bulkTargets(rows, { scope: String(c.form.scope ?? ""), value: String(c.form.value ?? "") });
     if (targets.length === 0) return redirect(res, "/availability");
     const synthetic = Object.fromEntries(targets.map((r) => [`slot:${r.date}:${r.hour}`, value]));
-    saveAvailability(db, c.personId, synthetic, sid);
+    saveAvailability(db, c.personId, synthetic, sid, today());
     redirect(res, `/availability?bulk=${targets.length}`);
   });
 
