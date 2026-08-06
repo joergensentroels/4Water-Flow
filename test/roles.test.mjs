@@ -9,7 +9,7 @@ import { makeNotifier, notifyConfig, stubTransport } from "../src/notify.mjs";
 import { migrate } from "../src/db.mjs";
 import { loadPattern, validatePattern, roleSlotsFor } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
-import { eligiblePeopleFor, openSlotsFor, claimSlot, assignSlot, setAvailabilityDay } from "../src/queries.mjs";
+import { eligiblePeopleFor, openSlotsFor, ANY_DATE, claimSlot, assignSlot, setAvailabilityDay } from "../src/queries.mjs";
 import { autoRoster } from "../src/roster.mjs";
 import { saveProfile } from "../src/pages/profile.mjs";
 
@@ -154,7 +154,7 @@ test("the board only shows a volunteer the role slots they can actually fill", (
     { name: "Follow Only", preferredRole: "f", can: ["salsa"] },
   ] });
   const [me] = ids;
-  const offered = openSlotsFor(db, me, seasonId, "0000-00-00");
+  const offered = openSlotsFor(db, me, seasonId, ANY_DATE);   // the whole season on purpose, not by omission
   assert.ok(offered.length > 0);
   for (const s of offered) assert.notEqual(s.role, "l", "a follower must never be offered a leader slot");
   assert.ok(offered.every((s) => s.role === "f"), "and every offer carries its role so the page can say which");

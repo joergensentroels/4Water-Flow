@@ -293,7 +293,18 @@ export const isActive = (db, personId, seasonId, threshold = 1) => score(db, per
 // ---- The vagtbørs -------------------------------------------------------------------------------------
 // `fromDate` defaults to the beginning of time so callers that do not care get everything; the board passes
 // today, because offering a volunteer a slot that already happened is noise they have to read past.
-export function openSlotsFor(db, personId, seasonId, fromDate = "0000-00-00") {
+// The date every caller must state, and there is no default any more — because a permissive default is exactly how
+// two screens came to show the past. `/plan` opened six weeks before today and `/availability` offered twelve dates
+// that had already happened, and in both cases the mechanism was the same: a filter that a caller could simply not
+// apply. The board's one production caller was passing today() correctly, so nothing here was broken — but the shape
+// was, and the two commits before this one are what it costs when a caller forgets.
+//
+// ANY_DATE is for the tests that genuinely want the whole season regardless of when it is, and it is exported with a
+// name so that choice is legible at the call site rather than being the absence of an argument.
+export const ANY_DATE = "0000-00-00";
+
+export function openSlotsFor(db, personId, seasonId, fromDate) {
+  if (!fromDate) throw new Error("openSlotsFor needs the date to offer from — pass today(), or ANY_DATE on purpose");
   return db.prepare(`
     SELECT a.id AS assignmentId, s.id AS sessionId, s.date, a.role,
            t.day_of_week AS dayOfWeek, t.hour, t.minute,

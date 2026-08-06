@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { loadPattern } from "../src/config.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { readFileSync } from "node:fs";
-import { openSlotsFor, claimSlot, handBackSlot, score, setAvailabilityDay, setAvailabilityHour,
+import { openSlotsFor, ANY_DATE, claimSlot, handBackSlot, score, setAvailabilityDay, setAvailabilityHour,
          boardEmptyReason, BOARD_EMPTY_REASONS, GATE, PLANNER_WRITE_HONOURS } from "../src/queries.mjs";
 
 const pattern = loadPattern();
@@ -43,7 +43,7 @@ function world() {
 }
 
 const boardHas = (db, pid, seasonId, assignmentId) =>
-  openSlotsFor(db, pid, seasonId).some((s) => s.assignmentId === assignmentId);
+  openSlotsFor(db, pid, seasonId, ANY_DATE).some((s) => s.assignmentId === assignmentId);
 
 test("DoD 4 — the board shows a slot only to someone both capable and available", () => {
   const { db, seasonId, target, able, unavailable, notCapable, silent } = world();
@@ -71,10 +71,10 @@ test("a board emptied only by double-booking says so, rather than blaming availa
   const { db, seasonId, able, target } = world();
 
   // Take everything they could otherwise claim, so the only openings left are at times they are already on.
-  const mine = openSlotsFor(db, able, seasonId);
+  const mine = openSlotsFor(db, able, seasonId, ANY_DATE);
   assert.ok(mine.length > 0, "the fixture needs at least one claimable slot");
   for (const s of mine) claimSlot(db, s.assignmentId, able);
-  assert.equal(openSlotsFor(db, able, seasonId).length, 0, "nothing left for them to take");
+  assert.equal(openSlotsFor(db, able, seasonId, ANY_DATE).length, 0, "nothing left for them to take");
 
   // Re-open a slot at a time they are now busy: same date and hour as one they hold, different activity — which
   // the config supports, since more than one activity shares a timeslot.
