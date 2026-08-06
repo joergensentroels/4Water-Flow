@@ -306,8 +306,14 @@ test("the version guard rejects what it should and accepts what it should", asyn
   // node:sqlite import. A list of examples cannot notice the case nobody thought of; walking the table can.
   for (const [maj, [, min, pat]] of Object.entries(MIN_BY_MAJOR)) {
     assert.equal(nodeTooOld(`${maj}.${min}.${pat}`), false, `${maj}.${min}.${pat} is the floor and must be accepted`);
-    // Just below it, both one patch and one minor down, must be refused.
-    if (pat > 0) assert.equal(nodeTooOld(`${maj}.${min}.${pat - 1}`), true, `${maj}.${min}.${pat - 1} is below the floor`);
+    // The version immediately below the floor, computed rather than guarded. This was
+    // `if (pat > 0) assert.equal(nodeTooOld(`${maj}.${min}.${pat - 1}`)...)`, and every floor in the table ends in .0,
+    // so the guard was always false and the assertion never ran once — reported by tools/deadassert.mjs. The comment
+    // above it claimed to check "both one patch and one minor down" while only the minor case executed. This project's
+    // own rule is that a conditional needs two reachable arms or it is not a conditional; the fix is to remove the
+    // conditional by deriving the predecessor, which always exists.
+    const below = pat > 0 ? `${maj}.${min}.${pat - 1}` : `${maj}.${min - 1}.99`;
+    assert.equal(nodeTooOld(below), true, `${below} is immediately below the floor and must be refused`);
     assert.equal(nodeTooOld(`${maj}.${min - 1}.99`), true, `${maj}.${min - 1}.99 is below the ${maj}-line floor`);
     assert.equal(nodeTooOld(`${maj}.0.0`), true, `${maj}.0.0 predates the flag being lifted on that line`);
     // And comfortably above it must be fine.

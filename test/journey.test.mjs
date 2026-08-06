@@ -250,6 +250,7 @@ test("a real deployment can be set up and used end to end", async () => {
         assert.ok(Number(loc.searchParams.get("n")) > 0,
           "roster_gaps must report at least one gap, or it is the wrong code for what happened");
       } else {
+        // deadassert: dormant — this fixture is realistic, so it takes the roster_gaps branch; roster.test.mjs covers done
         assert.equal(loc.searchParams.get("filled"), null,
           "roster_done must not also carry a gaps-shaped parameter");
       }

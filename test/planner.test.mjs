@@ -236,11 +236,29 @@ test("the planner defaults to a four-week horizon, with links to widen it", with
   // Measured at 200 volunteers and six slots a week, the whole-season view rendered 534 KB of HTML because
   // every open slot carries a dropdown of every eligible person. Half a megabyte is not a phone screen.
   const until = new Date(Date.parse(`${w.today}T00:00:00Z`) + 28 * 86400000).toISOString().slice(0, 10);
-  const shown = [...body.matchAll(/name="assignmentId" value="(\d+)"/g)].map((m) => Number(m[1]));
-  for (const id of shown) {
-    const date = w.db.prepare("SELECT s.date FROM assignments a JOIN sessions s ON s.id=a.session_id WHERE a.id=?").get(id).date;
-    assert.ok(date <= until, `a slot beyond the horizon was rendered: ${date}`);
-  }
+
+  // A PARTITION, not a sweep over whatever the fixture happens to render. This was a loop over
+  // `matchAll(/name="assignmentId"/)`, and tools/deadassert.mjs reported the assertion inside it as never executed:
+  // the default fixture assigns nobody, so the page contains no assignment forms and the loop body was dead. The
+  // horizon test did not test the horizon — it tested that two links exist — and that is class J exactly, in the test
+  // written because a 534 KB page had been measured.
+  //
+  // So put one assignment on each side of the boundary and require the page to contain the near one and not the far
+  // one. Both directions, because "the far one is absent" is also satisfied by a page that renders nothing at all,
+  // which is precisely how this went unnoticed.
+  const near = w.db.prepare(`SELECT a.id, s.date FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              WHERE s.date >= ? AND s.date <= ? ORDER BY s.date LIMIT 1`).get(w.today, until);
+  const far = w.db.prepare(`SELECT a.id, s.date FROM assignments a JOIN sessions s ON s.id=a.session_id
+                             WHERE s.date > ? ORDER BY s.date LIMIT 1`).get(until);
+  assert.ok(near && far, "the season must span the horizon, or this test cannot ask the question");
+  for (const row of [near, far]) w.db.prepare("UPDATE assignments SET person_id=?, state='confirmed' WHERE id=?")
+                                     .run(w.people[1], row.id);
+
+  const withBoth = await (await w.get("/planner", planner)).text();
+  assert.match(withBoth, new RegExp(`name="assignmentId" value="${near.id}"`),
+    `a slot on ${near.date}, inside the four-week window, must be on the page`);
+  assert.doesNotMatch(withBoth, new RegExp(`name="assignmentId" value="${far.id}"`),
+    `a slot on ${far.date} is past the horizon and must not be rendered — that is what keeps this page a phone page`);
   assert.match(body, /weeks=12/, "and there must be a way to see further");
   assert.match(body, /weeks=all/);
 

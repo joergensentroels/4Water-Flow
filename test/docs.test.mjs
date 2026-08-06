@@ -207,10 +207,22 @@ test("the config comment's own count of its placeholders is true", () => {
 
   const text = comment.join("\n");
   const WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
-  for (const m of text.matchAll(/\b(one|two|three|four|five|six|\d+)\s+(?:things?|items?|placeholders?)\b/gi)) {
-    const claimed = WORD[m[1].toLowerCase()] ?? Number(m[1]);
-    assert.equal(claimed, numbered.length,
-      `the comment says "${m[0]}" while listing ${numbered.length}. Either correct it or describe the list ` +
+  const COUNTS = /\b(one|two|three|four|five|six|\d+)\s+(?:things?|items?|placeholders?)\b/gi;
+  const claimsIn = (prose) =>
+    [...prose.matchAll(COUNTS)].map((m) => ({ said: m[0], n: WORD[m[1].toLowerCase()] ?? Number(m[1]) }));
+
+  // POSITIVE CONTROL FIRST. The comment states no count today — the stale "TWO THINGS BELOW" that caused this test was
+  // corrected when it was written — so the loop below has nothing to iterate, and tools/deadassert.mjs reported its
+  // assertion as never executed. Dormant is the correct state for this check, and it is indistinguishable from a regex
+  // that has stopped matching. So the detector is aimed at a planted claim before it is aimed at the real prose.
+  const planted = claimsIn("This section has three placeholders you must edit, and 12 items to read.");
+  assert.deepEqual(planted.map((c) => c.n), [3, 12],
+    "the count-in-prose detector no longer reads a count out of prose, so the check below is not dormant but blind");
+
+  for (const { said, n } of claimsIn(text)) {
+    // deadassert: dormant — the comment states no count today, so there is nothing to compare; the planted control above
+    assert.equal(n, numbered.length,
+      `the comment says "${said}" while listing ${numbered.length}. Either correct it or describe the list ` +
       `without counting it — a count in prose is what went stale here before.`);
   }
   // "Both" is a count of two wearing a different hat, and it is how the stale version survived a reading.

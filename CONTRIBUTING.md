@@ -73,6 +73,15 @@ all along, out of process. Chasing the list was still worth it, because four of 
 (see the header of `test/oidcguards.test.mjs`), but the entry that started it was a false alarm. **Before believing a
 line is dead, grep the test directory for something that reaches it, including through a subprocess.**
 
+**`node tools/deadassert.mjs` asks the question coverage cannot: which ASSERTIONS never run?** It reads the raw V8
+coverage Node writes under `NODE_V8_COVERAGE` — not filtered, unlike the `--test-coverage` report, which excludes test
+files by design — and reports every `assert…(` call site whose innermost coverage range has a count of zero. A green
+suite says nothing whatever about those. Its first run found five out of 2,302, and four were real: a horizon check
+looping over an empty match list, a boundary case behind `if (pat > 0)` when every floor in the table ends in `.0`, a
+same-time clash the fixture could not express, and one branch of a partition. An assertion that correctly never runs is
+marked in place with `// deadassert: dormant — reason` on the line above; a marker on an assertion that DOES run is
+reported too, so the markers cannot become a list of stale excuses.
+
 ## If you add a route, five audits will have an opinion
 
 They all walk `app.routes()` or `src/server.mjs` rather than a list somebody maintains, so a new route is covered

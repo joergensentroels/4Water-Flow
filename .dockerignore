@@ -43,3 +43,4 @@ node_modules/
 .github/
 *.md
 !README.md
+tools/deadassert.mjs

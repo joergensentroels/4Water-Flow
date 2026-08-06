@@ -14,14 +14,14 @@ import { autoRoster } from "../src/roster.mjs";
 import { saveProfile } from "../src/pages/profile.mjs";
 
 // A world where one class needs both roles and one workshop needs anybody.
-function world({ people = [] } = {}) {
+function world({ people = [], weekly = null } = {}) {
   const base = loadPattern();
   const pattern = validatePattern({
     ...base,
     activities: base.activities.map((a) =>
       a.key === "salsa" ? { ...a, needs: { l: 1, f: 1 } }
       : a.key === "workshop_yoga" ? { ...a, needs: { any: 1 } } : a),
-    weekly: [
+    weekly: weekly ?? [
       { dayOfWeek: 0, hour: 13, minute: 0, activities: ["salsa"] },
       { dayOfWeek: 0, hour: 16, minute: 0, activities: ["workshop_yoga"] },
     ],
@@ -277,12 +277,27 @@ test("the role appears on the slot wherever a slot is shown", async () => {
 // were safe and a direct planner assignment was not. tools/demo.mjs writes through assignSlot and produced
 // nine of them, one of which had the same person as both the leader and the follower of a single class.
 test("assignSlot refuses to book someone who is already busy at that time", () => {
+  // TWO activities at 13:00, which is what the real rhythm looks like — Wed 19:00 runs salsa and bachata at the same
+  // moment. The default fixture had one activity per time, so the "different activity, same time" case below could not
+  // exist in it: the assertion sat behind `if (clash)`, the query found nothing, and tools/deadassert.mjs reported it
+  // as never executed. The clash rule keys on date AND hour AND minute, so nothing but a same-minute pair can test it.
   const { db, ids } = world({
     people: [{ name: "Both", preferredRole: "b", can: ["salsa", "workshop_yoga"] },
              { name: "Other", preferredRole: "b", can: ["salsa", "workshop_yoga"] }],
+    weekly: [
+      { dayOfWeek: 0, hour: 13, minute: 0, activities: ["salsa", "workshop_yoga"] },
+      { dayOfWeek: 0, hour: 16, minute: 0, activities: ["workshop_yoga"] },
+    ],
   });
   const [both] = ids;
-  const [first, second] = slotsAt(db, 13);          // the salsa class: one leader slot, one follower slot
+  // Selected by ACTIVITY rather than by slotsAt's role ordering, which now returns three rows at 13:00 and puts the
+  // workshop's NULL role first.
+  const at13 = (key) => db.prepare(`SELECT a.id, a.role FROM assignments a
+      JOIN sessions s ON s.id=a.session_id JOIN timeslots t ON t.id=s.timeslot_id
+      JOIN activities act ON act.id=s.activity_id
+     WHERE t.hour=13 AND act.key=? AND s.date=(SELECT MIN(date) FROM sessions) ORDER BY a.role`).all(key);
+  const [first, second] = at13("salsa");            // the salsa class: one leader slot, one follower slot
+  assert.ok(first && second, "the salsa class must open both role slots");
 
   assert.equal(assignSlot(db, first.id, both, { expectPersonId: null }).ok, true);
 
@@ -295,11 +310,14 @@ test("assignSlot refuses to book someone who is already busy at that time", () =
   // Somebody else can, so the slot is not simply broken.
   assert.equal(assignSlot(db, second.id, ids[1], { expectPersonId: null }).ok, true);
 
-  // Nor a different activity at the same hour on the same date.
-  const clash = db.prepare(`SELECT a.id FROM assignments a
-      JOIN sessions s ON s.id=a.session_id JOIN timeslots t ON t.id=s.timeslot_id
-     WHERE a.person_id IS NULL AND t.hour=13 AND s.date=(SELECT MIN(date) FROM sessions) LIMIT 1`).get();
-  if (clash) assert.equal(assignSlot(db, clash.id, both, { expectPersonId: null }).reason, "already_booked");
+  // Nor a DIFFERENT activity starting at the same moment — the workshop that also runs at 13:00. No longer behind an
+  // `if`: the fixture above guarantees the slot exists, and if it ever stops existing this fails instead of skipping.
+  const [otherActivity] = at13("workshop_yoga");
+  assert.ok(otherActivity, "the fixture must open a second activity at 13:00 for this to be askable");
+  const across = assignSlot(db, otherActivity.id, both, { expectPersonId: null });
+  assert.equal(across.ok, false, "one person cannot teach salsa and run a workshop at the same moment");
+  assert.equal(across.reason, "already_booked");
+  assert.ok(across.clashesWith, "and the refusal must name the class they are already down for");
 
   // A DIFFERENT hour is fine — this must reject collisions, not the person.
   const later = slotsAt(db, 16)[0];
