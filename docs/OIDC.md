@@ -11,6 +11,11 @@ nobody put on the roster, a tampered `state`, and a replayed callback. The disco
 pointed at a provider with no well-known document, the app logs the failure and degrades to NextCloud's layout
 rather than breaking.
 
+`test/oidcguards.test.mjs` adds the guards that walk cannot reach from outside: a provider reporting
+`email_verified: false` on an address that matches a seeded volunteer must NOT adopt that record, a hostile `next`
+must not survive the round trip, a token endpoint answering 500 must produce a 502 page with no credential in it, and
+the status page must render whether or not the IdP can be reached.
+
 **So what is left unverified is NextCloud specifically**, and that is not a formality. Its endpoint paths, its
 claim names, whether it returns `name` or `preferred_username`, whether it honours PKCE, what it does with an
 unknown `scope` — every one is a property of their server, and a provider written to the spec tests this app

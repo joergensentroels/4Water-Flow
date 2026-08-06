@@ -61,6 +61,18 @@ Nothing checks it mechanically — a single-caller helper with a default is perf
 review: *what input takes the other branch, and does a test pass it?* `node --test --experimental-test-coverage`
 answers it faster than reading; branch percentage well below the rest of the file is the tell.
 
+**The uncovered-lines column is worth reading, but it means "not executed in THIS process" — not "not tested".** Read
+it as a list of questions, never as a verdict, and never read the percentages as a score. Several of the heaviest tests
+here — `test/oidc-endtoend.test.mjs`, the journey and first-run tests — `spawn` the server as a child process, and the
+coverage instrumentation cannot see into it. So the code those tests exercise hardest shows up as dead, which points
+the tool at exactly the most integration-heavy code in the project and gets it backwards.
+
+The first read of that column here reported the bodies of `GET /auth/oidc` and `GET /auth/callback` as unexecuted, and
+the conclusion drawn — that the OIDC front door had never been walked — was wrong; `oidc-endtoend` had been walking it
+all along, out of process. Chasing the list was still worth it, because four of the questions it raised had real answers
+(see the header of `test/oidcguards.test.mjs`), but the entry that started it was a false alarm. **Before believing a
+line is dead, grep the test directory for something that reaches it, including through a subprocess.**
+
 ## If you add a route, five audits will have an opinion
 
 They all walk `app.routes()` or `src/server.mjs` rather than a list somebody maintains, so a new route is covered
