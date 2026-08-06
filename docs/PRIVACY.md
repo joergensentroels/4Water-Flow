@@ -105,9 +105,20 @@ both as closed. It contradicted itself, in the part a board reads to answer whet
 actually be serviced.
 
 - **Access / portability:** a volunteer downloads their own data at `GET /me/export.json`; an admin fetches
-  anybody's at `GET /admin/person/:id/export.json`. JSON, one person per file: identity, capabilities, every
-  availability answer, every assignment, and whether a calendar feed is enabled — never the credential itself. A
-  whole season is also exportable as a spreadsheet at `GET /planner/season.csv`.
+  anybody's at `GET /admin/person/:id/export.json`. JSON, one person per file, and it covers **every table listed in
+  "What is stored" above** — identity, roles, capabilities, every availability answer, every assignment, the messages
+  the app has sent about them, any notes they wrote, any invitation addressed to them, and the actions they
+  themselves took from the change log. That completeness is enforced rather than promised: a test seeds a row for one
+  person in every table the schema holds personal data in and fails if the export comes back without it, so a table
+  added later cannot quietly fall out of a subject access request. It was added because three had — notes, the change
+  log and invitations were held by the app and missing from the file, while erasure had known about all three all
+  along.
+  **What the file deliberately does not contain:** the calendar credential or an invitation token (whether a feed is
+  enabled is theirs to know; the token would only be a liability in a downloaded file), and change-log rows where
+  somebody *else* acted on them — those are largely about the other person, and an administrator's identity is not
+  the requester's to receive. Rows recording what the requester did themselves include the full detail, since there
+  is nothing there they did not see at the time. A whole season is also exportable as a spreadsheet at
+  `GET /planner/season.csv`.
 - **Rectification:** a volunteer edits their own name, contact and dance role on their own page; an admin edits
   anyone's from Administration. Availability is always the volunteer's own.
 - **Erasure:** Administration → a person → Erase, in **two modes, because only the board can choose between

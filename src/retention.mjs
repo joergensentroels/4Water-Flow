@@ -263,6 +263,36 @@ export function exportPerson(db, personId) {
                       JOIN timeslots t ON t.id=s.timeslot_id JOIN activities act ON act.id=s.activity_id
                      WHERE a.person_id=? ORDER BY s.date, t.hour`),
     messagesAboutYou: q("SELECT created_at AS at, kind, body, status FROM notifications WHERE person_id=? ORDER BY id"),
+
+    // ---- the three tables this export used to walk straight past ------------------------------------------------
+    //
+    // Found by asking why `erasePerson`, twenty lines up, reaches ten tables while this function reads six. Erasure
+    // knows about `notes`, `audit` and `invitations` — it deletes the notes outright, pseudonymises the audit actor,
+    // scrubs an address out of `audit.detail`, and overwrites the invitation email. Every one of those is an
+    // admission that the table holds this person's personal data. The export, a hand-written list of queries, had
+    // never been told. Measured before changing anything: a note, an audit row and an invitation seeded for one
+    // person came back in none of them, with notifications present as the control proving the reader worked.
+    //
+    // Access and erasure are the same question asked twice — what do we hold about this person — and answering it in
+    // two places means one answer goes stale. The gate in test/privacy.test.mjs now derives the table list from the
+    // schema and fails until a new table is either exported or exempted with a reason, so the next one cannot
+    // silently be omitted.
+    //
+    // Their own notes, in full. Erasure DELETES these rather than relabelling them, on the grounds that a note is the
+    // person's own sentence and there is no version of it with the person taken out. The same reasoning makes it
+    // theirs to receive.
+    notesYouWrote: q(`SELECT n.at, s.date AS sessionDate, n.body
+                        FROM notes n JOIN sessions s ON s.id = n.session_id
+                       WHERE n.person_id=? ORDER BY n.at`),
+    // Invitations addressed to them. Just the address and the two timestamps — the token is a credential and stays
+    // out for the same reason `calendar_token_hash` does.
+    invitations: q("SELECT created_at AS at, email, accepted_at AS acceptedAt FROM invitations WHERE person_id=? ORDER BY id"),
+    // Actions THEY took, from the audit trail — and `detail` is included deliberately. It can name a third party
+    // (that is why scrubAuditDetail exists), which normally argues for holding it back under Art. 15(4); but these
+    // are rows recording what this person did themselves, so there is nothing here they did not already see at the
+    // time. Rows where they are the SUBJECT of somebody else's action are a different question and are not included:
+    // those are largely about the actor, and an admin's identity is not the requester's to receive.
+    actionsYouTook: q("SELECT at, action, subject, detail FROM audit WHERE actor_id=? ORDER BY id"),
   };
 }
 

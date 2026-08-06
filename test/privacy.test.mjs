@@ -221,3 +221,93 @@ test("nothing the notice says is NOT stored is in the schema", () => {
     "already — the notice said 'no attendance records' while assignments.attended existed:\n  " +
     contradicted.join("\n  "));
 });
+
+// ---- a subject access request must reach every table erasure reaches -------------------------------------------
+//
+// Access and erasure are the same question asked twice — what do we hold about this person — and the app answered it
+// in two places. `erasePerson` was told about ten tables; `exportPerson`, in the same file, was a hand-written list
+// of six queries, and nothing compared them. Measured before the fix: a note the person wrote, an audit row for an
+// action they took, and an invitation carrying their email were all held by the app and absent from their file. The
+// notification section was present, which is what proved the probe could see anything at all.
+//
+// So this does not check that three sections were added. It seeds one row for the person in EVERY table the schema
+// says is personal, exports, and requires each to be represented — with the mapping held against the schema in both
+// directions, so a table added later is a failure until somebody decides. The reason a table may be left out has to
+// be written down; "nobody thought about it" cannot pass.
+const EXPORTED = {
+  people: "person",
+  person_roles: "roles",
+  capabilities: "capabilities",
+  availability_day: "availabilityByDay",
+  availability_hour: "availabilityByHour",
+  assignments: "assignments",
+  notifications: "messagesAboutYou",
+  notes: "notesYouWrote",
+  invitations: "invitations",
+  audit: "actionsYouTook",
+};
+
+test("every personal table is represented in a subject access export", async () => {
+  const { makeWorld } = await import("../tools/testkit.mjs");
+  const { exportPerson } = await import("../src/retention.mjs");
+  const { addNote } = await import("../src/notes.mjs");
+  const { recordAudit } = await import("../src/audit.mjs");
+
+  // The mapping is held against the schema, not maintained beside it. A new personal table fails here first.
+  const { tables } = schema();
+  const personal = tables.filter((t) => !(t in NOT_PERSONAL));
+  assert.deepEqual(personal.slice().sort(), Object.keys(EXPORTED).sort(),
+    "a personal table is not accounted for in the export: decide whether a subject access request must include it, "
+    + "add it to exportPerson and map it here — or, if it genuinely holds nothing a person may ask for, say why");
+
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const me = w.people[0];
+    const person = w.db.prepare("SELECT name, contact FROM people WHERE id=?").get(me);
+    const session = w.db.prepare("SELECT id FROM sessions ORDER BY date LIMIT 1").get();
+    // One row in each of the three that used to be missed, so the assertion below has something to find.
+    addNote(w.db, session.id, { personId: me, authorName: person.name, body: "sentinel-note-body" });
+    recordAudit(w.db, { actorId: me, actorName: person.name, action: "sentinel_action", subject: "s", detail: "d" });
+    w.db.prepare("INSERT INTO invitations (email, token, role_id, created_at, person_id) VALUES (?,?,?,?,?)")
+        .run("sentinel@example.org", "sentinel-token", 1, new Date().toISOString(), me);
+    w.db.prepare(`INSERT INTO notifications (kind, person_id, period, channel, body, status, created_at)
+                  VALUES (?,?,?,?,?,?,?)`)
+        .run("nudge", me, "2026-W40", "mattermost", "sentinel-message", "sent", new Date().toISOString());
+    w.db.prepare("INSERT OR IGNORE INTO availability_day (person_id, date, available) VALUES (?,?,1)")
+        .run(me, w.db.prepare("SELECT date FROM sessions ORDER BY date LIMIT 1").get().date);
+    w.db.prepare("INSERT OR IGNORE INTO availability_hour (person_id, date, hour, available) VALUES (?,?,?,1)")
+        .run(me, session ? w.db.prepare("SELECT date FROM sessions ORDER BY date LIMIT 1").get().date : "2026-01-01", 19);
+    w.db.prepare(`INSERT OR IGNORE INTO capabilities (person_id, activity_id)
+                  VALUES (?, (SELECT id FROM activities LIMIT 1))`).run(me);
+    // 'confirmed', not 'locked': the schema's CHECK allows only proposed/confirmed, and the first attempt here used
+    // the word the PLAN screen shows rather than the one the column stores.
+    w.db.prepare(`INSERT INTO assignments (session_id, person_id, state) VALUES (?,?,'confirmed')`).run(session.id, me);
+
+    const file = exportPerson(w.db, me);
+    assert.ok(file, "the fixture must produce an exportable person");
+
+    // Each mapped table must have a section, and the section must not be empty — an empty array is what a forgotten
+    // query and a genuinely empty table look like from here, and only one of them is acceptable.
+    const empty = [];
+    for (const [table, key] of Object.entries(EXPORTED)) {
+      assert.ok(key in file, `${table} maps to "${key}" and the export has no such section`);
+      const v = file[key];
+      const populated = Array.isArray(v) ? v.length > 0 : Boolean(v);
+      if (!populated) empty.push(`${table} -> ${key}`);
+    }
+    assert.deepEqual(empty, [],
+      "the fixture put a row in each of these tables for this person and the export came back empty for them:\n  "
+      + empty.join("\n  "));
+
+    // And the values, because a section can exist, be non-empty, and still not contain what was seeded — which is
+    // how a query joined to the wrong column would pass everything above.
+    const text = JSON.stringify(file);
+    for (const sentinel of ["sentinel-note-body", "sentinel_action", "sentinel@example.org", "sentinel-message"]) {
+      assert.ok(text.includes(sentinel), `the export does not contain ${sentinel}, which is this person's own data`);
+    }
+    // The credential half of the bargain, asserted in the same place so it cannot drift: whether a feed exists is
+    // theirs to know, the token is not, and neither is an invitation token.
+    assert.ok(!text.includes("sentinel-token"), "an invitation token is a credential and must not be in a download");
+    assert.ok(!/calendar_token_hash|calendarTokenHash/.test(text), "nor the calendar credential");
+  } finally { w.close(); }
+});
