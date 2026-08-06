@@ -60,12 +60,15 @@ const countAt = (fns, offset) => {
   return best ? best.count : null;   // null = no range covers it, which means the script never loaded
 };
 
+let reportedTests = null;   // what the runner said, kept because a document claims it and nothing could check that
+
 function collect(args) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "4water-cov-"));
   try {
     try {
-      execFileSync(process.execPath, ["--test", ...args],
+      const out = execFileSync(process.execPath, ["--test", ...args],
         { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NODE_V8_COVERAGE: dir } });
+      reportedTests = Number(out.match(/^\s*(?:ℹ\s*)?tests (\d+)\s*$/m)?.[1]) || null;
     } catch (e) {
       // A failing suite still writes coverage, and a report about a red suite is misleading rather than useful.
       const out = String(e.stdout ?? "") + String(e.stderr ?? "");
@@ -145,4 +148,42 @@ if (dormant.length && !dead.length) {
   console.log("\n  Dormant, each with its stated reason:");
   for (const d of dormant) console.log(`  ${d.file}:${d.line} — ${d.dormant}`);
 }
-process.exit(dead.length === 0 && staleMarkers.length === 0 && unseen.length === 0 ? 0 : 1);
+// ---- and the one claim a test was never able to check --------------------------------------------------------
+//
+// test/docs.test.mjs states plainly why PLAN.md's "N tests green" is checked BY HAND: knowing the real count means
+// running the suite, and a suite that spawns itself does not terminate. That reasoning is correct and it left the figure
+// unguarded — PLAN.md said 460 against a real 525, sixty-five stale, in the status line of the handover document.
+//
+// The irony is recorded in PLAN.md's own increment-AH row: three documents stating the test count were consolidated
+// "down to one". Reducing the number of places a fact lives does not stop the last one going stale; only a check does.
+// And the restriction was never about tools. This one has just run the suite, so the number is right here.
+//
+// Matched on "N tests green" specifically, not on any number near the word "tests" — several rows deliberately quote
+// HISTORICAL counts while describing how they went stale, and a check that failed on those would be demanding the
+// history be falsified.
+const docsClaiming = [];
+const trackedDocs = execFileSync("git", ["-C", ROOT, "ls-files", "*.md"], { encoding: "utf8" })
+  .trim().split(/\r?\n/).filter(Boolean);
+for (const rel of trackedDocs) {
+  const text = readFileSync(path.join(ROOT, rel), "utf8");
+  for (const m of text.matchAll(/(\d+) tests green/g)) docsClaiming.push({ rel, said: Number(m[1]) });
+}
+const wrongClaims = docsClaiming.filter((c) => c.said !== reportedTests);
+console.log("");
+if (reportedTests === null) {
+  console.log("            (no test count read from the runner, so document claims were not checked)");
+} else if (docsClaiming.length === 0) {
+  // BLIND, and said so: the phrase may have been reworded, in which case this check is looking at nothing.
+  console.log('            BLIND: no document says "N tests green", so nothing was compared. If that claim was'
+    + " reworded, teach this pattern the new wording — a check that matches nothing passes forever.");
+} else if (wrongClaims.length === 0) {
+  console.log(`            ${docsClaiming.length} document claim(s) of the test count agree with the runner `
+    + `(${reportedTests}).`);
+} else {
+  console.log(`            ${wrongClaims.length} document(s) state a test count the suite does not report `
+    + `(${reportedTests}):`);
+  for (const c of wrongClaims) console.log(`  ${c.rel}: says ${c.said}`);
+}
+
+process.exit(dead.length === 0 && staleMarkers.length === 0 && unseen.length === 0
+  && wrongClaims.length === 0 && (reportedTests === null || docsClaiming.length > 0) ? 0 : 1);
