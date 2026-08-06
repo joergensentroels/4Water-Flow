@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import path from "node:path";
 import { makeWorld } from "../tools/testkit.mjs";
 import { proposeNextSeason } from "../src/admin.mjs";
@@ -252,4 +253,52 @@ test("the licence tells the board the choice is theirs", () => {
   assert.match(l, /AGPL/);
   assert.match(l, /4water/);
   assert.match(l, /board/i, "a licence picked by the developer without saying so is a decision taken quietly");
+});
+
+// ---- the version must not claim a name a tag has already given to a different commit -------------------------------
+//
+// Found by asking where v1.0.0-rc.1 actually points: at commit 37, with HEAD at 152. ONE HUNDRED AND FIFTEEN commits
+// behind — every fix since, including the GDPR export gaps, the retention sweep that never ran, the two screens showing
+// the past, and the demo that crashed on a second run. And package.json still said `1.0.0-rc.1`, so the tree claimed to
+// BE rc.1 while rc.1 named something 115 commits older, and /status told an operator the same thing. The answer to "what
+// version am I running" was a name that meant a different program.
+//
+// The rule is release hygiene rather than taste: after tagging, the version string must move, or every commit that
+// follows misrepresents itself. Stated as the check that catches it — if a tag exists for this version and does not
+// point at HEAD, the version was never bumped.
+//
+// Deliberately NOT a rule about tagging. Whether HEAD deserves a tag, and what to call it, is a judgement; whether the
+// tree may claim a name that is already taken is not.
+test("package.json does not claim a version some other commit already holds", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const tags = execSync("git tag -l", { cwd: ROOT, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  assert.ok(pkg.version, "package.json must state a version");
+
+  const mine = tags.filter((t) => t === `v${pkg.version}` || t === pkg.version);
+  if (mine.length === 0) return;   // no tag for this version yet: the ordinary state between releases
+
+  const head = execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
+  for (const tag of mine) {
+    const at = execSync(`git rev-list -n 1 ${tag}`, { cwd: ROOT, encoding: "utf8" }).trim();
+    const behind = execSync(`git rev-list --count ${tag}..HEAD`, { cwd: ROOT, encoding: "utf8" }).trim();
+    assert.equal(at, head,
+      `package.json says ${pkg.version} and the tag ${tag} points ${behind} commit(s) earlier. Whatever is here is not `
+      + `what that name means. Bump the version — tagging HEAD is a separate decision.`);
+  }
+});
+
+// The control for the test above, and it is the half that matters: the check must FIRE when the version is a taken
+// name, not merely pass when it is a free one. Verified by reading the tag that caused this — v1.0.0-rc.1 exists, and a
+// tree claiming that version while sitting anywhere else must fail.
+test("and that check fires rather than merely passing on an untagged version", () => {
+  const tags = execSync("git tag -l", { cwd: ROOT, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  assert.ok(tags.length > 0, "there must be at least one tag, or the test above is vacuous for a different reason");
+  const head = execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
+  const stale = tags.filter((t) => execSync(`git rev-list -n 1 ${t}`, { cwd: ROOT, encoding: "utf8" }).trim() !== head);
+  assert.ok(stale.length > 0,
+    "every tag points at HEAD, so the check above cannot currently distinguish a bumped version from a stale one — "
+    + "which means it is passing for a reason unrelated to what it asserts");
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  assert.ok(!stale.some((t) => t === `v${pkg.version}` || t === pkg.version),
+    `the version claims ${pkg.version}, which one of these tags already holds elsewhere: ${stale.join(", ")}`);
 });

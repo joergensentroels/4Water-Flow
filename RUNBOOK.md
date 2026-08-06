@@ -294,7 +294,7 @@ slots are still on them, with the button that clears them.
 
 ## What version is this, and what would make it 1.0.0
 
-**`1.0.0-rc.1`.** `/status` shows it as its last line, which is the answer to the first question any support
+**`1.0.0-rc.2`.** `/status` shows it as its last line, which is the answer to the first question any support
 conversation asks. It is also the only thing that reads `package.json` at runtime.
 
 The suffix is deliberate and is the honest part. The app is feature-complete, its whole suite passes on a clean

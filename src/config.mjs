@@ -28,7 +28,7 @@ const readJson = (p) => {
 
 // Which build is running, read once at load and shown on /status.
 //
-// `1.0.0-rc.1`, not `1.0.0`, and the suffix is the honest part: this is feature-complete and the whole suite
+// A pre-release suffix, not `1.0.0`, and the suffix is the honest part: this is feature-complete and the whole suite
 // passes, and it has never been built as a container, never spoken to a real NextCloud, and never been used by a
 // volunteer. A version number that claims otherwise is the same overstatement as a comment asserting a cause the
 // code contradicts. What makes it 1.0.0 is written in RUNBOOK.md.
