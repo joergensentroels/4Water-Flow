@@ -136,7 +136,7 @@ test("it refuses to write backups inside a git work tree", () => {
 });
 
 test("it refuses a cloud-synced folder, and accepts an ordinary one", () => {
-  assert.match(refuseUnsafeDir(path.join(os.tmpdir(), "OneDrive - PDC A S", "backups")) ?? "", /cloud-synced/);
+  assert.match(refuseUnsafeDir(path.join(os.tmpdir(), "OneDrive - Contoso", "backups")) ?? "", /cloud-synced/);
   assert.match(refuseUnsafeDir(path.join(os.tmpdir(), "Dropbox", "backups")) ?? "", /cloud-synced/);
   const plain = mkdtempSync(path.join(os.tmpdir(), "4water-plain-"));
   try { assert.equal(refuseUnsafeDir(path.join(plain, "backups")), null); } finally { cleanup(plain); }
