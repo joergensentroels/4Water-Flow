@@ -1102,8 +1102,11 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     }
     const [hour, minute] = time.split(":");
     // __all, because the activity checkboxes share one name and Object.fromEntries keeps only the last.
+    // Cadence. Absent or "1" means every week and is not written to the config at all; validatePattern bounds it,
+    // so a hand-typed 99 is a startup error rather than a slot that quietly runs twice a year.
     const next = addWeeklyToForm(baseForEdit(), {
       dayOfWeek: c.form.dayOfWeek, hour, minute, activities: c.form.__all("activities"),
+      everyNth: c.form.everyNth,
     });
     logAudit(c, "admin.weeklyAdd", null, `day ${String(c.form.dayOfWeek)} at ${time}`);
     // fromDate = today, so adding a slot in August does not manufacture unfilled sessions back to January.

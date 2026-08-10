@@ -115,8 +115,9 @@ each is marked as a placeholder where it is set, with the reasoning beside it. D
 because the count went stale the moment a fourth was added: three documents said "three" while the file listed four.
 
 - **Clock times.** The Wednesday/Sunday rhythm is from the real export; the times were never stated anywhere.
-- **`board.cutoffDays`** — how late a shift may be handed back. Spec question Q18, unanswered; `2` is a guess.
-  Without a sensible value the shift exchange becomes the no-show channel.
+- ~~**`board.cutoffDays`**~~ — **settled by 4water: `7`.** A week's notice, so there is realistic time to find a
+  replacement. It does not block the hand-back; it marks it as short notice in the flash and in the channel
+  announcement, so a planner sees the urgency without the volunteer having to relay it. `2` was the placeholder.
 - **`calendar.eventMinutes`** — how long a shift runs. 90 is invented.
 - **`locale`** — `"en"`, while a complete Danish translation ships beside it. One word switches every
   volunteer-facing string and the page's declared language. `export.csvDelimiter` is set for a Danish spreadsheet
@@ -127,11 +128,13 @@ because the count went stale the moment a fourth was added: three documents said
 And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
 current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.
 
-And the one question worth asking before a season is planned in this: **does anything in the rhythm happen
-fortnightly or monthly rather than every week?** The weekly pattern creates a session on every matching date, so a
-fortnightly activity cannot be expressed — it would have to be added weekly and half its dates cancelled by hand.
-The spreadsheet has an `EveryNth` filter for exactly this and the app has no equivalent. If the answer is no, this
-costs nothing; if yes, it is a small schema change and far cheaper now than later.
+**Cadence.** 4water confirmed that not everything in the rhythm is weekly, so a weekly entry takes an optional
+`everyNth`: absent or `1` is every week, `2` is fortnightly, up to `8`. The Administration screen offers it when a
+slot is added and shows it for every slot in the list. Phase is counted in whole weeks from `season.from`, which is
+what makes a mid-season reseed idempotent — anchoring it anywhere else would move a fortnightly slot to the opposite
+week whenever somebody edited the pattern. Holidays do not shift the phase: a suppressed date uses up its turn, as a
+cancelled class does in life. **Which** slots are fortnightly is still an open question for 4water — the capability
+is there and the shipped `config/pattern.json` sets no cadence, so everything currently runs weekly.
 
 Three more, which are places the software differs from what the spec says — the reasoning is in `PLAN.md` under
 "Four places this app differs from the spec":

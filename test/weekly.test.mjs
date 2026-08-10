@@ -19,6 +19,91 @@ const withAdmin = (opts, fn) => async () => {
 };
 const reasonOf = (res) => new URL(res.headers.get("location"), "http://x").searchParams.get("r");
 
+// ---- cadence: not everything happens every week ----------------------------------------------------------
+// 4water confirmed that some of their rhythm is fortnightly or monthly. Before this, `seedSeason` created a session
+// on EVERY matching weekday, so such an activity could only be faked by adding it weekly and cancelling half its
+// dates by hand — invisible in the config and unexplained to a volunteer reading the plan.
+test("a fortnightly slot produces half the sessions of a weekly one, and a monthly slot a quarter", () => {
+  const base = loadPattern();
+  // Same weekday, same season, three cadences. One seed, so nothing about the calendar differs between them.
+  const p = validatePattern({
+    ...base,
+    weekly: [
+      { dayOfWeek: 0, hour: 13, minute: 0, activities: ["workshop_yoga"] },
+      { dayOfWeek: 0, hour: 15, minute: 0, activities: ["salsa"], everyNth: 2 },
+      { dayOfWeek: 0, hour: 17, minute: 0, activities: ["bachata"], everyNth: 4 },
+    ],
+  });
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrate(db);
+    seedStructure(db, p);
+    const at = (hour) => db.prepare(`SELECT COUNT(*) n FROM sessions s JOIN timeslots t ON t.id=s.timeslot_id
+                                      WHERE t.hour=?`).get(hour).n;
+    const [weekly, fortnightly, monthly] = [at(13), at(15), at(17)];
+    // The CONTROL, and it has to come first: a filter that skipped everything would satisfy every ratio below.
+    assert.ok(weekly >= 8, `only ${weekly} weekly sessions — the season is too short for this test to mean anything`);
+    assert.ok(fortnightly > 0 && monthly > 0, "a cadence filter that creates NOTHING is not a cadence filter");
+    // Ceil, because the first occurrence always runs: 9 weekly dates means 5 fortnightly, not 4.
+    assert.equal(fortnightly, Math.ceil(weekly / 2), `${weekly} weekly should give ${Math.ceil(weekly / 2)} fortnightly`);
+    assert.equal(monthly, Math.ceil(weekly / 4), `${weekly} weekly should give ${Math.ceil(weekly / 4)} every-fourth`);
+  } finally { db.close(); }
+});
+
+test("a mid-season reseed does not move a fortnightly slot to the other week", () => {
+  const base = loadPattern();
+  const p = validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 0, hour: 15, minute: 0, activities: ["salsa"], everyNth: 2 }] });
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrate(db);
+    seedStructure(db, p);
+    const before = db.prepare("SELECT date FROM sessions ORDER BY date").all().map((r) => r.date);
+    assert.ok(before.length >= 4, "not enough dates to detect a phase shift");
+    // PRECONDITION, and the test is worthless without it. Reseeding is idempotent for a WEEKLY slot too, so
+    // "the dates did not change" is true of a build where cadence does not exist at all. Caught by deliberately
+    // disabling the cadence filter and finding that this test did not notice. Fourteen days apart or nothing here
+    // is about fortnightly slots.
+    const gap = (Date.parse(`${before[1]}T00:00:00Z`) - Date.parse(`${before[0]}T00:00:00Z`)) / 86400000;
+    assert.equal(gap, 14, `the fixture is not actually fortnightly — ${gap} days between the first two dates`);
+    // Reseed from a date partway through, which is what the admin screen does after a pattern edit. If the phase
+    // were counted from the seeding loop's start rather than from season.from, this would create sessions on the
+    // OFF weeks — silently doubling the slot and moving shifts people may already be rostered onto.
+    seedStructure(db, p, { fromDate: before[2] });
+    const after = db.prepare("SELECT date FROM sessions ORDER BY date").all().map((r) => r.date);
+    assert.deepEqual(after, before, "the reseed changed which dates the fortnightly slot falls on");
+  } finally { db.close(); }
+});
+
+test("everyNth is bounded, so a typo cannot quietly empty the plan", () => {
+  const base = loadPattern();
+  const bad = (everyNth) => () => validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 0, hour: 15, minute: 0, activities: ["salsa"], everyNth }] });
+  assert.throws(bad(0), /everyNth/, "0 would mean a slot that never runs");
+  assert.throws(bad(99), /everyNth/, "99 is a typo, not a cadence");
+  assert.throws(bad(2.5), /everyNth/, "half a week is not a cadence");
+  // The control: the legal values must still pass, or the bound is just rejecting everything.
+  assert.ok(validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 0, hour: 15, minute: 0, activities: ["salsa"], everyNth: 2 }] }));
+  // And absent still means weekly, which is what every existing config relies on.
+  assert.ok(validatePattern({ ...base, weekly: [{ dayOfWeek: 0, hour: 15, minute: 0, activities: ["salsa"] }] }));
+});
+
+test("the admin screen can create a fortnightly slot, and says so afterwards", () => {
+  const base = loadPattern();
+  const added = addWeeklyToForm(base, { dayOfWeek: 2, hour: 18, minute: 0, activities: ["salsa"], everyNth: 2 });
+  const slot = added.weekly.find((w) => w.dayOfWeek === 2 && w.hour === 18);
+  assert.equal(slot.everyNth, 2, "the cadence chosen on the form did not reach the config");
+  // Weekly is the absence of the key, not the number 1 — so the config keeps saying nothing about cadence
+  // unless somebody actually chose one, and existing files do not all sprout `everyNth: 1`.
+  const plain = addWeeklyToForm(base, { dayOfWeek: 4, hour: 18, minute: 0, activities: ["salsa"], everyNth: 1 });
+  assert.ok(!("everyNth" in plain.weekly.find((w) => w.dayOfWeek === 4 && w.hour === 18)),
+    "a weekly slot should not carry everyNth: 1");
+  const blank = addWeeklyToForm(base, { dayOfWeek: 5, hour: 18, minute: 0, activities: ["salsa"], everyNth: "" });
+  assert.ok(!("everyNth" in blank.weekly.find((w) => w.dayOfWeek === 5 && w.hour === 18)),
+    "a blank cadence field must not become NaN in the config");
+});
+
 // ---- several slots on one day, which is the whole point -------------------------------------------------
 test("a day can carry several timeslots, and each generates its own sessions", () => {
   const base = loadPattern();
@@ -216,6 +301,11 @@ test("the admin screen lists the rhythm with translated day names", withAdmin({}
   assert.match(body, /søndag|Sunday/);
   assert.match(body, /19:00/);
   assert.match(body, /name="activities"/, "and offer the activities as checkboxes");
+  // The cadence control has to be ON THE PAGE. addWeeklyToForm is tested directly, so the handler would accept
+  // everyNth perfectly well with no way for an administrator to send it — a capability reachable only by POSTing
+  // by hand is not a capability. Both halves: the input, and the cadence stated for the slots already listed.
+  assert.match(body, /name="everyNth"/, "the weekly form must offer a cadence, not just accept one");
+  assert.match(body, /Every week|Hver uge/, "and each listed slot must say how often it runs");
 }));
 
 // ---- the direction nothing checked: an activity no weekly entry staffs -------------------------------------
@@ -233,11 +323,12 @@ test("the admin screen lists the rhythm with translated day names", withAdmin({}
 // DECLARED rather than forbidden: an activity with no fixed weekly slot is legitimate, and 4water has some. What is
 // not legitimate is one being absent by accident, which is indistinguishable from one being absent on purpose.
 const UNSTAFFED_ON_PURPOSE = {
-  sh: "The Steel House social. Real, and the export's recurring pattern does not place it on a fixed weekday — it " +
-      "happens on particular dates. Scheduling one means adding a weekly entry, which recurs, so a single date is " +
-      "not expressible today; that limitation is written in config/pattern.json and in RUNBOOK.md.",
-  workshop_other: "A workshop of no fixed subject, on no fixed weekday. Same position as sh: the capability exists " +
-      "so the roster can match on it the moment somebody adds a weekly entry for it.",
+  socials: "Confirmed by 4water: it WAS a staffed activity and was cancelled mid-season, which is why it is absent " +
+      "from the export's recurring pattern — the export is a snapshot taken after the cancellation, not evidence " +
+      "that it never ran. It is expected back. Kept as an activity so the capability survives the gap and returning " +
+      "it is a weekly entry rather than a migration. Was keyed `sh` after the venue; the activity is the socials.",
+  workshop_other: "A workshop of no fixed subject, on no fixed weekday. Same position as socials: the capability " +
+      "exists so the roster can match on it the moment somebody adds a weekly entry for it.",
   workshop_yoga: "Likewise absent from the export's recurring pattern. It WAS on the shipped weekend slot, which " +
       "the export gives to the two dances it names — an invention contradicting a stated fact, corrected with " +
       "the rhythm. The names are keys here rather than labels because test/seams.test.mjs forbids the labels in " +

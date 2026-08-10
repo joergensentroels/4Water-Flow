@@ -193,14 +193,18 @@ export function patternFromForm(current, form) {
 // Which days, which times, which activities in each slot. This was editable only by hand-editing
 // config/pattern.json, which CONTRIBUTING names as the way a volunteer breaks the config — and it matters
 // because the shipped pattern (one slot per day) was a placeholder, not a description of anything real.
-export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities }) {
+export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities, everyNth }) {
   const next = structuredClone(current);
+  // Absent, blank or 1 all mean "every week", and the key is then left OFF rather than written as 1 — so the config
+  // keeps saying nothing about cadence unless somebody has actually chosen one.
+  const every = Number(everyNth);
   next.weekly = [...next.weekly, {
     dayOfWeek: Number(dayOfWeek),
     hour: Number(hour),
     minute: Number(minute ?? 0),
     // A slot with no activity is meaningless; validatePattern rejects it, which is where the message comes from.
     activities: (Array.isArray(activities) ? activities : [activities]).filter(Boolean),
+    ...(Number.isInteger(every) && every > 1 ? { everyNth: every } : {}),
   }];
   // Keep the list in the order a human reads a week, so the admin screen does not shuffle after every edit.
   next.weekly.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.hour - b.hour || (a.minute ?? 0) - (b.minute ?? 0));

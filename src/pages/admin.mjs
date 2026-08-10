@@ -174,6 +174,9 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
       const used = weeklyUse[`${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`] ?? 0;
       return html`<div class="card">
         <b>${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}</b>
+        <!-- Shown for every slot, not only the fortnightly ones. A cadence visible only when it is unusual leaves a
+             reader unable to tell "weekly" from "this screen does not report cadence at all". -->
+        <p class="hint">${t("admin.weeklyEvery", { n: Number(w.everyNth ?? 1) })}</p>
         <p class="hint">${w.activities.map((k) => pattern.activities.find((a) => a.key === k)?.label ?? k).join(", ")}</p>
         <p class="hint">${t("admin.weeklyUsed", { n: used })}</p>
         ${toggle("/admin/weekly/remove", { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0 },
@@ -190,6 +193,17 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         </label>
         <label>${t("admin.weeklyTime")}
           <input type="time" name="time" value="19:00" required>
+        </label>
+        <!-- Cadence. The spreadsheet this app replaces had an EveryNth filter and the app had none, so a fortnightly
+             activity could only be faked by adding it weekly and cancelling half its dates by hand — which the config
+             would not show and nothing would explain to a volunteer reading the plan. Rendered through the same
+             singular mechanism as every count string here (the .one key), so the first option reads "Every week"
+             rather than "Every 1 weeks". NOTE: no backticks in this comment — it sits inside a tagged template
+             literal, where one would end the template and turn the next word into a property access. -->
+        <label>${t("admin.weeklyEveryLabel")}
+          <select name="everyNth">
+            ${[1, 2, 3, 4].map((n) => html`<option value="${n}">${t("admin.weeklyEvery", { n })}</option>`)}
+          </select>
         </label>
         <p class="hint">${t("admin.weeklyActivities")}</p>
         ${pattern.activities.map((a) => html`

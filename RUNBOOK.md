@@ -249,10 +249,14 @@ screen: the date appears in the list above with a **Classes run anyway** button.
 A date where somebody has already taken a shift is **refused**, naming how many. Free those under Planning first —
 removing the date would cancel on a volunteer who had agreed to be there. A date outside the season is refused too.
 
-This is also how a fortnightly slot is expressed: add the weekly rhythm entry, then close the alternate dates. That
-is one action per skipped date, which is laborious over a six-month season — if 4water runs anything on a repeating
-interval other than weekly, say so and it should become a property of the weekly entry instead. The spreadsheet's
-rules engine had `EveryNth` for this; nothing here does.
+This is **no longer** how a fortnightly slot is expressed. Under **Administration** → the weekly rhythm, a slot's
+**How often** field says every week, every 2nd, 3rd or 4th — the equivalent of the spreadsheet's `EveryNth` rule.
+Every slot in the list shows its cadence, so "every week" is stated rather than assumed. Closing alternate dates by
+hand was the old workaround, one action per skipped date across a six-month season; use the field instead.
+
+Cadence counts in whole weeks from the season's start date, so editing the rhythm mid-season does not shift a
+fortnightly slot to the opposite week. A public holiday does not shift it either: the suppressed date uses up its
+turn, exactly as a cancelled class does, and the slot resumes on its normal week.
 
 ## Public holidays — no sessions on them unless you say otherwise
 

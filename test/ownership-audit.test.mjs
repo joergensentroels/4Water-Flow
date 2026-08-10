@@ -77,8 +77,13 @@ const PROBES = new Map([
       "another volunteer released a shift that was not theirs, or was refused for some other reason");
     assert.equal(ownerOf(w, id), w.people[1], "the slot changed hands anyway");
 
-    assert.equal(reasonOf(await w.post(`/slot/${id}/hand-back`, a, new URLSearchParams({ csrf: csrfFromCookie(a) }))),
-      "handed_back", "the OWNER cannot hand it back either — the refusal above was not about ownership");
+    // Either success code will do. The board offers the NEAREST slot first, so whether that slot falls inside
+    // board.cutoffDays decides between `handed_back` and `handed_back_late` — and both mean the hand-back happened.
+    // Pinning the exact string coupled an OWNERSHIP probe to a scheduling number, and it broke the moment
+    // cutoffDays moved from its placeholder 2 to the decided 7 without anything about ownership changing.
+    const owner = reasonOf(await w.post(`/slot/${id}/hand-back`, a, new URLSearchParams({ csrf: csrfFromCookie(a) })));
+    assert.ok(owner === "handed_back" || owner === "handed_back_late",
+      `the OWNER cannot hand it back either — the refusal above was not about ownership (got ${owner})`);
   }],
 
   ["POST /board/:id/claim", async (w) => {

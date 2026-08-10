@@ -32,6 +32,25 @@ export function seedRoles(db, roles) {
 // `fromDate` limits session creation to that date onward. Boot and rollover want the whole season; an admin
 // adding a timeslot in August does NOT want sessions manufactured back to January, which would fill the plan
 // with unfilled historical slots nobody can do anything about.
+// Does this weekly entry run on this date? The spreadsheet this app replaces had an `EveryNth` filter and the app
+// had no equivalent, so a fortnightly or monthly activity could not be expressed at all — it would have to be added
+// weekly and half its dates cancelled by hand, which the config would not show and nothing would explain to a
+// volunteer reading the plan. 4water confirmed that some of their rhythm is not weekly, so this is that filter.
+//
+// Phase is counted in whole weeks from `season.from`, and that anchor matters more than it looks. The seeding loop
+// can start at `fromDate` — an admin editing the pattern reseeds from today onward — and anchoring on the loop's
+// start would flip every fortnightly slot to the opposite week whenever somebody touched the admin screen, silently
+// moving shifts people had already been rostered onto. Anchored on the season, a reseed is idempotent.
+//
+// Holidays deliberately do NOT shift the phase: the cadence is a property of the calendar, not of how many sessions
+// happened to be created. A suppressed date consumes its turn, exactly as a cancelled class does in real life.
+export function recurs(weekly, iso, seasonFrom) {
+  const everyNth = Number(weekly.everyNth ?? 1);
+  if (!Number.isFinite(everyNth) || everyNth <= 1) return true;
+  const days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${seasonFrom}T00:00:00Z`)) / 86400000);
+  return Math.floor(days / 7) % everyNth === 0;
+}
+
 export function seedStructure(db, pattern, { fromDate = null } = {}) {
   migrate(db);
   const tx = () => {
@@ -68,6 +87,7 @@ export function seedStructure(db, pattern, { fromDate = null } = {}) {
       if (suppressed(iso, hol)) { skipped++; continue; }
       for (const w of pattern.weekly) {
         if (w.dayOfWeek !== dow) continue;
+        if (!recurs(w, iso, pattern.season.from)) continue;
         const slotId = findSlot.get(w.dayOfWeek, w.hour, w.minute ?? 0).id;
         for (const key of w.activities) {
           const r = insSession.run(seasonId, iso, slotId, findAct.get(key).id);

@@ -1,8 +1,11 @@
-# Personal data in this app — a draft for the board to confirm
+# Personal data in this app
 
-This answers spec question Q16. **It is a description of what the software does plus a suggested position —
-not legal advice, and not yet a decision.** The board needs to confirm the controller, the lawful basis and
-the retention period; the rest is factual and can be checked against the code.
+This answers spec question Q16. **The controller, the lawful basis and the retention period below are 4water's
+position, confirmed rather than proposed.** Everything else here is factual and can be checked against the code.
+
+**This is not legal advice.** It is a description of what the software does, plus the association's settled
+position on the three questions the software cannot answer for itself. One item remains open and is marked where
+it arises: where Lyon's server physically sits, which is what the "no transfers outside the EU" statement rests on.
 
 ## What is stored, and where it comes from
 
@@ -79,7 +82,7 @@ Content-Security-Policy forbids them outright.
 
 Roughly 40 volunteers per department. Ordinary contact data, no special categories.
 
-## Suggested position for the board
+## The association's position
 
 - **Controller:** 4water Copenhagen (the association), since it decides who is on the roster and why.
 - **Processors:** 4water's **Lyon department**, who operate the host — this is an internal arrangement, but it

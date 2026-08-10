@@ -187,8 +187,13 @@ export function migrate(db) {
     --   * The two workshop subtypes have DIFFERENT consolidation letters in the export. Config had the same one
     --     for both, silently merging two codes the spreadsheet keeps apart — a consolidation view built on that
     --     data could not have told the two subtypes apart. Now distinct, as the export has them.
-    --   * the sh activity is not in the export's activity table at all; SH appears there in the CAPABILITY matrix. Making it
-    --     an activity was this build's decision, so its SH / H codes are invented rather than sourced.
+    --   * the socials activity is not in the export's activity table, and SH appears there only in the CAPABILITY
+    --     matrix. This file used to conclude that making it an activity was this build's decision. WRONG, and
+    --     corrected by asking 4water: it WAS a staffed activity and was cancelled mid-season, so the export is a
+    --     snapshot from after the cancellation. Absence of evidence, read as evidence of absence. Its SH / H codes
+    --     are therefore unverified rather than invented — nobody has checked them against a pre-cancellation export.
+    --     It was keyed sh after the venue (Steel House); 4water calls the activity the socials, and it is expected
+    --     back, so it stays an activity and returning it is a weekly entry rather than a migration.
     -- Nothing reads any of it, so none of that had a symptom — it would have acquired one the moment somebody built
     -- the consolidation view these columns exist for and took the codes as authoritative.
     --

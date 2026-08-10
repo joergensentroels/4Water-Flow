@@ -129,7 +129,9 @@ test("handing a slot back returns it to the exchange", withWorld({}, async (w) =
   await post(`/board/${id}/claim`, a, new URLSearchParams({ csrf: token }));
 
   const r = await post(`/slot/${id}/hand-back`, a, new URLSearchParams({ csrf: token }));
-  assert.equal(reasonOf(r), "handed_back");
+  // This test is about the ROW returning to the exchange, not about how near the shift is.
+  const back = reasonOf(r);
+  assert.ok(back === "handed_back" || back === "handed_back_late", `the hand-back did not succeed (got ${back})`);
   assert.equal(db.prepare("SELECT person_id FROM assignments WHERE id=?").get(id).person_id, null);
 
   // Visible to the other eligible volunteer again — the point of the whole feature.
@@ -283,6 +285,33 @@ async function claimFirst(w, personId) {
   return { cookie, token, id };
 }
 
+// A slot far enough out that handing it back is NOT short notice.
+//
+// claimFirst takes the nearest slot, and the default clock is the season's first day — so the nearest slot is
+// within a week of it. That sat outside the placeholder cutoff of 2 days and is inside the decided 7, which broke
+// every test that meant "an ordinary hand-back" and had only ever said "the first one". A test that depends on
+// being outside the window has to place itself outside the window, not inherit it from a number that moved.
+async function claimBeyondCutoff(w, personId) {
+  makeAvailableEverywhere(w.db, personId, w.today);
+  const cookie = await w.signIn(personId);
+  const cutoff = Number(w.pattern.board.cutoffDays);
+  const after = new Date(Date.parse(`${w.today}T00:00:00Z`) + (cutoff + 1) * 86400000).toISOString().slice(0, 10);
+  const row = w.db.prepare(`SELECT a.id FROM assignments a JOIN sessions s ON s.id = a.session_id
+                             WHERE a.person_id IS NULL AND s.date > ? ORDER BY s.date, a.id LIMIT 1`).get(after);
+  assert.ok(row, `no open slot more than ${cutoff} days out — an ordinary hand-back is not expressible in this fixture`);
+  const { token } = await w.csrfFrom("/board", cookie);
+  const r = await w.post(`/board/${row.id}/claim`, cookie, new URLSearchParams({ csrf: token }));
+  assert.equal(reasonOf(r), "claimed", "the fixture could not claim a far slot, so nothing below is testing hand-back");
+  return { cookie, token, id: row.id };
+}
+
+// The hand-back happened. WHICH success code it is depends on how near the shift is, which is board.cutoffDays'
+// business and not the business of a test about announcements, rows, or webhooks.
+const handedBack = (r, why) => {
+  const got = reasonOf(r);
+  assert.ok(got === "handed_back" || got === "handed_back_late", `${why} (got ${got})`);
+};
+
 test("handing a slot back announces it, naming how many others could take it", async () => {
   const { stub, opts } = withNotifier();
   const w = await makeWorld(opts);
@@ -292,7 +321,7 @@ test("handing a slot back announces it, naming how many others could take it", a
 
     const before = stub.calls.length;
     const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
-    assert.equal(reasonOf(r), "handed_back");
+    handedBack(r, "the hand-back that this announcement is about did not happen");
 
     const call = await waitFor(() => (stub.calls.length > before ? stub.calls.at(-1) : null));
     assert.match(call.body, /Open slot|Ledig vagt/);
@@ -341,10 +370,12 @@ test("and an ordinary hand-back's announcement says nothing about short notice",
   const w = await makeWorld(opts);
   try {
     for (const p of w.people) makeAvailableEverywhere(w.db, p, w.today);
-    const { cookie, token, id } = await claimFirst(w, w.people[0]);
+    // Deliberately a FAR slot. This is the control for the short-notice test above, so it has to be genuinely
+    // outside board.cutoffDays — and it must stay outside it whatever that number is set to.
+    const { cookie, token, id } = await claimBeyondCutoff(w, w.people[0]);
     const before = stub.calls.length;
     const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
-    assert.equal(reasonOf(r), "handed_back", "the default fixture must be well inside the deadline");
+    assert.equal(reasonOf(r), "handed_back", "the far slot was still treated as short notice — the control is broken");
     const call = await waitFor(() => (stub.calls.length > before ? stub.calls.at(-1) : null));
     assert.doesNotMatch(call.body, /short notice|kort varsel/i,
       `an ordinary opening must not claim urgency, or the marker means nothing: ${call.body}`);
@@ -359,7 +390,7 @@ test("a dead webhook does not break handing a slot back", async () => {
     const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
 
     assert.equal(r.status, 303, "a dead webhook must not become an error page");
-    assert.equal(reasonOf(r), "handed_back");
+    handedBack(r, "the hand-back itself failed, so this says nothing about the webhook");
     assert.equal(w.db.prepare("SELECT person_id FROM assignments WHERE id=?").get(id).person_id, null,
       "the slot really was released — reporting otherwise would make the volunteer retry");
 
@@ -374,7 +405,7 @@ test("no notifier configured at all: the board still works", async () => {
   try {
     const { cookie, token, id } = await claimFirst(w, w.people[0]);
     const r = await w.post(`/slot/${id}/hand-back`, cookie, new URLSearchParams({ csrf: token }));
-    assert.equal(reasonOf(r), "handed_back");
+    handedBack(r, "the hand-back failed, so this proves nothing about running without a notifier");
     assert.equal(w.db.prepare("SELECT COUNT(*) n FROM notifications").get().n, 0);
   } finally { w.close(); }
 });

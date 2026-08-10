@@ -114,15 +114,27 @@ in a document, not in the config. Judged operation by operation rather than as a
   created for the old one, by the policy stated on that screen — so a mid-season swap of one activity for another
   is a hand edit per date.
 - `ClearSet` has no equivalent beyond unassigning one slot at a time on the planner grid.
-- **`EveryNth` is the one that matters, and it is a hard limit rather than a chore.** `timeslots` carries a
-  `day_of_week` and a time, and `seedSeason` creates a session on *every* matching date. A fortnightly or monthly
-  activity cannot be expressed at all. An admin wanting one would have to add it weekly and then cancel half the
-  dates by hand, which the config would not show and nothing would explain to a volunteer looking at the plan.
+- ~~**`EveryNth` is the one that matters, and it is a hard limit rather than a chore.**~~ **BUILT.** It was the one
+  gap in the read-back that was a missing capability rather than a wording difference: `seedSeason` created a
+  session on *every* matching date, so a fortnightly activity could only be faked by adding it weekly and cancelling
+  half its dates by hand — invisible in the config and unexplained to a volunteer reading the plan.
 
-Nobody has asked 4water whether anything in their rhythm is fortnightly. If the answer is no, this costs nothing
-and the note can go. If the answer is yes, it is a schema change (a recurrence rule on `timeslots`) and much
-cheaper to know now than after a season has been planned. **This is the one gap found in the read-back that is a
-missing capability rather than a wording difference.**
+4water was asked, and the answer was **yes, some of the rhythm is not weekly.** A weekly entry now takes an optional
+`everyNth` (absent or `1` = weekly, up to `8`), settable from the Administration screen and shown for every slot.
+
+It did **not** need the schema change predicted here. Recurrence is a property of the weekly *entry*, not of the
+`timeslots` row — two entries at the same hour with different cadences legitimately share one timeslot, because a
+session is keyed by (date, timeslot, activity). So it is a config field and a filter in the seeding loop, and the
+database is untouched.
+
+The one thing worth knowing about it: **phase is anchored on `season.from`, not on the seeding loop's start.** The
+loop starts at `fromDate` when an admin edits the pattern, and anchoring there would have flipped every fortnightly
+slot to the opposite week on every admin save — silently moving shifts volunteers were already rostered onto. The
+test for that was initially vacuous (reseeding is idempotent for weekly slots too, so it passed on a build with no
+cadence at all) and was caught by deliberately disabling the filter and finding the test did not notice.
+
+Still open for 4water: **which** slots are fortnightly. The shipped config sets no cadence, so everything runs
+weekly until somebody says otherwise.
 
 **5. Score is now two numbers, and the spec describes one.** §2 defines Score as *"the number of activities a
 person has had this season"* with two uses: balancing the load, and the contribution record. 4water asked for the
@@ -311,8 +323,9 @@ up, add it there too.**
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
 - **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
-  The clock times (the Wed/Sun rhythm is from the real export; the times were never stated), `board.cutoffDays`
-  (spec Q18), `calendar.eventMinutes` — no shift length was ever stated, so 90 minutes is invented — and `locale`.
+  The clock times (the Wed/Sun rhythm is from the real export; the times were never stated),
+  `calendar.eventMinutes` — no shift length was ever stated, so 90 minutes is invented — and `locale`.
+  `board.cutoffDays` (spec Q18) is no longer among them: 4water settled it at `7`.
   `calendar.timezone` is **not** a placeholder: it is what puts a 19:00 shift at 19:00 in a subscriber's calendar,
   and getting it wrong shifts every event silently.
   Not counted here on purpose. This said "three" in three documents while the config comment listed four, within
@@ -443,7 +456,7 @@ what leaves the box, final read of every user-visible string in both locales.
 | | Placeholder in use | Confirm before |
 |---|---|---|
 | Clock times for the Wed/Sun pattern | `19:00` and `15:00` in `config/pattern.json` | B |
-| `board.cutoffDays` (spec Q18) | `2` | D |
+| ~~`board.cutoffDays` (spec Q18)~~ | **SETTLED by 4water: `7`** — a week's notice, so a replacement can realistically be found. Was `2` | ~~D~~ |
 | "Active volunteer" = current season or longer? | current season | G |
 | Whether swap (named two-party exchange) is wanted at all | not built — the open board likely absorbs it | after D lands; **still open** |
 | NextCloud OIDC issuer, client id, redirect URI | dev provider | any real deployment |

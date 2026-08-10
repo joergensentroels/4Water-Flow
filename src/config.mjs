@@ -93,6 +93,13 @@ export function validatePattern(p) {
     if (!Number.isInteger(w.hour) || w.hour < 0 || w.hour > 23) err(`hour must be 0..23, got ${w.hour}`);
     if (!Array.isArray(w.activities) || w.activities.length === 0) err("a weekly entry needs at least one activity");
     for (const k of w.activities) if (!keys.has(k)) err(`weekly references unknown activity "${k}"`);
+    // Optional, and absent means weekly. Bounded above because a slot recurring less often than every eighth week
+    // is almost certainly a typo, and a typo here removes sessions from the plan without saying anything.
+    if (w.everyNth !== undefined) {
+      if (!Number.isInteger(w.everyNth) || w.everyNth < 1 || w.everyNth > 8) {
+        err(`everyNth must be a whole number 1..8 (1 = every week, 2 = fortnightly), got ${w.everyNth}`);
+      }
+    }
   }
   // Every role the CODE depends on, not just the one it was checking.
   //
