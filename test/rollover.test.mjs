@@ -204,8 +204,32 @@ test("the project ships the files a handover needs", () => {
 test("package.json describes something runnable, with no dependencies", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   assert.equal(pkg.type, "module");
-  assert.ok(!pkg.dependencies, "a dependency appearing here is the story, not a detail");
-  assert.ok(!pkg.devDependencies);
+  // RUNTIME dependencies stay at zero, and that is the property worth protecting: a deployer clones this, runs
+  // node, and is done — no install step, no lockfile, nothing between them and the app.
+  assert.ok(!pkg.dependencies || Object.keys(pkg.dependencies).length === 0,
+    "a RUNTIME dependency appearing here is the story, not a detail — the app must run from a clone with no install");
+
+  // devDependencies are allowed one at a time, each with the reason it earns its place. An allowlist rather than a
+  // free hand: the rule was never "no packages", it was "nothing between a deployer and running this", and a
+  // test-only package does not sit there. Anything unlisted still fails.
+  const DEV_ALLOWED = {
+    "axe-core": "the accessibility gate in test/a11y.test.mjs. A hand-written UX pass over these screens got three "
+      + "of seven findings wrong and missed four unlabelled date inputs entirely — 'does every input have an "
+      + "accessible name' is not a judgement call and should not be checked by one.",
+    jsdom: "gives axe-core a DOM to walk. It has no layout engine, so colour-contrast is checked separately in a "
+      + "real browser; tools/a11y.mjs names every rule it therefore cannot run.",
+  };
+  const unexplained = Object.keys(pkg.devDependencies || {}).filter((d) => !(d in DEV_ALLOWED));
+  assert.deepEqual(unexplained, [],
+    `every devDependency needs its reason in DEV_ALLOWED — these have none: ${unexplained.join(", ")}`);
+  // And the image must never install them. .dockerignore keeps the tools out; the Dockerfile installs nothing.
+  // COMMENTS STRIPPED FIRST. The Dockerfile's own comment says "There is no `npm install` here because there is
+  // nothing to install" — and the first version of this assertion matched that sentence and failed on a file that
+  // was already correct. Same trap the CI-workflow check above documents.
+  const dockerfile = readFileSync(path.join(ROOT, "Dockerfile"), "utf8")
+    .split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  assert.ok(!/npm\s+(ci|install)/.test(dockerfile),
+    "the Dockerfile must not install anything — devDependencies are for the suite, not for the deployment");
   assert.match(pkg.engines.node, /22\.5|2[2-9]/, "node:sqlite needs >= 22.5");
   for (const s of ["test", "start", "demo", "backup", "bootstrap"]) {
     assert.ok(pkg.scripts[s], `npm run ${s} should exist — it is what the runbook tells people to type`);

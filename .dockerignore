@@ -46,3 +46,8 @@ node_modules/
 tools/deadassert.mjs
 tools/proseproof.mjs
 .githooks/
+
+# The accessibility gate: axe-core in jsdom, reachable only from `npm test`. It audits the pages the image
+# serves, but it is not part of serving them — and its dependencies are devDependencies the image never installs.
+tools/a11y.mjs
+tools/a11y-run.mjs

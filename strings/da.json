@@ -343,6 +343,8 @@
   "admin.weeklyAdd": "Tilføj tidsrum",
   "admin.weeklyDay": "Dag",
   "admin.weeklyTime": "Tid",
+  "admin.seasonFrom": "Første dag",
+  "admin.seasonTo": "Sidste dag",
   "home.needAnswerNone": "Du har ikke fortalt os, hvornår du kan hjælpe i denne sæson.",
   "home.needAnswerSome": "{remaining} af {total} datoer mangler stadig et svar.",
   "home.needAnswerCta": "Udfyld din tilgængelighed",

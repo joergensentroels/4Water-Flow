@@ -159,8 +159,8 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
       <form method="post" action="/admin/season">
         ${csrfField(session)}
         <label>${t("admin.season")} <input name="seasonKey" value="${pattern.season.key}" required></label>
-        <label><input type="date" name="seasonFrom" value="${pattern.season.from}" required></label>
-        <label><input type="date" name="seasonTo" value="${pattern.season.to}" required></label>
+        <label>${t("admin.seasonFrom")} <input type="date" name="seasonFrom" value="${pattern.season.from}" required></label>
+        <label>${t("admin.seasonTo")} <input type="date" name="seasonTo" value="${pattern.season.to}" required></label>
         <label>${t("admin.cutoffDays")}
           <input type="number" name="cutoffDays" min="0" max="30" value="${pattern.board?.cutoffDays ?? 0}">
         </label>
@@ -267,8 +267,8 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         <form method="post" action="/admin/season">
           ${csrfField(session)}
           <label>${t("admin.season")} <input name="seasonKey" value="${nextSeason.key}" required></label>
-          <label><input type="date" name="seasonFrom" value="${nextSeason.from}" required></label>
-          <label><input type="date" name="seasonTo" value="${nextSeason.to}" required></label>
+          <label>${t("admin.seasonFrom")} <input type="date" name="seasonFrom" value="${nextSeason.from}" required></label>
+          <label>${t("admin.seasonTo")} <input type="date" name="seasonTo" value="${nextSeason.to}" required></label>
           <input type="hidden" name="cutoffDays" value="${pattern.board?.cutoffDays ?? 0}">
           <button type="submit">${t("admin.rolloverDo", { key: nextSeason.key })}</button>
         </form>

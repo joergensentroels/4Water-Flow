@@ -15,5 +15,9 @@
     "bootstrap": "node tools/bootstrap.mjs",
     "precheck": "node tools/precheck.mjs"
   },
-  "license": "AGPL-3.0-or-later"
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "axe-core": "^4.13.0",
+    "jsdom": "^30.0.1"
+  }
 }

@@ -39,6 +39,49 @@ own errors teaches nobody anything.
 
 ---
 
+## SECOND PASS, 2026-08-11 — done by axe-core instead of by looking
+
+The 3-in-7 false rate is the argument for not doing this by judgement. `axe-core` now audits **17 page-states** —
+three viewers, two data states, the planner both with and without proposals — as `test/a11y.test.mjs`.
+
+**It found one thing this entire review missed:** four date inputs on the Administration screen wrapped in an
+**empty `<label>`**, so a screen reader announced "date entry" twice with no way to tell a season's first day from
+its last, and a sighted user could not tell either. Administration was in the "Not checked" list above. Fixed with
+visible **First day** / **Last day** text, which was the right fix for both audiences.
+
+### The part worth keeping: we already had a label test, and it was right
+
+`css-audit.test.mjs` has asserted *"every visible input is associated with a label"* since increment M, **with its
+own negative control**, and it passed on every run while those four inputs had no accessible name.
+
+It was not broken. `unlabelledInputs` strips `<label>…</label>` and looks at what inputs remain — so it measures
+**association**, and an input inside an empty label is associated perfectly well. Its control plants an input with
+*no* label, which shares the same proxy, so no amount of care in that test could ever have surfaced this.
+
+*Ask what the check would accept.* A test with a negative control can still be measuring the wrong thing, because
+the control usually measures the wrong thing in the same way. `test/a11y.test.mjs` now pins the exact markup where
+the two disagree, so the relationship is recorded rather than rediscovered — and so nobody deletes one as
+redundant without seeing which question they would stop asking.
+
+### Colour contrast: checked, and NOT in CI
+
+The item this review listed as "not checked" is now checked — in a real browser, because jsdom has no layout
+engine. Availability at **291 elements** with the collapsed `<details>` forced open, Administration at **316** with
+twelve opened: zero failures at WCAG AA. A deliberately unreadable element (1.92:1) was planted first and caught,
+because the previous contrast sweep in this project reported 105 clean pairs while looking at none of the elements
+in question.
+
+**This is manual.** `tools/a11y.mjs` names every rule it therefore cannot run — `color-contrast`, `target-size`,
+`scrollable-region-focusable` — and prints them on every report, so their absence stays visible instead of reading
+as a pass. Closing it in CI needs a real browser in the pipeline, which is a bigger decision than this was.
+
+### Still not covered
+
+Keyboard-only navigation, and the interaction between screen-reader order and the availability form's 153 radios.
+Both need a person, not a checker.
+
+---
+
 ## 1. A volunteer who has answered nothing is never asked to  — **REAL, FIXED**
 
 Signed in as Demo Twelve — the volunteer whose whole point is that they have answered nothing — the home screen

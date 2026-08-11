@@ -343,6 +343,8 @@
   "admin.weeklyAdd": "Add slot",
   "admin.weeklyDay": "Day",
   "admin.weeklyTime": "Time",
+  "admin.seasonFrom": "First day",
+  "admin.seasonTo": "Last day",
   "home.needAnswerNone": "You have not told us when you can help this season.",
   "home.needAnswerSome": "{remaining} of {total} dates still need an answer.",
   "home.needAnswerCta": "Fill in your availability",
