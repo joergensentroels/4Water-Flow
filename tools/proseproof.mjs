@@ -25,7 +25,7 @@
 // every run plants one: a needle in a comment, and a check that looks for it. If that planted check does NOT fail, the
 // stripper did not work and this refuses to report anything.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, appendFileSync, symlinkSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,23 @@ rmSync(wt, { recursive: true, force: true });           // git insists on creati
 try {
   git("worktree", "add", "-q", "--detach", wt, "HEAD");
   const at = (rel) => path.join(wt, rel);
+
+  // node_modules is not in git, so a fresh worktree has none — and the moment this project gained its first
+  // devDependency (axe-core, for the accessibility gate) the whole of test/a11y.test.mjs failed here with
+  // ERR_MODULE_NOT_FOUND and was reported as a check that "lost its needle". It had lost nothing; it could not
+  // load. A tool that runs the suite somewhere else has to give it the same packages, or every dependency added
+  // from here on reads as a prose defect. Linked rather than copied — it is large and only read here.
+  if (existsSync(path.join(ROOT, "node_modules"))) {
+    try {
+      symlinkSync(path.join(ROOT, "node_modules"), at("node_modules"), "junction");
+    } catch (e) {
+      // Refuse rather than report: a run where some tests cannot load produces failures indistinguishable from
+      // real ones, which is worse than no run.
+      console.error(`proseproof: could not link node_modules into the worktree (${e.code || e.message}).`
+        + "\n            Tests needing a devDependency would fail for that reason alone, so this run is void.");
+      process.exit(2);
+    }
+  }
 
   // Plant the control BEFORE stripping: a needle inside a comment in a file the stripper covers, and a check that
   // looks for it in the raw bytes. This is the defect's exact shape, so the sweep must kill it.

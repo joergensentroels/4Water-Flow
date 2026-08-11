@@ -269,7 +269,13 @@ test("CI runs the suite, the fresh-deployment check, and the backup restore", ()
   // Same reason, other tool: a check satisfied by prose about the thing it checks is this project's most
   // repeated defect, and the sweep for it only counts if the gate runs it.
   assert.match(ci, /proseproof/, "CI must check that no check in the suite is satisfied by a comment");
-  assert.ok(!/npm (install|ci)\b/.test(ci), "there is nothing to install");
+  // CI installs the test-only packages, and only those. This assertion used to forbid an install outright, which
+  // was the right rule while devDependencies were empty and the wrong one the moment the accessibility gate needed
+  // axe-core. What it protects now is the distinction that actually matters: the SUITE may install, a DEPLOYMENT
+  // may not. The Dockerfile check in the package.json test above holds the other half.
+  assert.match(ci, /npm ci\b/, "CI must install the test-only packages, or test/a11y.test.mjs cannot load");
+  assert.ok(!/npm install\b/.test(ci),
+    "use `npm ci` and not `npm install` — CI must build from the lockfile, not resolve versions afresh");
 });
 
 test("the licence tells the board the choice is theirs", () => {

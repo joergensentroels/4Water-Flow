@@ -1,6 +1,7 @@
-# The whole suite needs no network, no database, no services and no npm install — so CI is genuinely this
-# short. If this file ever grows a service container or an install step, something has gone wrong with the
-# zero-dependency rule rather than with the workflow.
+# The suite needs no network, no database and no services. It DOES now need an install: the accessibility
+# gate uses axe-core in jsdom, which are devDependencies. The RUNTIME dependency count is still zero — the app
+# runs from a clone with no install, the Dockerfile installs nothing — and that is the rule this file used to
+# state more broadly than it meant. A service container here would still be a sign something had gone wrong.
 name: test
 
 on:
@@ -23,13 +24,15 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Show what we are running on
         run: node --version
+      - name: Install the test-only packages
+        # Only axe-core and jsdom, and only for the suite. Nothing here reaches the image or a deployment.
+        run: npm ci
       - name: Run the suite
         # `npm test`, not `node --test`, and the difference is the point: npm test runs tools/precheck.mjs first and
         # this step used to skip it. Precheck exists because ONE unterminated template literal left a quarter of the
         # test files unrun with the process not terminating — the suite did not go red, it went unreliable, which is
         # the single failure mode a gate must not have. So the gate was running the weaker of the two available
-        # commands, and only because nobody had compared them. There is no npm install: `npm test` here is still just
-        # two node processes.
+        # commands, and only because nobody had compared them.
         run: npm test
       - name: No check in the suite may be satisfied by a comment
         # tools/proseproof.mjs strips every comment — JS, YAML, and config/pattern.json's _comment — in a throwaway
