@@ -62,6 +62,11 @@ export function renderPlanner({ t, session, roles, who, rows, eligibleByAssignme
       <form method="post" action="/planner/auto-roster">
         ${csrfField(session)}
         <button type="submit" class="secondary">${t("planner.autoRoster")}</button>
+        <!-- The most consequential button on this screen carried no text but its own label: nothing said whether
+             it overwrites what is already there, how much it touches, or whether it can be undone. Placed AFTER
+             the button so it reads as the answer to "what will this do", and because a paragraph sitting above a
+             button is the thing people skip on the way to pressing it. -->
+        <p class="hint">${t("planner.autoRosterWhat")}</p>
       </form>
       ${pendingProposals === 0 ? "" : html`
         <p class="hint">${t("planner.proposalsPending", { n: pendingProposals })}</p>

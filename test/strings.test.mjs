@@ -259,6 +259,8 @@ const NUMBER_INVARIANT = {
   "profile.answered": "'You have answered 1 of 60 dates this season' — the plural belongs to the 60, not the 1.",
   "status.gaps": "'1 of 20 slots in the next month are unfilled' — the noun agrees with the total, not the count.",
   "status.silent": "'1 of 12 active volunteers have not answered' — same n-of-N shape.",
+  "home.needAnswerSome": "'1 of 51 dates still need an answer' — the noun agrees with the 51, exactly as status.silent does.",
+  "availability.progress": "'1 of 51 dates answered — 50 still to go' — n-of-N, and the trailing count has no noun to agree with.",
   "status.silentMore": "'And 1 more.' — the noun is elided entirely, so there is nothing for it to agree with.",
   "outbox.all": "'Everything (1)' — a filter chip carrying a bare count in brackets.",
   // NOTE_MAX is a constant 280 in src/notes.mjs, not configuration — so {max} is never 1 and never can be. This
@@ -417,6 +419,12 @@ const GLOSSARY = {
 const NOT_DOMAIN = new Set(["the", "and", "you", "your", "that", "this", "for", "are", "have", "has", "not", "can",
   "will", "with", "from", "they", "them", "their", "was", "were", "been", "which", "what", "when", "who", "why",
   "how", "there", "here", "one", "all", "any", "some", "more", "most", "than", "then", "but", "because", "into",
+  // "help" reads as domain vocabulary in English — "when you can help" is how this app asks about availability —
+  // but it is ENGLISH PHRASING, not a concept with a fixed Danish word. Danish elides it: "Marker hvornår du kan",
+  // "hvor du har sagt, at du ikke kan". Listing it in the glossary with "kan" as its rendering would technically
+  // pass and blunt the check, since nearly every Danish string contains "kan". The concept with a fixed word is
+  // availability / tilgængelighed, which the glossary already carries.
+  "help", "helps",
   "out", "off", "still", "yet", "does", "did", "just", "only", "also", "already", "again", "back", "now", "date",
   "dates", "day", "days", "time", "times", "week", "weeks", "month", "minute", "minutes", "hour",
   "hours", "automatically", "somebody", "nobody", "everybody", "people",

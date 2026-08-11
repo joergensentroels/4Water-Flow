@@ -125,7 +125,7 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
         // server — the same noise `ratelimit.mjs` goes out of its way to bound.
         let pathname;
         try { pathname = decodeURIComponent(url.pathname); }
-        catch { return send(res, 400, renderError(400)); }
+        catch { return send(res, 400, renderError(400, req)); }
 
         if (req.method === "GET" && pathname.startsWith("/static/")) return serveStatic(pathname, res, renderError, req);
 
@@ -139,12 +139,12 @@ export function createApp({ renderError = (status) => `<h1>${status}</h1>` } = {
         // a form that posts to the wrong verb.
         const otherVerb = routes.some((r) => r.rx.test(pathname));
         const status = otherVerb ? 405 : 404;
-        return send(res, status, renderError(status));
+        return send(res, status, renderError(status, req));
       } catch (e) {
         const status = e?.status ?? 500;
         if (status >= 500) console.error("[http]", e);
         // Never echo the error to the client: messages here can carry file paths and query fragments.
-        return send(res, status, renderError(status));
+        return send(res, status, renderError(status, req));
       }
     },
     // Forwards a ready callback and returns the http.Server, so the caller can announce the bind only once it
@@ -192,7 +192,7 @@ function serveStatic(pathname, res, renderError, req) {
   const name = path.basename(pathname);                 // basename only: traversal is not expressible
   const ext = path.extname(name);
   const type = STATIC_TYPES[ext];
-  if (!type) return send(res, 404, renderError(404));
+  if (!type) return send(res, 404, renderError(404, req));
   const file = path.join(ROOT, "static", name);
   if (!existsSync(file)) return send(res, 404, renderError(404));
   const body = readFileSync(file);

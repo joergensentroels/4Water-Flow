@@ -11,7 +11,7 @@ import { rolesOf, requireRole, devSignIn, assertDevAllowed, oidcConfig, beginOid
 import { layout, navFor, formatDate, formatTime, formatRole, renderErrorPage, renderPrivacy, renderInvite } from "./views.mjs";
 import { slotOpenMessage, notifyConfig, makeNotifier } from "./notify.mjs";
 import { startJobs } from "./jobs.mjs";
-import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailability, bulkTargets } from "./pages/availability.mjs";
+import { datesNeedingAnswer, currentAnswers, renderAvailability, saveAvailability, bulkTargets, answerProgress } from "./pages/availability.mjs";
 import { renderHome, renderPlan } from "./pages/plan.mjs";
 import { renderBoard, flashFor } from "./pages/board.mjs";
 import { renderPlanner, plannerFlash } from "./pages/planner.mjs";
@@ -88,7 +88,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
   setInterval(() => limiter.sweep(), 60_000).unref?.();
 
   // Error pages need the layout and the current locale, both of which live here rather than in the router.
-  const app = createApp({ renderError: (status) => renderErrorPage(t, status) });
+  // The request is passed through so an error page can carry the viewer's own nav. It may be absent (the 400 for
+  // an undecodable path fires before anything is read), and then roles stays null and no nav is drawn.
+  const app = createApp({
+    renderError: (status, req) => {
+      const c = req ? ctx(req) : null;
+      return renderErrorPage(t, status, { signedIn: !!c?.session?.personId, roles: c?.session?.personId ? c.roles : null });
+    },
+  });
 
   // Every request resolves a session once. A fresh CSRF token is minted for anyone without one, so the
   // token is bound to the session rather than kept in a server-side map.
@@ -309,6 +316,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       t, session: c.session, roles: c.roles, who: c.who,
       rows: sid ? datesNeedingAnswer(db, sid, today()) : [],
       answers: currentAnswers(db, c.personId),
+      progress: sid ? answerProgress(db, c.personId, sid, today()) : null,
       flash: query.get("saved") ? { text: t("availability.saved") }
             : query.get("bulk") ? { text: t("availability.bulkDone", { n: query.get("bulk") }) } : null,
     }));
@@ -354,6 +362,9 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       t, session: c.session, roles: c.roles, who: c.who,
       mine: sid ? myUpcoming(db, c.personId, sid, today()) : [],
       score: sid ? score(db, c.personId, sid) : 0,
+      // Same helper the availability form's own counter uses, so the two screens cannot disagree about how far
+      // along somebody is.
+      progress: sid ? answerProgress(db, c.personId, sid, today()) : null,
       // Not derivable from the score: a stood-down volunteer keeps the shifts they already did, so the score
       // stays positive while the roster no longer holds them. See renderHome.
       status: db.prepare("SELECT status FROM people WHERE id = ?").get(c.personId)?.status ?? "active",

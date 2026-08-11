@@ -151,3 +151,64 @@ test("/healthz answers without a session, for the container probe", withWorld({}
   assert.equal(r.status, 200);
   assert.equal(await r.text(), "ok");
 }));
+
+// ---- the UX runthrough's real findings, and the two controls that keep them honest ---------------------------
+//
+// A volunteer who had answered nothing saw "Your upcoming slots", a score and an "Active volunteer" badge — the
+// screen reassuring the one person whose answer the rota was waiting on — with the only route to the form being a
+// nav link identical to every other. And a 51-row, 153-radio form gave no sense of how far along you were.
+//
+// Both read from ONE helper, answerProgress, so the home screen and the form cannot disagree about it.
+test("a volunteer who has answered nothing is asked to, and told how far along they are", async () => {
+  const { makeAvailableEverywhere } = await import("../tools/testkit.mjs");
+  const w = await makeWorld({ volunteers: 3 });
+  try {
+    const fresh = w.people[2];
+    const c = await w.signIn(fresh);
+    const rows = w.db.prepare("SELECT (SELECT COUNT(*) FROM availability_day WHERE person_id=:p)"
+      + " + (SELECT COUNT(*) FROM availability_hour WHERE person_id=:p) AS n").get({ p: fresh }).n;
+    assert.equal(rows, 0, "the fixture must start with a volunteer who has answered nothing");
+
+    const home = await (await w.get("/", c)).text();
+    assert.match(home, /have not told us when you can help/, "the home screen must ask, not just reassure");
+    assert.match(home, /href="\/availability"/, "and offer a way to the form");
+
+    const form = await (await w.get("/availability", c)).text();
+    assert.match(form, /0 of \d+ dates answered/, "the form must say how far along the volunteer is");
+
+    // THE CONTROL, and without it both assertions above would pass on a build that shows the prompt to everybody
+    // for ever: answer everything, and the ask must go away.
+    makeAvailableEverywhere(w.db, fresh, w.today);
+    const home2 = await (await w.get("/", c)).text();
+    const form2 = await (await w.get("/availability", c)).text();
+    assert.doesNotMatch(home2, /have not told us when you can help/, "answering everything must retire the prompt");
+    assert.match(form2, /Every date is answered/, "and the counter must say so rather than still counting down");
+  } finally { w.close(); }
+});
+
+test("the button that rewrites the season says what it will do", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const body = await (await w.get("/planner", await w.signIn(w.people[0]))).text();
+    const i = body.indexOf('action="/planner/auto-roster"');
+    assert.ok(i >= 0, "the auto-roster form must be on the planner");
+    // Scoped to the form itself: prose elsewhere on the page would satisfy a whole-body search while the button
+    // still stood alone, which is exactly what the review found.
+    const form = body.slice(i, body.indexOf("</form>", i));
+    assert.match(form, /Fills every open slot|Udfylder alle ledige/, "the button must explain itself where it is");
+  } finally { w.close(); }
+});
+
+test("an error page keeps the nav of whoever is looking at it", async () => {
+  const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin", "planner"] } });
+  try {
+    const vol = await (await w.get("/no-such-page", await w.signIn(w.people[2]))).text();
+    const adm = await (await w.get("/no-such-page", await w.signIn(w.people[0]))).text();
+    const out = await w.get("/no-such-page");
+    assert.match(vol, /href="\/board"/, "a signed-in volunteer must not be stranded on a 404");
+    assert.doesNotMatch(vol, /href="\/admin"/, "but must not be shown screens they cannot open");
+    assert.match(adm, /href="\/admin"/, "while an admin keeps their own links");
+    assert.equal(out.status, 404, "and the status is still 404");
+    assert.doesNotMatch(await out.text(), /href="\/board"/, "a signed-out visitor gets no nav at all");
+  } finally { w.close(); }
+});

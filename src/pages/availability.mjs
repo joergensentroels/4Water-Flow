@@ -66,6 +66,20 @@ const shown = (answers, date, hour) => {
   return d === undefined ? "" : String(d);
 };
 
+// How far along this volunteer is. ONE definition, used by the availability form's own counter AND by the prompt on
+// the home screen — two screens computing this separately is how they come to disagree, and a volunteer told "3
+// dates left" on one and "you have not answered" on the other believes neither.
+//
+// "Answered" means what it means everywhere else in this file: a stored answer at hour or day level. Silence is not
+// an answer, which is the whole reason the radio group is tri-state.
+export function answerProgress(db, personId, seasonId, from) {
+  const rows = datesNeedingAnswer(db, seasonId, from);
+  const answers = currentAnswers(db, personId);
+  let answered = 0;
+  for (const r of rows) if (shown(answers, r.date, r.hour) !== "") answered++;
+  return { total: rows.length, answered, remaining: rows.length - answered };
+}
+
 // Bulk setting. Opening the real page in a browser measured 3,750 pixels — 51 date rows and 153 radio
 // buttons, about four and a half phone screens. Answering that one tap at a time is exactly the chore that
 // makes people stop filling the form in, which is the bottleneck this whole project exists to unblock.
@@ -93,12 +107,19 @@ export function bulkScopes(t, rows) {
   };
 }
 
-export function renderAvailability({ t, session, roles, who, rows, answers, flash }) {
+export function renderAvailability({ t, session, roles, who, rows, answers, flash, progress = null }) {
   const scopes = bulkScopes(t, rows);
   const body = rows.length === 0
     ? html`<p class="empty">${t("availability.noDates")}</p>`
     : html`
       <h2>${t("availability.title")}</h2>
+      <!-- Where you are in it. Measured at 375px this form is 51 date rows and 153 radios — about four and a half
+           phone screens, with a single Save at the very bottom and, until now, nothing anywhere saying how far
+           along you were or how much was left. Same helper the home screen's prompt uses, so the two cannot
+           disagree about it. -->
+      ${progress ? html`<p class="hint"><b>${progress.remaining === 0
+          ? t("availability.progressDone")
+          : t("availability.progress", { answered: progress.answered, total: progress.total, remaining: progress.remaining })}</b></p>` : ""}
       <p class="hint">${t("availability.intro")} ${t("availability.onlyThese")}</p>
       <p class="hint">${t("privacy.notice")} <a href="/privacy">${t("privacy.link")}</a></p>
 

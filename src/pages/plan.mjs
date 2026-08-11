@@ -29,12 +29,23 @@ const slotLine = (t, r) => html`${formatTime(r.hour, r.minute)} · ${r.activityL
 // The score claim is now conditional on the status, and — the more useful half — a stood-down volunteer is TOLD.
 // Before this they got no indication at all: their upcoming list simply emptied, the nudges stopped, and the page
 // called them active. The only reading available to them was that the app was broken.
-export function renderHome({ t, session, roles, who, mine, score, status = "active", flash }) {
+export function renderHome({ t, session, roles, who, mine, score, status = "active", flash, progress = null }) {
   const onRoster = status === "active";
   const body = html`
     ${onRoster ? "" : html`<div class="flash bad">
       <b>${t("home.standDown")}</b><br><small>${t("home.standDownWhy")}</small>
     </div>`}
+
+    <!-- The one thing this screen is for, when it applies. A volunteer who had answered nothing saw "Your upcoming
+         slots", a score, and an "Active volunteer" badge — a screen actively reassuring the person whose answer the
+         whole rota is waiting on, with the only route to the form being a nav link identical to every other nav
+         link. Placed FIRST on purpose: a call to action underneath the reassurance is not a call to action. -->
+    ${progress && progress.remaining > 0 ? html`<div class="card">
+      <b>${progress.answered === 0
+            ? t("home.needAnswerNone")
+            : t("home.needAnswerSome", { remaining: progress.remaining, total: progress.total })}</b>
+      <p><a class="btn" href="/availability">${t("home.needAnswerCta")}</a></p>
+    </div>` : ""}
 
     <h2>${t("home.mine")}</h2>
     ${mine.length === 0

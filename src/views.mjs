@@ -75,11 +75,17 @@ const ERROR_KEY = {
 // `messageKey` overrides the default for a status that has more than one honest cause: a 403 from a stale
 // CSRF token is almost always a form left open overnight, and telling that person "you do not have access"
 // sends them to find an admin instead of pressing the button again.
-export function renderErrorPage(t, status, { signedIn = true, messageKey = null } = {}) {
+export function renderErrorPage(t, status, { signedIn = true, messageKey = null, roles = null } = {}) {
   const key = messageKey ?? ERROR_KEY[status] ?? "error.server";
   return layout({
     t,
     title: String(status),
+    // A signed-in person who mistyped a URL lost the whole nav bar and was left with a single "Home" link — the
+    // error page was the only screen in the app with no way to anywhere else. `roles` now comes from the request,
+    // so an admin keeps their admin links and a volunteer is not offered screens they cannot open. `null` means
+    // the caller could not tell (a parse failure, before any session is read) and then there is no nav at all,
+    // because a guessed one would offer a signed-out visitor links to gated pages.
+    nav: signedIn && roles ? navFor(t, roles, "") : [],
     body: html`
       <p class="empty">${t(key)}</p>
       <p><a class="btn secondary" href="${signedIn ? "/" : "/signin"}">${t(signedIn ? "nav.home" : "signin.title")}</a></p>`,
