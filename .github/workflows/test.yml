@@ -33,7 +33,20 @@ jobs:
         # test files unrun with the process not terminating — the suite did not go red, it went unreliable, which is
         # the single failure mode a gate must not have. So the gate was running the weaker of the two available
         # commands, and only because nobody had compared them.
-        run: npm test
+        #
+        # The failure is also echoed into an ANNOTATION, because reading the log needs a signed-in session with
+        # admin rights on the repo and reading an annotation does not. This workflow has NEVER passed — six runs,
+        # six failures — while README.md said CI "has never run: this repository has no remote yet". It had a
+        # remote and it had run; the failure was unreadable without signing in, so nobody looked.
+        run: |
+          set +e
+          npm test 2>&1 | tee /tmp/test-output.txt
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            body=$(tail -80 /tmp/test-output.txt | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Suite failed on Node ${{ matrix.node }} (exit $code)::$body"
+          fi
+          exit $code
       - name: No check in the suite may be satisfied by a comment
         # tools/proseproof.mjs strips every comment — JS, YAML, and config/pattern.json's _comment — in a throwaway
         # worktree, then runs the suite. A check whose needle lived in prose loses it and fails. This class has cost
