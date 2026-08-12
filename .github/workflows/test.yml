@@ -74,7 +74,7 @@ jobs:
           { node tools/proseproof.mjs ; } 2>&1 | tee /tmp/step.txt
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' -e 's//%0D/g' | awk '{printf "%s%%0A", $0}')
+            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=proseproof failed (exit $code)::$body"
           fi
           exit $code
@@ -90,7 +90,7 @@ jobs:
           { node tools/deadassert.mjs ; } 2>&1 | tee /tmp/step.txt
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' -e 's//%0D/g' | awk '{printf "%s%%0A", $0}')
+            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=deadassert failed (exit $code)::$body"
           fi
           exit $code

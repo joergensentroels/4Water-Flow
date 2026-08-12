@@ -16,14 +16,14 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 546 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 547 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It read 551 until the count was measured on the version the Dockerfile pins. Seven of those were phantoms:
 `test/a11y.test.mjs` imported `test/css-audit.test.mjs` to borrow a helper, which re-registered that file's seven
 tests as subtests, so the suite counted them twice and reported a total nobody had. A count that goes up when a
 file is imported is not a measure of coverage. The helper moved to `tools/a11y.mjs` and the number is now real;
-two genuinely new tests bring it to 546.
+three genuinely new tests bring it to 547.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent

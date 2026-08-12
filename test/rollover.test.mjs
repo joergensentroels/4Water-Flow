@@ -238,6 +238,22 @@ test("package.json describes something runnable, with no dependencies", () => {
   assert.ok(pkg.version && pkg.version !== "0.0.0");
 });
 
+// A workflow GitHub cannot PARSE does not fail loudly — it produces a run with zero jobs, whose `name` comes back as
+// the file path instead of the workflow's own name, and a red tick that says "Process completed with exit code 2"
+// about nothing. That happened here: an edit left a literal carriage return in the middle of a line, mid-`sed`
+// expression, and the whole gate silently stopped existing for a commit. Nothing in the suite could have noticed,
+// because every other assertion about this file reads it as text and a stray CR is invisible in text.
+test("the workflow file has no stray control bytes, so GitHub can parse it at all", () => {
+  const bytes = readFileSync(path.join(ROOT, ".github", "workflows", "test.yml"));
+  assert.ok(bytes.length > 1000, `precondition: the workflow was read, got ${bytes.length} bytes`);
+  const stray = [...bytes].map((c, i) => [c, i]).filter(([c]) => c === 13 || c < 9 || (c > 10 && c < 32) || c === 127);
+  assert.deepEqual(stray.map(([c, i]) => `0x${c.toString(16)} at ${i}`), [],
+    "a control byte in the YAML makes the workflow unparseable, and an unparseable workflow reports nothing");
+  // The control, because "no control bytes" is exactly the assertion that passes when it is looking at nothing.
+  const planted = Buffer.concat([bytes, Buffer.from([13])]);
+  assert.equal([...planted].filter((c) => c === 13).length, 1, "the scan cannot see a planted carriage return");
+});
+
 test("CI runs the suite, the fresh-deployment check, and the backup restore", () => {
   const raw = readFileSync(path.join(ROOT, ".github", "workflows", "test.yml"), "utf8");
   // COMMENTS STRIPPED FOR EVERY ASSERTION, not just one of them. This test used to read the raw file for six checks
