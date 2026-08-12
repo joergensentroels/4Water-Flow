@@ -100,6 +100,16 @@ export function validatePattern(p) {
         err(`everyNth must be a whole number 1..8 (1 = every week, 2 = fortnightly), got ${w.everyNth}`);
       }
     }
+    if (w.weekOffset !== undefined) {
+      const every = Number(w.everyNth ?? 1);
+      // An offset at or above the cadence can NEVER match: `week % 2 === 2` is false for every week there will
+      // ever be, so the slot silently produces no sessions and the season looks thinner than anybody intended.
+      // Refused at load, where it is one message, rather than discovered as an absence months later.
+      if (!Number.isInteger(w.weekOffset) || w.weekOffset < 0 || w.weekOffset >= every) {
+        err(`weekOffset must be a whole number from 0 to ${every - 1} for everyNth ${every} — `
+          + `${w.weekOffset} can never come round, so that slot would never run at all`);
+      }
+    }
   }
   // Every role the CODE depends on, not just the one it was checking.
   //

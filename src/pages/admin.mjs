@@ -172,15 +172,35 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
     <p class="hint">${t("admin.weeklyHint")}</p>
     ${pattern.weekly.map((w) => {
       const used = weeklyUse[`${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`] ?? 0;
+      // Built BEFORE the template rather than nested inside it. A nested tagged template here defeated the seams
+      // gate's tokeniser: it lost track of where the string ended, mis-attributed a literal further down the file,
+      // and reported department vocabulary in a line that had been there and passing for increments. The gate was
+      // right that something was wrong and wrong about where — so the fix is to stop nesting, not to exempt it.
+      //
+      // NO BACKTICKS IN THIS COMMENT EITHER. Naming the tag with a pair of them, to be precise about what had been
+      // nested, opened a template literal as far as the tokeniser was concerned and reproduced the exact failure
+      // this comment describes. Twice in one file, once inside a template and once in the prose beside it.
+      //
+      // Shown for every slot, not only the fortnightly ones: a cadence visible only when it is unusual leaves a
+      // reader unable to tell "weekly" from "this screen does not report cadence at all".
+      const every = Number(w.everyNth ?? 1);
+      const cadence = every > 1
+        ? `${t("admin.weeklyEvery", { n: every })} · ${t("admin.weeklyOffset", { n: Number(w.weekOffset ?? 0) + 1 })}`
+        : t("admin.weeklyEvery", { n: 1 });
       return html`<div class="card">
         <b>${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}</b>
-        <!-- Shown for every slot, not only the fortnightly ones. A cadence visible only when it is unusual leaves a
-             reader unable to tell "weekly" from "this screen does not report cadence at all". -->
-        <p class="hint">${t("admin.weeklyEvery", { n: Number(w.everyNth ?? 1) })}</p>
+        <p class="hint">${cadence}</p>
         <p class="hint">${w.activities.map((k) => pattern.activities.find((a) => a.key === k)?.label ?? k).join(", ")}</p>
         <p class="hint">${t("admin.weeklyUsed", { n: used })}</p>
-        ${toggle("/admin/weekly/remove", { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0 },
-                 t("admin.weeklyRemove"), `${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}`)}
+        <!-- The cadence goes in the form, because day+hour+minute no longer identify a slot: two entries can share
+             a time and alternate, and without these two fields removing either would remove both. The accessible
+             name carries it too, or a screen reader hears the same remove-button name twice on one screen. -->
+        ${toggle("/admin/weekly/remove",
+                 { dayOfWeek: w.dayOfWeek, hour: w.hour, minute: w.minute ?? 0,
+                   everyNth: Number(w.everyNth ?? 1), weekOffset: Number(w.weekOffset ?? 0) },
+                 t("admin.weeklyRemove"),
+                 `${t.weekday(w.dayOfWeek)} ${String(w.hour).padStart(2, "0")}:${String(w.minute ?? 0).padStart(2, "0")}`
+                 + ` — ${w.activities.map((k) => pattern.activities.find((a) => a.key === k)?.label ?? k).join(", ")}`)}
       </div>`;
     })}
     <div class="card">
@@ -205,6 +225,16 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
             ${[1, 2, 3, 4].map((n) => html`<option value="${n}">${t("admin.weeklyEvery", { n })}</option>`)}
           </select>
         </label>
+        <!-- WHICH of those weeks. Without it a cadence can only mean every other week starting with the first, so
+             two fortnightly slots at the same hour both land on the same weeks and alternation cannot be expressed
+             at all — which is the shape one of the evenings in this department actually has. Ignored when the cadence is weekly;
+             an offset that can never come round is refused by validatePattern rather than written. -->
+        <label>${t("admin.weeklyOffsetLabel")}
+          <select name="weekOffset">
+            ${[0, 1, 2, 3].map((n) => html`<option value="${n}">${t("admin.weeklyOffset", { n: n + 1 })}</option>`)}
+          </select>
+        </label>
+        <p class="hint">${t("admin.weeklyOffsetHint")}</p>
         <p class="hint">${t("admin.weeklyActivities")}</p>
         ${pattern.activities.map((a) => html`
           <label class="inline"><input type="checkbox" name="activities" value="${a.key}"> ${a.label}</label>`)}

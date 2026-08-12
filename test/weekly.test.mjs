@@ -197,7 +197,15 @@ test("removal is by value, so a concurrent edit cannot make it hit the wrong row
   const target = base.weekly[0];
   const { pattern: next, removed } = removeWeeklyFromForm(base, target);
   assert.equal(removed, 1);
-  assert.ok(!next.weekly.some((w) => w.dayOfWeek === target.dayOfWeek && w.hour === target.hour));
+  // Checked by IDENTITY, not by "nothing is left at that time". Two entries may now share a day and hour and
+  // alternate between them, so an empty time is the wrong thing to assert — and asserting it would quietly demand
+  // that removing one dance take the other with it, which is the defect tested for further down this file.
+  assert.ok(!next.weekly.some((w) => w.dayOfWeek === target.dayOfWeek && w.hour === target.hour
+      && (w.minute ?? 0) === (target.minute ?? 0)
+      && Number(w.everyNth ?? 1) === Number(target.everyNth ?? 1)
+      && Number(w.weekOffset ?? 0) === Number(target.weekOffset ?? 0)),
+    "the entry that was asked for is still there");
+  assert.equal(next.weekly.length, base.weekly.length - 1, "and exactly one entry went");
   // An index-based remove would have deleted something arbitrary here; by value it correctly matches nothing.
   assert.equal(removeWeeklyFromForm(base, { dayOfWeek: 5, hour: 4, minute: 0 }).removed, 0);
 });
@@ -374,4 +382,104 @@ test("and the shipped rhythm staffs the activities the export's own pattern name
   const classes = pattern.weekly.find((w) => w.activities.includes("salsa") && w.dayOfWeek === dj.dayOfWeek);
   assert.ok(dj.hour * 60 + dj.minute > classes.hour * 60 + classes.minute,
     "the later slot follows the class it comes after, which is what makes it a separate shift somebody else can take");
+});
+
+// ---- alternation: the shape the cadence question was actually about -------------------------------------------
+//
+// `everyNth` alone can only say "every other week starting with the first", so two fortnightly entries at the same
+// hour both land on the same weeks. 4water's Wednesday is salsa one week and bachata the next — which that cannot
+// express at all. `weekOffset` says WHICH of the n weeks.
+test("two slots at the same hour alternate, and never collide", () => {
+  const base = loadPattern();
+  const p = validatePattern({
+    ...base,
+    weekly: [
+      { dayOfWeek: 3, hour: 19, minute: 0, activities: ["salsa"], everyNth: 2 },
+      { dayOfWeek: 3, hour: 19, minute: 0, activities: ["bachata"], everyNth: 2, weekOffset: 1 },
+    ],
+  });
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrate(db);
+    seedStructure(db, p);
+    const rows = db.prepare(`SELECT s.date, act.key FROM sessions s
+                               JOIN activities act ON act.id = s.activity_id
+                              ORDER BY s.date, act.key`).all();
+    const byDate = new Map();
+    for (const r of rows) byDate.set(r.date, [...(byDate.get(r.date) || []), r.key]);
+    const dates = [...byDate.keys()].sort();
+
+    // CONTROL FIRST: enough dates for "alternating" to be a claim about anything.
+    assert.ok(dates.length >= 8, `only ${dates.length} Wednesdays — too few to show alternation`);
+    // Never both on one date. This is the defect the old config had: one slot carrying both dances, every week.
+    const both = dates.filter((d) => byDate.get(d).length !== 1);
+    assert.deepEqual(both, [], `these dates got more than one dance: ${both.join(", ")}`);
+    // And they really alternate rather than one of them simply never appearing.
+    const seq = dates.map((d) => byDate.get(d)[0]);
+    assert.equal(new Set(seq).size, 2, `only ${[...new Set(seq)].join("/")} was ever scheduled`);
+    for (let i = 1; i < seq.length; i++) {
+      assert.notEqual(seq[i], seq[i - 1], `${dates[i]} repeats ${seq[i]} from the week before`);
+    }
+  } finally { db.close(); }
+});
+
+test("an offset that can never come round is refused, not silently empty", () => {
+  const base = loadPattern();
+  const bad = (everyNth, weekOffset) => () => validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 3, hour: 19, minute: 0, activities: ["salsa"], everyNth, weekOffset }] });
+  // `week % 2 === 2` is false for every week there will ever be, so the slot would produce nothing at all and the
+  // season would just look thinner than intended — the silent-absence shape this project keeps closing.
+  assert.throws(bad(2, 2), /weekOffset/, "an offset equal to the cadence can never match");
+  assert.throws(bad(2, 5), /weekOffset/, "nor one above it");
+  assert.throws(bad(1, 1), /weekOffset/, "and on a weekly slot every offset above 0 is unreachable");
+  assert.throws(bad(2, -1), /weekOffset/, "a negative offset is not a week");
+  // THE CONTROL: the reachable offsets must still pass, or this is just rejecting everything.
+  assert.ok(validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 3, hour: 19, minute: 0, activities: ["salsa"], everyNth: 2, weekOffset: 1 }] }));
+  assert.ok(validatePattern({ ...base,
+    weekly: [{ dayOfWeek: 3, hour: 19, minute: 0, activities: ["salsa"], everyNth: 2, weekOffset: 0 }] }));
+});
+
+test("the admin screen can create the second half of an alternating pair", () => {
+  const base = loadPattern();
+  const added = addWeeklyToForm(base, { dayOfWeek: 2, hour: 18, minute: 0, activities: ["bachata"],
+                                        everyNth: 2, weekOffset: 1 });
+  const slot = added.weekly.find((w) => w.dayOfWeek === 2 && w.hour === 18);
+  assert.equal(slot.everyNth, 2);
+  assert.equal(slot.weekOffset, 1, "the chosen week did not reach the config");
+  // An offset on a WEEKLY slot is dropped rather than written: it could never match, and validatePattern would
+  // refuse the file at startup. Not writing it beats writing something that gets refused.
+  const weekly = addWeeklyToForm(base, { dayOfWeek: 4, hour: 18, minute: 0, activities: ["salsa"],
+                                         everyNth: 1, weekOffset: 1 });
+  assert.ok(!("weekOffset" in weekly.weekly.find((w) => w.dayOfWeek === 4 && w.hour === 18)),
+    "an offset with no cadence to sit in must not be written");
+  // And offset 0 is the default, so it is not written either.
+  const first = addWeeklyToForm(base, { dayOfWeek: 5, hour: 18, minute: 0, activities: ["salsa"],
+                                        everyNth: 2, weekOffset: 0 });
+  assert.ok(!("weekOffset" in first.weekly.find((w) => w.dayOfWeek === 5 && w.hour === 18)),
+    "weekOffset 0 is the default and should not be written out");
+});
+
+test("removing one of an alternating pair leaves the other alone", () => {
+  const base = loadPattern();
+  const p = { ...base, weekly: [
+    { dayOfWeek: 3, hour: 19, minute: 0, activities: ["salsa"], everyNth: 2 },
+    { dayOfWeek: 3, hour: 19, minute: 0, activities: ["bachata"], everyNth: 2, weekOffset: 1 },
+    { dayOfWeek: 3, hour: 20, minute: 15, activities: ["dj"] },
+  ] };
+  // Day, hour and minute identified a slot only while every entry ran weekly. Removing "the Wednesday 19:00 one"
+  // used to take both halves of the pair with it — an admin dropping one dance would silently lose the other.
+  const { pattern: afterOne, removed } = removeWeeklyFromForm(p, { dayOfWeek: 3, hour: 19, minute: 0,
+                                                                  everyNth: 2, weekOffset: 1 });
+  assert.equal(removed, 1, "exactly one half of the pair should go");
+  const left = afterOne.weekly.filter((w) => w.hour === 19);
+  assert.equal(left.length, 1);
+  assert.deepEqual(left[0].activities, ["salsa"], "the wrong half was removed");
+
+  // THE CONTROL: an old form post carrying no cadence still removes everything at that time, which is what it
+  // meant before alternation existed. Silently changing that would break a bookmarked form.
+  assert.equal(removeWeeklyFromForm(p, { dayOfWeek: 3, hour: 19, minute: 0 }).removed, 2,
+    "without cadence fields the removal is by time alone, as it always was");
+  // And a cadence that matches nothing removes nothing, rather than falling back to time.
+  assert.equal(removeWeeklyFromForm(p, { dayOfWeek: 3, hour: 19, minute: 0, everyNth: 3 }).removed, 0);
 });

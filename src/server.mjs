@@ -1117,7 +1117,7 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
     // so a hand-typed 99 is a startup error rather than a slot that quietly runs twice a year.
     const next = addWeeklyToForm(baseForEdit(), {
       dayOfWeek: c.form.dayOfWeek, hour, minute, activities: c.form.__all("activities"),
-      everyNth: c.form.everyNth,
+      everyNth: c.form.everyNth, weekOffset: c.form.weekOffset,
     });
     logAudit(c, "admin.weeklyAdd", null, `day ${String(c.form.dayOfWeek)} at ${time}`);
     // fromDate = today, so adding a slot in August does not manufacture unfilled sessions back to January.

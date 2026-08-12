@@ -128,13 +128,24 @@ because the count went stale the moment a fourth was added: three documents said
 And one modelling question that is cheap now and expensive later: whether *"active volunteer"* is judged on the
 current season only or a longer window. Longer means a slim per-person-per-season history import at cutover.
 
-**Cadence.** 4water confirmed that not everything in the rhythm is weekly, so a weekly entry takes an optional
-`everyNth`: absent or `1` is every week, `2` is fortnightly, up to `8`. The Administration screen offers it when a
-slot is added and shows it for every slot in the list. Phase is counted in whole weeks from `season.from`, which is
-what makes a mid-season reseed idempotent — anchoring it anywhere else would move a fortnightly slot to the opposite
-week whenever somebody edited the pattern. Holidays do not shift the phase: a suppressed date uses up its turn, as a
-cancelled class does in life. **Which** slots are fortnightly is still an open question for 4water — the capability
-is there and the shipped `config/pattern.json` sets no cadence, so everything currently runs weekly.
+**Cadence, and alternation.** 4water confirmed that not everything runs weekly: the evening class **alternates**
+between the two dances rather than running them together. A weekly entry therefore takes two optional fields.
+`everyNth` is how often — absent or `1` every week, `2` fortnightly, up to `8`. `weekOffset` is **which** of those
+weeks, and without it alternation cannot be expressed at all: two fortnightly entries at the same hour would both
+land on the same weeks. Two entries, same time, offsets `0` and `1`, take turns. The shipped
+`config/pattern.json` now does exactly that, and the Administration screen offers both fields when a slot is added
+and shows them for every slot listed.
+
+Phase is counted in whole weeks from `season.from`, which is what makes a mid-season reseed idempotent — anchoring
+it anywhere else would move a fortnightly slot to the opposite week whenever somebody edited the pattern. Holidays
+do not shift it either: a suppressed date uses up its turn, as a cancelled class does in life.
+
+Two consequences worth knowing. A day and a time **no longer identify a slot**, so removing one now matches on the
+cadence too — without that, dropping one dance silently dropped the other. And an offset that can never come round
+(`weekOffset` at or above `everyNth`) is refused at load rather than producing a slot that quietly never runs.
+
+**Which dance falls in the season's first week is not known.** Salsa sits on offset `0` because something had to;
+if it is the wrong way round, every evening of the season is the wrong dance. It is marked in the config file.
 
 Three more, which are places the software differs from what the spec says — the reasoning is in `PLAN.md` under
 "Four places this app differs from the spec":

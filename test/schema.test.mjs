@@ -46,7 +46,7 @@ test("DoD 2 — seeding creates a season, activities, timeslots, sessions, 10 pe
 
   assert.equal(db.prepare("SELECT COUNT(*) n FROM seasons").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM activities").get().n, pattern.activities.length);
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM timeslots").get().n, pattern.weekly.length);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM timeslots").get().n, new Set(pattern.weekly.map((w) => w.dayOfWeek + ":" + w.hour + ":" + (w.minute ?? 0))).size);
   assert.ok(sessions > 0, "no sessions were generated");
 
   // Every generated session must fall on a configured weekday — catches an off-by-one in the date walk,

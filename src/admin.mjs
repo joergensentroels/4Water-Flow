@@ -193,18 +193,25 @@ export function patternFromForm(current, form) {
 // Which days, which times, which activities in each slot. This was editable only by hand-editing
 // config/pattern.json, which CONTRIBUTING names as the way a volunteer breaks the config — and it matters
 // because the shipped pattern (one slot per day) was a placeholder, not a description of anything real.
-export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities, everyNth }) {
+export function addWeeklyToForm(current, { dayOfWeek, hour, minute, activities, everyNth, weekOffset }) {
   const next = structuredClone(current);
   // Absent, blank or 1 all mean "every week", and the key is then left OFF rather than written as 1 — so the config
   // keeps saying nothing about cadence unless somebody has actually chosen one.
   const every = Number(everyNth);
+  const fortnightlyish = Number.isInteger(every) && every > 1;
+  // WHICH of those weeks. Only meaningful alongside a cadence, and dropped entirely without one: `weekOffset` on a
+  // weekly slot cannot match any week, so writing it would create a slot that never runs. validatePattern refuses
+  // that too, but not writing it is better than writing something to be refused.
+  const off = Number(weekOffset);
+  const offset = fortnightlyish && Number.isInteger(off) && off > 0 && off < every ? { weekOffset: off } : {};
   next.weekly = [...next.weekly, {
     dayOfWeek: Number(dayOfWeek),
     hour: Number(hour),
     minute: Number(minute ?? 0),
     // A slot with no activity is meaningless; validatePattern rejects it, which is where the message comes from.
     activities: (Array.isArray(activities) ? activities : [activities]).filter(Boolean),
-    ...(Number.isInteger(every) && every > 1 ? { everyNth: every } : {}),
+    ...(fortnightlyish ? { everyNth: every } : {}),
+    ...offset,
   }];
   // Keep the list in the order a human reads a week, so the admin screen does not shuffle after every edit.
   next.weekly.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.hour - b.hour || (a.minute ?? 0) - (b.minute ?? 0));
@@ -287,11 +294,24 @@ export function sessionsOnDate(db, seasonId, date) {
 }
 
 // Removal is by value, not index: an index would silently target the wrong row if two admins edit at once.
-export function removeWeeklyFromForm(current, { dayOfWeek, hour, minute }) {
+export function removeWeeklyFromForm(current, { dayOfWeek, hour, minute, everyNth, weekOffset }) {
   const next = structuredClone(current);
   const before = next.weekly.length;
-  next.weekly = next.weekly.filter((w) =>
-    !(w.dayOfWeek === Number(dayOfWeek) && w.hour === Number(hour) && (w.minute ?? 0) === Number(minute ?? 0)));
+  // Day, hour and minute NO LONGER IDENTIFY A SLOT. They did while every entry ran weekly; the moment two entries
+  // can share a time and alternate — salsa one week, bachata the next — removing "the Wednesday 19:00 one" hits
+  // both, and an admin dropping bachata silently loses salsa as well. Found by the existing removal test the same
+  // hour alternation was configured, which is the argument for its being written by value in the first place.
+  //
+  // The cadence is therefore part of the identity, and only when the caller supplies it: an old form post with no
+  // cadence fields still removes everything at that time, which is what it meant when it was written.
+  const sameTime = (w) => w.dayOfWeek === Number(dayOfWeek) && w.hour === Number(hour)
+    && (w.minute ?? 0) === Number(minute ?? 0);
+  // Once a cadence is given, an ABSENT offset means 0 — the same default the config itself uses — rather than
+  // "any offset". Treating it as a wildcard made passing a whole entry (which is how the existing removal test
+  // and any caller holding a slot object does it) match both halves of a pair again, quietly undoing the fix.
+  const sameCadence = (w) => everyNth === undefined
+    || (Number(w.everyNth ?? 1) === Number(everyNth) && Number(w.weekOffset ?? 0) === Number(weekOffset ?? 0));
+  next.weekly = next.weekly.filter((w) => !(sameTime(w) && sameCadence(w)));
   return { pattern: next, removed: before - next.weekly.length };
 }
 

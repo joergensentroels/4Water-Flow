@@ -48,7 +48,11 @@ export function recurs(weekly, iso, seasonFrom) {
   const everyNth = Number(weekly.everyNth ?? 1);
   if (!Number.isFinite(everyNth) || everyNth <= 1) return true;
   const days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${seasonFrom}T00:00:00Z`)) / 86400000);
-  return Math.floor(days / 7) % everyNth === 0;
+  // WHICH of the n weeks this slot falls on. Without it, `everyNth` alone can only express "every other week
+  // starting with the first" — so two fortnightly entries at the same hour both land on the same weeks, and
+  // ALTERNATION is not expressible at all. 4water's Wednesday 19:00 is salsa one week and bachata the next,
+  // which is exactly that shape and was the reason the cadence question was asked in the first place.
+  return Math.floor(days / 7) % everyNth === Number(weekly.weekOffset ?? 0);
 }
 
 export function seedStructure(db, pattern, { fromDate = null } = {}) {

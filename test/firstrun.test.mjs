@@ -121,7 +121,7 @@ test("a brand-new deployment seeds its season, not an empty shell", async () => 
       }
       assert.equal(counts.seasons, 1, `a fresh boot must have a season, got ${JSON.stringify(counts)}`);
       assert.equal(counts.activities, pattern.activities.length);
-      assert.equal(counts.timeslots, pattern.weekly.length);
+      assert.equal(counts.timeslots, new Set(pattern.weekly.map((w) => w.dayOfWeek + ":" + w.hour + ":" + (w.minute ?? 0))).size);
       assert.ok(counts.sessions > 0, "and actual sessions to schedule");
       assert.equal(counts.roles, pattern.roles.length);
 

@@ -19,6 +19,16 @@
     "above is corrected. The lesson is the one that keeps recurring here: a provenance claim is a claim, and this one",
     "went unchecked because nothing reads the spec except a person deciding to.",
     "",
+    "AND THE WEDNESDAY DOES NOT RUN THE DANCES TOGETHER. 4water say it ALTERNATES - salsa one week, bachata the next.",
+    "The export lists the dances against that slot, which is true of the slot across a season and false of any single",
+    "Wednesday, and reading it as a weekly double bill doubled that shift for the whole season. It is separate entries now,",
+    "each everyNth 2, the second offset by a week. The same trap as the provenance claim above: a source can be",
+    "quoted accurately and still be read into the wrong shape, and nothing catches that except asking.",
+    "",
+    "*** WHICH DANCE FALLS IN THE SEASON'S FIRST WEEK IS NOT KNOWN. *** Salsa is on weekOffset 0 here because",
+    "something had to be, not because anybody said so. If it is the wrong way round every Wednesday in the season",
+    "is the wrong dance - swap the two activities lines, or set 4water's answer once and it is right thereafter.",
+    "",
     "1. Sunday's single 15:00 slot is a SIMPLIFICATION, not an invention: the export states 13:00-16:00, which is a",
     "   range, and this app models discrete timeslots. 15:00 sits inside the stated range and one slot stands in for",
     "   whatever the real granularity is. How many Sunday slots there actually are is 4water's answer; several times",
@@ -137,9 +147,19 @@
       "hour": 19,
       "minute": 0,
       "activities": [
-        "salsa",
+        "salsa"
+      ],
+      "everyNth": 2
+    },
+    {
+      "dayOfWeek": 3,
+      "hour": 19,
+      "minute": 0,
+      "activities": [
         "bachata"
-      ]
+      ],
+      "everyNth": 2,
+      "weekOffset": 1
     },
     {
       "dayOfWeek": 3,
