@@ -80,7 +80,13 @@ try {
   // from here on reads as a prose defect. Linked rather than copied — it is large and only read here.
   if (existsSync(path.join(ROOT, "node_modules"))) {
     try {
-      symlinkSync(path.join(ROOT, "node_modules"), at("node_modules"), "junction");
+      // "junction" is a WINDOWS link type. It was hardcoded, so this line could only ever work on the machine it
+      // was written on: on Linux it throws and the refusal below fires, which is why this tool exited 2 on every
+      // CI run it has ever had while passing locally. Same shape as the two path assertions in Bureau that asserted
+      // Windows semantics as universal. A junction is the right choice on Windows — it needs no privileges, where a
+      // directory symlink does — so the platform is asked rather than assumed.
+      symlinkSync(path.join(ROOT, "node_modules"), at("node_modules"),
+                  process.platform === "win32" ? "junction" : "dir");
     } catch (e) {
       // Refuse rather than report: a run where some tests cannot load produces failures indistinguishable from
       // real ones, which is worse than no run.

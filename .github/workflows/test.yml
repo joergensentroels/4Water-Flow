@@ -69,7 +69,15 @@ jobs:
         # change it was supposed to be checking. It plants its own control on every run and refuses to report a clean
         # result if that control does not fail. Needs the git history, so no shallow checkout.
         if: matrix.node == '22.14'
-        run: node tools/proseproof.mjs
+        run: |
+          set +e
+          { node tools/proseproof.mjs ; } 2>&1 | tee /tmp/step.txt
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' -e 's//%0D/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=proseproof failed (exit $code)::$body"
+          fi
+          exit $code
       - name: No assertion in the suite may be one that never runs
         # tools/deadassert.mjs reads the raw V8 coverage and reports every assert() call site that never executed.
         # Its first run found five, four of them real — a horizon check looping over an empty list, a boundary case
@@ -77,7 +85,15 @@ jobs:
         # so a green CI should not either. Once, on the version the Dockerfile pins: it re-runs the whole suite under
         # coverage, and the answer does not differ by Node line.
         if: matrix.node == '22.14'
-        run: node tools/deadassert.mjs
+        run: |
+          set +e
+          { node tools/deadassert.mjs ; } 2>&1 | tee /tmp/step.txt
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            body=$(tail -30 /tmp/step.txt | sed -e 's/%/%25/g' -e 's//%0D/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=deadassert failed (exit $code)::$body"
+          fi
+          exit $code
       - name: Prove a fresh deployment comes up and seeds itself
         # The bug this catches is the one that shipped: migrate ran, seeding did not, and the app served a
         # working-looking empty shell. Every test builds its world through the harness, so only the real entry
