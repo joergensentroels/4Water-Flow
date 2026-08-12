@@ -255,9 +255,20 @@ test("CI runs the suite, the fresh-deployment check, and the backup restore", ()
   // with the suite going unreliable rather than red. The gate was running the weaker of the two available commands.
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   assert.match(pkg.scripts.test, /precheck/, "npm test must still be the command that parses everything first");
-  assert.ok(new RegExp(`run:\\s*(npm test|${pkg.scripts.test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*$`, "m").test(ci),
+  // The suite step pipes through `tee` now, so the command is no longer the whole line: CI echoes a failure into an
+  // annotation as well as the log, because reading the log needs a signed-in session with admin rights and reading
+  // an annotation does not. This workflow was red for its entire existence with nobody able to see why. So the
+  // command is matched as INVOKED — a redirection or pipeline may follow — rather than having to end the line.
+  const escaped = pkg.scripts.test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const runsTheSuite = (yaml) =>
+    new RegExp(`(?:^\\s*run:\\s*|^\\s*)(?:npm test|${escaped})(?=\\s*(?:2>&1|\\||$))`, "m").test(yaml);
+  assert.ok(runsTheSuite(ci),
     `CI must run the same command a developer runs (\`npm test\`, or literally \`${pkg.scripts.test}\`) — running a `
     + "subset means the gate is weaker than the local check, which is the wrong way round");
+  // The control, because the assertion above was deliberately loosened. A loosened check that now passes on the
+  // very workflow it was written to reject is worse than no check, and nothing else here would notice.
+  assert.ok(!runsTheSuite(ci.replace(/npm test/g, "node --test")),
+    "the check must still fail on a workflow whose suite step is `node --test` — that is the defect it exists for");
 
   assert.match(ci, /22\.14/, "the version the Dockerfile pins is the one that matters");
   assert.match(ci, /healthz/, "and a fresh deployment must be proven to come up");
