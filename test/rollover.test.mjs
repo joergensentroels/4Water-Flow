@@ -310,39 +310,46 @@ test("the licence tells the board the choice is theirs", () => {
 //
 // Deliberately NOT a rule about tagging. Whether HEAD deserves a tag, and what to call it, is a judgement; whether the
 // tree may claim a name that is already taken is not.
+// The rule, as one pure function over (version, tags, head) so the control below can exercise the SAME code with
+// inputs it chooses. The previous control asserted the repository happened to contain a stale tag, which made the
+// control a fact about this clone rather than about the rule — and it was false in every fresh clone, because
+// `git push` does not push tags. CI therefore failed this on all six of its runs while the rule itself was fine, and
+// the failure said "there must be at least one tag", which reads as a repository problem and is a harness problem.
+const versionsAlreadyTaken = (version, tags, head) =>
+  (tags || []).filter((t) => (t.name === `v${version}` || t.name === version) && t.at !== head);
+
 test("package.json does not claim a version some other commit already holds", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  const tags = execSync("git tag -l", { cwd: ROOT, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
   assert.ok(pkg.version, "package.json must state a version");
-
-  const mine = tags.filter((t) => t === `v${pkg.version}` || t === pkg.version);
-  if (mine.length === 0) return;   // no tag for this version yet: the ordinary state between releases
-
   const head = execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
-  for (const tag of mine) {
-    const at = execSync(`git rev-list -n 1 ${tag}`, { cwd: ROOT, encoding: "utf8" }).trim();
-    const behind = execSync(`git rev-list --count ${tag}..HEAD`, { cwd: ROOT, encoding: "utf8" }).trim();
-    // deadassert: dormant — no tag names the current version between releases, which is the ordinary state; the test below is what stays live
-    assert.equal(at, head,
-      `package.json says ${pkg.version} and the tag ${tag} points ${behind} commit(s) earlier. Whatever is here is not `
-      + `what that name means. Bump the version — tagging HEAD is a separate decision.`);
-  }
+  assert.match(head, /^[0-9a-f]{40}$/, "precondition: git must be readable here, or this test is looking at nothing");
+
+  const names = execSync("git tag -l", { cwd: ROOT, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  const tags = names.map((name) => ({ name, at: execSync(`git rev-list -n 1 ${name}`, { cwd: ROOT, encoding: "utf8" }).trim() }));
+
+  const taken = versionsAlreadyTaken(pkg.version, tags, head);
+  assert.deepEqual(taken.map((t) => t.name), [],
+    `package.json says ${pkg.version}, and ${taken.map((t) => t.name).join(", ")} already names a different commit. `
+    + `Whatever is here is not what that name means. Bump the version — tagging HEAD is a separate decision.`);
 });
 
-// The control for the test above, and it is the half that matters: the check must FIRE when the version is a taken
-// name, not merely pass when it is a free one. Verified by reading the tag that caused this — v1.0.0-rc.1 exists, and a
-// tree claiming that version while sitting anywhere else must fail.
-test("and that check fires rather than merely passing on an untagged version", () => {
-  const tags = execSync("git tag -l", { cwd: ROOT, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
-  assert.ok(tags.length > 0, "there must be at least one tag, or the test above is vacuous for a different reason");
-  const head = execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
-  const stale = tags.filter((t) => execSync(`git rev-list -n 1 ${t}`, { cwd: ROOT, encoding: "utf8" }).trim() !== head);
-  assert.ok(stale.length > 0,
-    "every tag points at HEAD, so the check above cannot currently distinguish a bumped version from a stale one — "
-    + "which means it is passing for a reason unrelated to what it asserts");
-  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  assert.ok(!stale.some((t) => t === `v${pkg.version}` || t === pkg.version),
-    `the version claims ${pkg.version}, which one of these tags already holds elsewhere: ${stale.join(", ")}`);
+// The control, and it is the half that matters: the rule must FIRE on a taken name, not merely pass on a free one.
+// It feeds the same function a fabricated tag rather than hoping this clone contains a stale one, so it holds in a
+// fresh clone, on a CI runner that fetched no tags, and in a repository that has never been tagged at all.
+test("and that rule fires on a taken name rather than merely passing on an untagged tree", () => {
+  const HEAD = "a".repeat(40), ELSEWHERE = "b".repeat(40);
+  const fired = versionsAlreadyTaken("1.0.0-rc.2", [{ name: "v1.0.0-rc.2", at: ELSEWHERE }], HEAD);
+  assert.deepEqual(fired.map((t) => t.name), ["v1.0.0-rc.2"],
+    "a tag naming this version at a different commit is exactly the case the rule exists for");
+  assert.deepEqual(versionsAlreadyTaken("1.0.0-rc.2", [{ name: "v1.0.0-rc.2", at: HEAD }], HEAD), [],
+    "but the same tag pointing AT head is a released version, not a stolen name");
+  assert.deepEqual(versionsAlreadyTaken("1.0.0-rc.2", [{ name: "v0.9.0", at: ELSEWHERE }], HEAD), [],
+    "and a stale tag for some other version says nothing about this one");
+  assert.deepEqual(versionsAlreadyTaken("1.0.0-rc.2", [], HEAD), [],
+    "an untagged tree is the ordinary state between releases, not a failure");
+  // Both spellings, because the repo's own tag carries the `v` and package.json does not.
+  assert.equal(versionsAlreadyTaken("2.0.0", [{ name: "2.0.0", at: ELSEWHERE }], HEAD).length, 1,
+    "a tag without the v prefix is the same claim");
 });
 
 // ---- the local gate and CI must run the same checks ---------------------------------------------------------------
