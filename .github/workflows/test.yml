@@ -43,7 +43,15 @@ jobs:
           npm test 2>&1 | tee /tmp/test-output.txt
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            body=$(tail -80 /tmp/test-output.txt | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
+            # The FAILING lines first, then a short tail. A tail alone is the wrong lines — the runner prints one
+            # line per passing test, so the end of the output is whatever ran last — and GitHub truncates a long
+            # annotation mid-word, which ate the summary on the Node 24 job. Node prints TAP ("not ok N - name")
+            # when piped and the spec reporter ("✖ name") otherwise, so both markers are matched.
+            { grep -aE 'not ok [0-9]|✖|failing tests|AssertionError' /tmp/test-output.txt | head -25
+              echo "-- counts --"
+              grep -aE '^# (tests|pass|fail|cancelled)|^ℹ (tests|pass|fail|cancelled)' /tmp/test-output.txt | head -8
+            } > /tmp/test-report.txt
+            body=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' /tmp/test-report.txt | awk '{printf "%s%%0A", $0}')
             echo "::error title=Suite failed on Node ${{ matrix.node }} (exit $code)::$body"
           fi
           exit $code
