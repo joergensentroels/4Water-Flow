@@ -66,7 +66,10 @@ function collect(args) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "4water-cov-"));
   try {
     try {
-      const out = execFileSync(process.execPath, ["--test", ...args],
+      // Reporter pinned for the same reason as proseproof: Node picks TAP when piped and spec on a TTY, and
+      // which it picks changed between 22 and 24. Unpinned, this printed "no test count read from the runner"
+      // on the version the Dockerfile pins -- a check reporting that it checked nothing.
+      const out = execFileSync(process.execPath, ["--test", "--test-reporter=spec", ...args],
         { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NODE_V8_COVERAGE: dir } });
       reportedTests = Number(out.match(/^\s*(?:ℹ\s*)?tests (\d+)\s*$/m)?.[1]) || null;
     } catch (e) {

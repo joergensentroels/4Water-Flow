@@ -138,7 +138,13 @@ try {
   if (jsSkipped.length) console.log(`            ${jsSkipped.length} module(s) left alone, strip broke parsing: ${jsSkipped.join(", ")}`);
 
   let out = "";
-  try { out = execFileSync(process.execPath, ["--test"], { cwd: wt, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
+  // The reporter is PINNED, and that is the whole point of naming it here. Node chooses a reporter by whether
+  // stdout is a TTY: the spec reporter interactively, TAP when piped -- and it changed which it picks between
+  // 22 and 24. This tool parses the runner's output, so an unpinned reporter means parsing a shape that
+  // depends on the Node version and the terminal. On 22.14 the spec regex matched nothing, so no failing test
+  // was ever seen, so the control "did not fire" and this refused to report -- correctly, but for a reason
+  // that was about the parser rather than about the sweep. It fails safe and could not succeed.
+  try { out = execFileSync(process.execPath, ["--test", "--test-reporter=spec"], { cwd: wt, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
   catch (e) { out = String(e.stdout ?? "") + String(e.stderr ?? ""); }
 
   // Failing test NAMES, from the runner's own summary block rather than from counting ✖ marks in the stream.
