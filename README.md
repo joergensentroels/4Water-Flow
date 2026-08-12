@@ -144,8 +144,9 @@ Two consequences worth knowing. A day and a time **no longer identify a slot**, 
 cadence too — without that, dropping one dance silently dropped the other. And an offset that can never come round
 (`weekOffset` at or above `everyNth`) is refused at load rather than producing a slot that quietly never runs.
 
-**Which dance falls in the season's first week is not known.** Salsa sits on offset `0` because something had to;
-if it is the wrong way round, every evening of the season is the wrong dance. It is marked in the config file.
+**Which dance falls in the season's first week is confirmed: salsa**, checked by 4water against the real rhythm.
+Offset `0` is salsa on purpose rather than as a placeholder, so leave the two offsets alone unless the rhythm
+itself changes — swapping them puts every evening of the season on the wrong dance.
 
 Three more, which are places the software differs from what the spec says — the reasoning is in `PLAN.md` under
 "Four places this app differs from the spec":
