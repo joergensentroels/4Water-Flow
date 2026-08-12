@@ -24,11 +24,18 @@ Zero dependencies. Nothing to install; there is no `node_modules`.
 `src/db.mjs` checks the version and says so, rather than dying at `No such built-in module: node:sqlite`.
 
 `node:sqlite` is **Stability 1.2, "Release candidate"** — not stable. It is what makes zero dependencies
-possible and it is the one part of this stack that could change under a Node upgrade. The CI workflow is written
-to run the suite on both the pinned LTS and current Node, so a breaking change shows up as a red build rather
-than a broken deployment mid-season — but **it has never run: this repository has no remote yet.** Push it and
-confirm the first build is green before relying on that. RUNBOOK says what to do if `node:sqlite` ever does move
-under the app.
+possible and it is the one part of this stack that could change under a Node upgrade. CI runs the suite on both
+**22.14** (what the Dockerfile pins) and **24**, so a breaking change shows up as a red build rather than a broken
+deployment mid-season. RUNBOOK says what to do if `node:sqlite` ever does move under the app.
+
+> This paragraph used to end *"it has never run: this repository has no remote yet"*. By then it had a remote and
+> CI had run **thirteen times and gone red thirteen times**, and nobody looked — the notification said only "All
+> jobs have failed" and the run page says "Sign in to view logs". **The two-version matrix earned its keep the moment it
+> was readable**: `ALTER TABLE … DROP COLUMN` throws on the SQLite that Node 22.14 bundles and not on 24's, which
+> is precisely the class of thing this matrix exists to catch and precisely the version that gets deployed. Three
+> more defects were only ever visible there, and two of the tools meant to police this suite had **never once run
+> to completion** on that Node. Same trap as the section above: no mechanical check covers a negative claim, and
+> "CI has never run" is one.
 
 ## The four decisions that shape everything else
 
