@@ -19,6 +19,13 @@ jobs:
         node: ["22.14", "24"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history AND tags. Two checks need them and neither could ever have passed here: tools/proseproof.mjs
+          # runs the suite in a worktree (its step comment already said "no shallow checkout" — a stated requirement
+          # nothing implemented), and rollover.test.mjs asserts at least one tag exists, precisely so the version-vs-tag
+          # check above it cannot go vacuous. checkout@v4 defaults to depth 1 with no tags, so that guard fired on every
+          # run: `git tag -l` was empty and the test correctly said the check it protects was proving nothing.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -47,7 +54,7 @@ jobs:
             # line per passing test, so the end of the output is whatever ran last — and GitHub truncates a long
             # annotation mid-word, which ate the summary on the Node 24 job. Node prints TAP ("not ok N - name")
             # when piped and the spec reporter ("✖ name") otherwise, so both markers are matched.
-            { grep -aE 'not ok [0-9]|✖|failing tests|AssertionError' /tmp/test-output.txt | head -25
+            { grep -aA5 -E 'not ok [0-9]|✖ ' /tmp/test-output.txt | grep -avE '^\s*(duration_ms|\.\.\.|ok [0-9])' | head -45
               echo "-- counts --"
               grep -aE '^# (tests|pass|fail|cancelled)|^ℹ (tests|pass|fail|cancelled)' /tmp/test-output.txt | head -8
             } > /tmp/test-report.txt
