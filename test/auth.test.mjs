@@ -1,6 +1,7 @@
 // Increment A: sessions, CSRF, the auth seam, and the guards that keep the dev provider out of production.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { withLoopAlive } from "../tools/testkit.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -228,7 +229,7 @@ test("discovery is cached, so it is not fetched on every sign-in", async () => {
 // out — was unreachable: the volunteer waited on undici's 300-second headers timeout instead. The transport
 // here IGNORES the abort signal on purpose, because a timeout that needs the transport's cooperation is one a
 // future adapter can silently remove.
-test("an identity provider that goes quiet falls back instead of hanging the sign-in", async () => {
+test("an identity provider that goes quiet falls back instead of hanging the sign-in", withLoopAlive(async () => {
   clearDiscoveryCache();
   let aborted = false;
   const silent = (url, opts) => {
@@ -252,9 +253,9 @@ test("an identity provider that goes quiet falls back instead of hanging the sig
   } finally {
     console.warn = realWarn;
   }
-});
+}));
 
-test("a token exchange against a silent provider fails with which endpoint went quiet", async () => {
+test("a token exchange against a silent provider fails with which endpoint went quiet", withLoopAlive(async () => {
   clearDiscoveryCache();
   // Discovery succeeds; the TOKEN endpoint is the one that stops answering. Naming it matters, because
   // "sign-in is broken" and "the token endpoint is slow" get fixed differently.
@@ -266,7 +267,7 @@ test("a token exchange against a silent provider fails with which endpoint went 
     () => completeOidc(CFG(), { code: "c", verifier: "v" }, half, { timeoutMs: 50 }),
     (e) => /token endpoint did not answer/.test(e.message),
     "the error must name the endpoint that went quiet");
-});
+}));
 
 // The reason to write this rather than trust the three tests above: every recurring defect in this project has
 // been care applied to one path and not its sibling. Four outbound calls existed and I found the hang in one of

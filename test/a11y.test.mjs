@@ -18,7 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, makeAvailableEverywhere } from "../tools/testkit.mjs";
 import { autoRoster } from "../src/roster.mjs";
-import { auditHtml, reportText, SKIPPED } from "../tools/a11y.mjs";
+import { auditHtml, reportText, SKIPPED, unlabelledInputs } from "../tools/a11y.mjs";
 
 test("every screen passes axe-core, in the states each one actually has", async () => {
   const w = await makeWorld({ volunteers: 4, roles: { 0: ["admin", "planner"] } });
@@ -96,7 +96,6 @@ test("the audit can fail, and names what it cannot check", async () => {
 // two disagree. If someone later decides one of them is redundant, this fails and tells them which question they
 // would stop asking.
 test("an empty label satisfies the association check and fails the accessible-name check", async () => {
-  const { unlabelledInputs } = await import("./css-audit.test.mjs");
   const emptyLabel = '<label><input type="date" name="seasonFrom" required></label>';
   const page = (inner) => '<!doctype html><html lang="en"><head><title>t</title></head>'
     + `<body><main><h1>h</h1><form>${inner}</form></main></body></html>`;

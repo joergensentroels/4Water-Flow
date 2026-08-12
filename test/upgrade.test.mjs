@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
-import { migrate, ADDED_COLUMNS } from "../src/db.mjs";
+import { migrate, ADDED_COLUMNS, stripSchemaComments } from "../src/db.mjs";
 import { ROOT, loadPattern } from "../src/config.mjs";
 import { seedSeason, seedPeople } from "../src/seed.mjs";
 import { makeBackup, verifyBackup } from "../tools/backup.mjs";
@@ -334,4 +334,48 @@ test("a database missing a whole table gains it, with the columns a fresh instal
       `that adds this table would start without it, and every query touching it would throw`);
     db.close();
   }
+});
+
+// The whole fixture above rests on ALTER TABLE ... DROP COLUMN, and that is not portable across the SQLite versions
+// this project supports. SQLite stores CREATE TABLE text verbatim and, before 3.49, finds a column's span in that
+// text by scanning for commas WITHOUT skipping comments — so a comma inside a `--` comment makes the drop fail with
+// "error in table X after drop column: incomplete input". Node 22.14 bundles 3.47.2 and is what the Dockerfile pins;
+// Node 24 bundles 3.53 and is fine. That is why this file passed for its whole life on a developer's machine and
+// failed on the version the deployment actually runs, taking the entire suite's remaining tests down with it.
+//
+// Isolated one property at a time on 3.47.2: a plain last column drops fine, a CHECK constraint is fine, a comment is
+// fine, an apostrophe in a comment is fine. A comment CONTAINING A COMMA is not.
+test("the stored schema carries no comments, so DROP COLUMN works on the SQLite the Dockerfile pins", () => {
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+  const stored = db.prepare("SELECT group_concat(sql, char(10)) s FROM sqlite_schema WHERE sql IS NOT NULL").get().s;
+  assert.ok(stored && stored.length > 500, `precondition: the stored schema was read, got ${stored && stored.length}`);
+  assert.ok(!stored.includes("--"), "a comment in the STORED schema breaks DROP COLUMN on SQLite before 3.49");
+
+  // The control, because the assertion above would also pass on a schema nobody ever documented: the SOURCE keeps
+  // every comment, for the reader it was written for.
+  const src = readFileSync(path.join(ROOT, "src", "db.mjs"), "utf8");
+  assert.match(src, /-- Did they turn up\?/, "the source comments must survive — they are the documentation");
+
+  // And the property itself, exercised rather than described. `attended` is the last column of assignments and the
+  // comment above it contains two commas, which is the exact case that failed.
+  db.exec("ALTER TABLE assignments DROP COLUMN attended");
+  assert.ok(!columnsOf(db, "assignments").includes("attended"), "the drop reported success but the column is still there");
+  db.close();
+});
+
+test("stripSchemaComments removes comments and nothing else", () => {
+  const LF = String.fromCharCode(10);
+  assert.equal(stripSchemaComments(["CREATE TABLE t (", "  -- a, comma", "  x INTEGER", ");"].join(LF)),
+               ["CREATE TABLE t (", "  x INTEGER", ");"].join(LF), "a comment-only line goes entirely");
+  // The one the first version missed: a comment AFTER code on the same line. Two tables carried these and the
+  // stored schema kept them, so the property held for whole-line comments and failed for the ones that mattered.
+  assert.equal(stripSchemaComments("  key TEXT NOT NULL,   -- matches config/pattern.json"),
+               "  key TEXT NOT NULL,", "a trailing comment is removed and the code before it kept");
+  // A `--` inside a string literal is NOT a comment. Nothing in the schema relies on this today, which is exactly
+  // why it needs a test: the day something does, silence would be a corrupted default rather than a failure.
+  assert.equal(stripSchemaComments("  flag TEXT DEFAULT 'a--b'"), "  flag TEXT DEFAULT 'a--b'");
+  assert.equal(stripSchemaComments("  flag TEXT DEFAULT 'a--b'  -- and a real comment"), "  flag TEXT DEFAULT 'a--b'");
+  assert.equal(stripSchemaComments(["a", "", "b"].join(LF)), ["a", "", "b"].join(LF), "blank lines keep the shape");
+  assert.equal(stripSchemaComments(""), "");
 });

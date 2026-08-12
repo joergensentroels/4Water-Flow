@@ -133,10 +133,40 @@ function applyColumnAdditions(db) {
   return applied;
 }
 
+// SQLite stores the CREATE TABLE text VERBATIM, comments and all, and `ALTER TABLE ... DROP COLUMN` finds a
+// column's span in that stored text by scanning for commas — without skipping comments, in SQLite before 3.49.
+// So a COMMA INSIDE A `--` COMMENT makes DROP COLUMN fail with "error in table X after drop column: incomplete
+// input" on 3.47.2, which is what Node 22.14 bundles and what the Dockerfile pins, while working on the 3.53 that
+// Node 24 bundles. Isolated one property at a time: a plain last column is fine, a CHECK constraint is fine, a
+// comment is fine, an apostrophe in a comment is fine — a comment CONTAINING A COMMA is not.
+//
+// These comments are documentation for whoever reads this file. There is no reason for them to be in the database's
+// stored schema, where no reader ever sees them and a parser depends on them. Stripped on the way in.
+//
+// Trailing comments count, and the first version of this missed them: it dropped whole comment LINES only, and left
+// `key TEXT NOT NULL UNIQUE,  -- matches config/pattern.json` untouched in two tables. The test caught it, which is
+// the only reason it is not still there.
+//
+// Quote-aware, so a `--` inside a string literal survives. That is deliberate rather than theoretical: this DDL has
+// no such literal today, and a check below plants one so the rule is enforced rather than assumed.
+const stripCommentTail = (line) => {
+  let quoted = false;
+  for (let i = 0; i < line.length - 1; i++) {
+    if (line[i] === "'") quoted = !quoted;
+    else if (!quoted && line[i] === "-" && line[i + 1] === "-") return line.slice(0, i).replace(/\s+$/, "");
+  }
+  return line;
+};
+export const stripSchemaComments = (sql) => sql.split("\n")
+  .map((line) => ({ line, code: stripCommentTail(line) }))
+  // A comment-only line goes entirely; a line that was already blank stays, so the DDL keeps its shape.
+  .filter(({ line, code }) => code.trim() !== "" || line.trim() === "")
+  .map(({ code }) => code).join("\n");
+
 // Idempotent in both directions that matter: safe to run against a fresh database, and able to bring an
 // older one up to date. Returns what it changed, so a boot can say so rather than migrating silently.
 export function migrate(db) {
-  db.exec(`
+  db.exec(stripSchemaComments(`
     CREATE TABLE IF NOT EXISTS seasons (
       id        INTEGER PRIMARY KEY,
       key       TEXT NOT NULL UNIQUE,
@@ -367,7 +397,7 @@ export function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_assign_person  ON assignments(person_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_date  ON sessions(date);
     CREATE INDEX IF NOT EXISTS idx_avail_hour     ON availability_hour(person_id, date);
-  `);
+  `));
   // AFTER the creates, so a fresh database already has everything and this finds nothing to do.
   const added = applyColumnAdditions(db);
   if (added.length) console.log(`[migrate] added column(s): ${added.join(", ")}`);

@@ -192,3 +192,22 @@ export function csrfFromCookie(cookie) {
 export const slotsIn = (html) =>
   [...new Set([...html.matchAll(/name="slot:(\d{4}-\d{2}-\d{2}):(\d+)"/g)].map((m) => `${m[1]}:${m[2]}`))]
     .map((k) => { const [date, hour] = k.split(":"); return { date, hour, key: `slot:${date}:${hour}` }; });
+
+// Hold the event loop open for the duration of a test, and the reason is specific rather than defensive.
+//
+// src/outbound.mjs UNREFS its timeout on purpose — "a pending timeout must never be the reason the process stays
+// alive" — and that is right: in production a real fetch holds a SOCKET, which is ref'd, so the timeout still fires.
+// It is only when a test injects a transport that opens nothing (`new Promise(() => {})`) that the unref'd timer is
+// the sole pending work. Node 22.14's test runner then sees the loop resolve and cancels the test at ~2ms with
+// "Promise resolution is still pending but the event loop has already resolved" — and every test after it in that
+// file cascades. Node 24 holds the loop and passes, so the suite was green on the developer's machine and red on the
+// version the Dockerfile pins, for its entire existence.
+//
+// Isolated in both directions on both runtimes: on 22.14 a ref'd timer beside a never-settling promise PASSES and
+// the same thing unref'd is cancelled; on 24.18 all of it passes. So this is the harness holding one ref'd handle,
+// not the product changing to suit a stub. Wrap only tests that inject a never-settling transport — using it
+// everywhere would mask a genuinely hanging test, which is a thing a suite should still be able to catch.
+export const withLoopAlive = (fn) => async (...args) => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await fn(...args); } finally { clearInterval(keep); }
+};

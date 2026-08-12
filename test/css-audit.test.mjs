@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/config.mjs";
+import { unlabelledInputs } from "../tools/a11y.mjs";
 import { modulesToCheck } from "../tools/precheck.mjs";
 import { makeWorld } from "../tools/testkit.mjs";
 
@@ -233,15 +234,13 @@ test("every visible input is associated with a label, by ancestor or by for=", a
 });
 
 // Labels do not nest in this app, so removing every label element and looking at what inputs remain finds the ones
-// with no label ANCESTOR; the `for=` set then accounts for the sibling pattern. Exported for the control below,
-// because a scan that removes too much, or collects too many ids, reports zero offenders forever.
-export function unlabelledInputs(html) {
-  const referenced = new Set([...html.matchAll(/<label\b[^>]*\bfor="([^"]+)"/gi)].map((m) => m[1]));
-  const withoutLabels = html.replace(/<label\b[\s\S]*?<\/label>/gi, "");
-  return [...withoutLabels.matchAll(/<input\b[^>]*>/gi)].map((m) => m[0])
-    .filter((tag) => !/type="hidden"/i.test(tag))
-    .filter((tag) => { const id = tag.match(/\bid="([^"]+)"/i); return !id || !referenced.has(id[1]); });
-}
+// with no label ANCESTOR; the `for=` set then accounts for the sibling pattern. The control below matters, because
+// a scan that removes too much, or collects too many ids, reports zero offenders forever.
+//
+// It now lives in tools/a11y.mjs, beside auditHtml. It was defined HERE and test/a11y.test.mjs reached it with
+// `await import("./css-audit.test.mjs")` — one test file importing another. On Node 22 that registers this file's
+// tests as SUBTESTS of whatever test is running, and they are cancelled the moment it finishes. A helper two files
+// share belongs in neither of them.
 
 test("the unlabelled-input scan finds one when there is one, and not when there is not", () => {
   const ancestor = `<label>Name <input type="text" name="n"></label>`;

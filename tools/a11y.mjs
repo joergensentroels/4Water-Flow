@@ -73,3 +73,25 @@ export function reportText(pages) {
   }
   return lines.join("\n");
 }
+
+// The association scan, here rather than in a test file — and the move is the fix for a real defect, not tidying.
+//
+// It lived in test/css-audit.test.mjs and test/a11y.test.mjs reached it with `await import("./css-audit.test.mjs")`.
+// Importing a TEST file runs its `test()` registrations, and on Node 22 they attach to whatever test is running as
+// SUBTESTS — which are then cancelled the moment that test finishes: "test did not finish before its parent and was
+// cancelled", three of them, naming css-audit's own tests from inside a11y's run. Node 24 tolerates it, so the suite
+// was green on the developer's machine and red on the version the Dockerfile pins. A helper two files share belongs
+// in neither of them.
+//
+// It detects ASSOCIATION — an input inside a <label>, or paired by for= — which is a WEAKER question than the one
+// axe asks. An input wrapped in an EMPTY label is associated perfectly and still has no accessible name. Both checks
+// are kept deliberately, and test/a11y.test.mjs pins the exact markup where they disagree.
+export function unlabelledInputs(html) {
+  const referenced = new Set([...html.matchAll(/<label\b[^>]*\bfor="([^"]+)"/gi)].map((m) => m[1]));
+  // Non-greedy on purpose: a greedy strip swallows everything between the FIRST <label> and the LAST </label>,
+  // hiding any bare input sitting between two labelled ones.
+  const withoutLabels = html.replace(/<label\b[\s\S]*?<\/label>/gi, "");
+  return [...withoutLabels.matchAll(/<input\b[^>]*>/gi)].map((m) => m[0])
+    .filter((tag) => !/type="hidden"/i.test(tag))
+    .filter((tag) => { const id = tag.match(/\bid="([^"]+)"/i); return !id || !referenced.has(id[1]); });
+}

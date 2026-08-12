@@ -2,6 +2,7 @@
 // URL must never be logged, and the nudge must not turn into a weekly nag loop.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { withLoopAlive } from "../tools/testkit.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "../src/db.mjs";
 import { loadPattern, makeT, validatePattern, notifyTimingConfig } from "../src/config.mjs";
@@ -261,7 +262,7 @@ test("a nudge that fails to deliver is not marked as sent, so the next run retri
 //
 // The stub deliberately IGNORES the abort signal. Real fetch honours it, but the transport is injectable, so a
 // timeout that depends on the transport cooperating is a timeout that can be bypassed by the next adapter.
-test("a webhook that never answers is failed, not waited on forever", async () => {
+test("a webhook that never answers is failed, not waited on forever", withLoopAlive(async () => {
   const { db, seasonId, pattern } = world({ volunteers: 2 });
   let aborts = 0;
   const fetchImpl = (url, opts) => {
@@ -284,7 +285,7 @@ test("a webhook that never answers is failed, not waited on forever", async () =
     assert.match(row.error, /did not answer within/, "the row must say WHY, since that is where an operator looks");
   }
   assert.equal(aborts, 2, "and the socket is released rather than left open");
-});
+}));
 
 test("a slow tick is skipped rather than run twice over the same broken channel", async () => {
   const { db, seasonId, pattern } = world({ volunteers: 1 });
