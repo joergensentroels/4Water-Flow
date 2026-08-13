@@ -192,6 +192,24 @@ rather than lingering as apparent coverage.
   `--experimental-sqlite` until 22.13. `src/db.mjs` checks that at load, which is why it imports `node:sqlite`
   dynamically and carries a top-level await. `package.json` `engines` cannot enforce it: a project with no
   dependencies never has `npm install` run against it, so nothing ever reads that field.
+- **Test on 22.14 as well as on whatever you have, and the SQLite version is why.** The Dockerfile pins 22.14,
+  which bundles **SQLite 3.47.2**; Node 24 bundles **3.53.1**, and they are not interchangeable. `ALTER TABLE …
+  DROP COLUMN` throws on 3.47 when the stored `CREATE TABLE` text has a comma inside a `--` comment: SQLite finds
+  a column's span by scanning for commas and, before 3.49, does not skip comments. That is why `migrate()` strips
+  comments out of the DDL on the way in — see `stripSchemaComments` in `src/db.mjs`.
+
+  CI runs both versions, but CI is the slow way to find out. A portable 22.14 lives at
+  `Documents/LLM server/node-v22.14.0-win-x64/` on the machine this was built on — no installer, nothing added to
+  PATH, invoked by full path:
+
+  ```bash
+  "/c/Users/troel/Documents/LLM server/node-v22.14.0-win-x64/node.exe" --test
+  ```
+
+  It paid for itself at once: **five defects were visible only there**, and this suite had been green on the
+  developer's machine and red on the deployment target for its entire existence. Elsewhere, fetch the matching
+  build from nodejs.org and verify it against `SHASUMS256.txt` before unzipping; the checksum file for this one is
+  kept beside the tree as `node-v22.14.0-SHASUMS256.txt`.
 - **`db.prepare()` will not mix `?` and `:named` parameters in one statement.** Pick one per query. Mixing them
   fails at bind time with "Provided value cannot be bound to SQLite parameter N", which reads like a type error
   and is not one.
