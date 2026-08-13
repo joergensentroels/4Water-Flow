@@ -156,8 +156,10 @@ const JUSTIFIED = {
   "privacy.attendance":
     "Three separate guarantees, each with code behind it. 'After a shift': markAttendance returns not_yet when " +
     "date >= today, and the control only renders for past shifts. 'Never used to decide what you are offered': " +
-    "eligiblePeopleFor, autoRoster and isActive all read score(), which counts confirmed assignments and does " +
-    "not look at `attended` — test/attendance.test.mjs asserts marking attendance leaves score() unchanged. " +
+    "eligiblePeopleFor and autoRoster — the two things that DO decide what you are offered — both read score(), " +
+    "which counts confirmed assignments and does not look at `attended`; test/attendance.test.mjs asserts that " +
+    "marking attendance leaves score() unchanged. isActive was named here as a third example until it was " +
+    "deleted: it read score() as well, but it decided nothing and no caller ever reached it. " +
     "'A planner can change it back': null is an accepted value, which is why the column is nullable.",
   "privacy.notes":
     "Four claims, each with code behind it. 'Everybody signed in can read them': GET /session/:id is gated on a " +

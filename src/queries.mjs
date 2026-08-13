@@ -283,12 +283,16 @@ export const unmarkedShifts = (db, seasonId, today, limit = 50) =>
      ORDER BY s.date DESC, t.hour LIMIT :n
   `).all({ sid: seasonId, today, n: limit });
 
-// "Active volunteer" in the spreadsheet's sense: has done at least `threshold` activities this season.
+// `isActive` was here — "active volunteer" in the spreadsheet's sense, `score(...) >= threshold`. Deleted, not
+// kept: its own comment said it "feeds nothing that gates eligibility" (`people.status` does that, for the
+// bootstrapping reason in PLAN.md), and nothing else called it either. It computed a number for no reader at all,
+// which is exactly what test/reachable.test.mjs exists to catch — and it hid from that check for as long as it
+// existed, because it reaches the database THROUGH score() rather than preparing a statement itself. The gate now
+// follows delegation to a fixed point, so the next one cannot hide the same way.
 //
-// Deliberately still LOAD rather than attendance. This feeds nothing that gates eligibility — `people.status` does
-// that, for the bootstrapping reason recorded in PLAN.md — and switching it to attendance would make a volunteer
-// who has signed up but not yet run anything read as inactive, which is the same paradox one layer along.
-export const isActive = (db, personId, seasonId, threshold = 1) => score(db, personId, seasonId) >= threshold;
+// If a screen ever wants it, `score(db, personId, seasonId) >= threshold` is the whole implementation. Deleting it
+// settles nothing about the modelling question: whether "active" is derived or set by an admin is answered in
+// README.md, and the answer is that an admin sets it.
 
 // ---- The vagtbørs -------------------------------------------------------------------------------------
 // `fromDate` defaults to the beginning of time so callers that do not care get everything; the board passes

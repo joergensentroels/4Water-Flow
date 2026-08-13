@@ -38,6 +38,38 @@ const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ")
   .replace(/(^|\s)--\s[^\n]*/g, "$1");
 const stripImports = (s) => s.replace(/^import[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm, "");
 
+// Which exported functions REACH the database — directly, or through another one that does.
+//
+// A DIRECT reader must prepare a statement and contain uppercase SQL. Both conditions, and each earns its place:
+// `db.prepare(` rules out prose, and dropping the case-insensitive flag rules out English that happens to read like
+// SQL. The first version had /FROM|JOIN/i and flagged `AUDITED` — a list of route descriptions, one of which says
+// "a slot was removed FROM THE weekly rhythm". A check that cannot tell a sentence from a query would have had
+// prose in its exception list forever.
+//
+// DELEGATING readers were the gap, and `isActive` sat in it: `score(db, personId, seasonId) >= threshold` prepares
+// no statement and contains no SQL, so the direct test could not see it, and it was exported and called by nothing
+// for as long as it existed. A function that reads the database through another function can compute something
+// nobody can see just as easily as one that queries directly — the defect this whole file exists for.
+//
+// A FIXED POINT rather than one hop, so the depth is not a number somebody chose. Measured before widening, which
+// is this file's own rule: the closure adds 13 functions and settles after a single pass, flagging exactly two
+// more — `isActive`, which was the real defect, and `verifyBackup`, whose only caller is the CLI block at the
+// bottom of its own file and which is therefore the same crude-splitting artifact as `buildApp`. Two, not a
+// 63-entry exception list, is what made the widening worth making.
+export function readersIn(exported) {
+  const direct = (p) => /db\.prepare\(/.test(p.body) && /\b(FROM|JOIN)\s+\w+/.test(p.body);
+  const names = new Set(exported.filter(direct).map((p) => p.name));
+  for (;;) {
+    const before = names.size;
+    for (const p of exported) {
+      if (names.has(p.name)) continue;
+      if ([...names].some((n) => new RegExp(`\\b${n}\\s*\\(`).test(p.body))) names.add(p.name);
+    }
+    if (names.size === before) break;
+  }
+  return exported.filter((p) => names.has(p.name));
+}
+
 // What a request can reach: the transitive closure of local imports from the server.
 const reachableModules = () => {
   const seen = new Set();
@@ -65,6 +97,10 @@ const TEST_ONLY = {
   buildApp:
     "The app factory itself. Its caller is the boot block at the bottom of its own module, which this check " +
     "cannot see because it splits a file at top-level exports.",
+  verifyBackup:
+    "Called at tools/backup.mjs:144, inside the CLI block that follows the last export in that file — so the " +
+    "split-at-top-level-exports rule folds the call into the exported chunk and then removes it along with the " +
+    "body. The same artifact as buildApp, and the reason this list exists rather than a cleverer parser.",
 };
 // `nodeTooOld` and `PLANNER_WRITE_HONOURS` were excused here until the reader test grew a `db.prepare(` condition,
 // at which point neither counted as a reader any more and the stale-entry half of this check said so. Left as a
@@ -74,14 +110,9 @@ test("every database reader is reachable from a route, or listed as deliberately
   const modules = reachableModules();
   assert.ok(modules.length >= 20, `only ${modules.length} modules reachable from server.mjs — not looking properly`);
 
-  // Exported things whose body selects from the database. Split at top-level exports: crude, and the crudeness is
+  // Exported things that reach the database. Split at top-level exports: crude, and the crudeness is
   // accounted for by TEST_ONLY rather than pretended away.
-  // A reader must PREPARE A STATEMENT and contain uppercase SQL. Both conditions, and each earns its place:
-  // `db.prepare(` rules out prose, and dropping the case-insensitive flag rules out English that happens to read
-  // like SQL. The first version had /FROM|JOIN/i and flagged `AUDITED` — a list of route descriptions, one of
-  // which says "a slot was removed FROM THE weekly rhythm". A check that cannot tell a sentence from a query
-  // would have had prose in its exception list forever.
-  const readers = [];
+  const exported = [];
   for (const file of modules) {
     for (const part of stripComments(read(file)).split(/^(?=export\s)/m)) {
       // A FUNCTION, not a data literal. `export const ADDED_COLUMNS = [...]` is a list of DDL strings, and it was
@@ -89,11 +120,10 @@ test("every database reader is reachable from a route, or listed as deliberately
       // contain a non-exported helper that queries. Splitting a file at top-level exports is crude enough that the
       // discriminator has to be the declaration itself: `function x`, or `const x = (` for an arrow.
       const m = /^export\s+(?:async\s+)?(?:function\s+(\w+)|const\s+(\w+)\s*=\s*(?:async\s*)?\()/.exec(part);
-      if (m && /db\.prepare\(/.test(part) && /\b(FROM|JOIN)\s+\w+/.test(part)) {
-        readers.push({ file, name: m[1] ?? m[2], body: part });
-      }
+      if (m) exported.push({ file, name: m[1] ?? m[2], body: part });
     }
   }
+  const readers = readersIn(exported);
   assert.ok(!readers.some((r) => r.name === "AUDITED"),
     "AUDITED is a list of English sentences, not a query. If it is being counted as a database reader, the " +
     "detection is matching prose and every count below is wrong.");
@@ -137,6 +167,31 @@ test("the reachability check can see an unwired reader", () => {
   const wired = new RegExp("\\blistAudit\\b");
   assert.ok([...code].some(([f, src]) => f !== "src/audit.mjs" && wired.test(src)),
     "listAudit is called by the audit page's route — if this fails, the import-stripping is eating real calls");
+});
+
+// The DELEGATING half of the scope rule, on synthetic input — and it has to be synthetic, because the one real
+// example (isActive) was the defect and has been deleted. A widening whose only demonstration was the thing it
+// found is a widening that stops being exercised the moment it succeeds.
+test("a function that reaches the database only through another one is still a reader", () => {
+  const part = (name, body) => ({ file: "synthetic.mjs", name, body: `export function ${name}(db) {${body}}` });
+  const directBody = "return db.prepare('SELECT n FROM people').get();";
+  const found = readersIn([
+    part("directReader", directBody),
+    part("delegatingReader", "return directReader(db) >= 1;"),   // the isActive shape: no db.prepare, no SQL
+    part("twoHopsOut", "return delegatingReader(db) ? 1 : 0;"),  // reached only via the delegating one
+    part("pureHelper", "return 2 + 2;"),
+  ]).map((p) => p.name);
+
+  assert.ok(found.includes("directReader"), "the direct reader must still be in scope");
+  assert.ok(found.includes("delegatingReader"),
+    "a function whose body has neither db.prepare( nor SQL, but calls a reader, IS a reader — this is the case " +
+    "isActive sat in, uncalled and invisible, for as long as it existed");
+  assert.ok(found.includes("twoHopsOut"), "the closure must not stop after one hop, or the depth is a number somebody picked");
+  // The control that keeps the widening honest: it must not simply call everything a reader.
+  assert.ok(!found.includes("pureHelper"),
+    "a function that touches no reader was counted anyway — the scope rule has stopped discriminating and every " +
+    "count in the check above is meaningless");
+  assert.equal(found.length, 3, `expected exactly the three that reach the database, got ${found.join(", ")}`);
 });
 
 // The same shape one layer out: a CONFIG key nothing reads.
