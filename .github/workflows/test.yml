@@ -18,24 +18,28 @@ jobs:
         # notice a breaking change in node:sqlite BEFORE the LTS line moves under us — the module is young.
         node: ["22.14", "24"]
     steps:
-      # v5 on both, for the runtime rather than for the features: v4 declares `using: node20`, which the runners
-      # now force onto node24 anyway and announce as deprecated on every run. v5 is the first major that declares
-      # node24 itself. Needs a runner at v2.327.1 or newer, which GitHub-hosted ubuntu-latest is.
+      # v7 on both — current, and the reason to leave v4 was the RUNTIME: v4 declares `using: node20`, which the
+      # runners no longer offer. They force it onto node24 and announce it as deprecated on every run. Read out of
+      # each action.yml rather than assumed: v4 is node20, v5/v6/v7 are all node24. Needs a runner at v2.327.1 or
+      # newer, which GitHub-hosted ubuntu-latest is.
       #
-      # v7 is current for both. Staying at v5 deliberately: it is the version that fixes the stated problem, and
-      # each further major carries changes this repo has no need of — setup-node v5 alone already added automatic
-      # caching when package.json has a `packageManager` field. This one has none, so that behaviour is off here;
-      # if a `packageManager` field is ever added, decide about `package-manager-cache` at the same time.
-      - uses: actions/checkout@v5
+      # What the majors after v4 change that could touch this workflow, checked rather than skimmed:
+      #   checkout    v6 moves credentials to a separate file; v7 blocks checking out a FORK PR under
+      #               `pull_request_target` and `workflow_run`. This workflow triggers on `push` and
+      #               `pull_request`, so that restriction does not reach it.
+      #   setup-node  v5 added automatic caching when package.json carries a `packageManager` field, and v6
+      #               narrowed that to npm only. This package.json has no such field, so it is off either way.
+      #               v7 adds cache outputs and drops a dummy NODE_AUTH_TOKEN export; nothing here publishes.
+      - uses: actions/checkout@v7
         with:
           # Full history AND tags. Two checks need them and neither could ever have passed here: tools/proseproof.mjs
           # runs the suite in a worktree (its step comment already said "no shallow checkout" — a stated requirement
           # nothing implemented), and rollover.test.mjs asserts at least one tag exists, precisely so the version-vs-tag
-          # check above it cannot go vacuous. checkout defaults to depth 1 with no tags — unchanged from v4 to v5, so
-          # this line is still load-bearing — and that guard fired on every run without it: `git tag -l` was empty and
-          # the test correctly said the check it protects was proving nothing.
+          # check above it cannot go vacuous. checkout defaults to depth 1 with no tags — unchanged through v7, so this
+          # line is still load-bearing — and that guard fired on every run without it: `git tag -l` was empty and the
+          # test correctly said the check it protects was proving nothing.
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - name: Show what we are running on
