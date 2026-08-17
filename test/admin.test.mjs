@@ -586,6 +586,55 @@ test("the roster is capped by default, searchable, and honest about what it is n
   assert.equal(cards, PEOPLE_PAGE, `rendered ${cards} person cards, expected ${PEOPLE_PAGE}`);
 }));
 
+// ---- and so is the invitation list -----------------------------------------------------------------------
+// The same defect as the roster above, in the same file, left in place when the roster was fixed:
+// `invitesWithDetail` ended `ORDER BY i.id DESC LIMIT 50` and returned a bare array, so the page rendered fifty
+// cards and said nothing about the rest. Worse than the roster's version was — there was no search and no paging
+// either, so invitation 51 could not be reached AT ALL. An admin looking for one they had definitely sent would
+// have found a list quietly telling them they had not.
+//
+// Found by an unattended review round, which pointed at src/admin.mjs:145 — exactly the LIMIT line — five times
+// and could not repair it, because a repair changes the function's return shape and therefore three files.
+test("the invitation list is capped by default, pageable, and honest about what it is not showing", withAdmin({}, async (w) => {
+  const { INVITES_PAGE, invitesWithDetail } = await import("../src/admin.mjs");
+  const ins = w.db.prepare("INSERT INTO invitations (email, token, created_at) VALUES (?,?,?)");
+  for (let i = 0; i < INVITES_PAGE + 7; i++) ins.run(`inv${i}@example.org`, `tok-${i}`, "2026-08-01T00:00:00Z");
+  const total = w.db.prepare("SELECT COUNT(*) n FROM invitations").get().n;
+  assert.ok(total > INVITES_PAGE, `the fixture must exceed one page, got ${total}`);
+
+  const page = invitesWithDetail(w.db);
+  assert.equal(page.shown, INVITES_PAGE, "the default must be capped");
+  assert.equal(page.total, total, "and must report the whole count, not the page's");
+  assert.equal(invitesWithDetail(w.db, { limit: "all" }).shown, total, "'all' must mean all, or the cap is a wall");
+
+  // A nonsense limit falls back to the page size rather than reaching a LIMIT clause.
+  for (const bad of ["", "0", "-5", "banana", null]) {
+    assert.ok(invitesWithDetail(w.db, { limit: bad }).shown <= INVITES_PAGE, `limit=${bad} must not uncap the list`);
+  }
+
+  // Over HTTP, which is where the silence actually happened.
+  const admin = await w.signIn(w.people[0]);
+  const body = await (await w.get("/admin", admin)).text();
+  assert.match(body, new RegExp(`Invitations: showing ${INVITES_PAGE} of ${total}`), "the page must admit the cap");
+  assert.match(body, /invites=all/, "and offer a way to reach the rest");
+
+  // The cap is real in the RENDERED page, not only in the query. Counted by the revoke control each pending
+  // invitation carries — asserting on the function alone would pass even if the template mapped a stale list.
+  const shownCards = (body.match(/value="revoke"|\/admin\/invite\/revoke/g) ?? []).length;
+  assert.ok(shownCards >= INVITES_PAGE && shownCards < total,
+    `rendered ${shownCards} revoke controls against ${total} invitations — expected a page, not all of them`);
+
+  // Uncapped over HTTP too: the escape hatch has to work through the route, not only the function.
+  const allBody = await (await w.get("/admin?invites=all", admin)).text();
+  assert.match(allBody, new RegExp(`Invitations: showing ${total} of ${total}`), "invites=all must show all of them");
+
+  // CONTROL for "read from its own parameter": the two lists must not page each other. Without this, passing
+  // people=all and reading a longer invitation list would look exactly like the fix working.
+  const peopleAll = await (await w.get("/admin?people=all", admin)).text();
+  assert.match(peopleAll, new RegExp(`Invitations: showing ${INVITES_PAGE} of ${total}`),
+    "people=all must leave the invitation cap alone");
+}));
+
 // ---- removing a capability from somebody already rostered for it (increment AP) ------------------------------
 //
 // Walked as a lifecycle transition rather than read: an admin unchecks an activity for a volunteer who is confirmed

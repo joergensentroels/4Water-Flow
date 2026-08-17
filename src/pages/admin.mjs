@@ -45,7 +45,10 @@ export function adminFlash(t, code, vars) {
 // that passes a plain array still renders — the search UI simply does not appear.
 export function renderAdmin({ t, session, roles, who, people, invites, pattern, inviteLink, nextSeason, weeklyUse = {}, flash,
                              holidays = [], holidayCountry = null,
-                             roster = { q: "", shown: people.length, matching: people.length, total: people.length, limit: "all" } }) {
+                             roster = { q: "", shown: people.length, matching: people.length, total: people.length, limit: "all" },
+                             // Same defaulting for invitations, and for the same reason: a caller handing over a
+                             // plain array gets an uncapped list rather than a page claiming to be a page of one.
+                             inviteList = { shown: invites.length, total: invites.length, limit: "all" } }) {
   // `subject` is WHO or WHAT the button acts on, and it belongs in the accessible name. The card around the
   // button says it; a screen reader arriving at the button does not get the card. With four volunteers this page
   // announced "Remove entirely, button" four times over, and the same for every role grant, every capability
@@ -137,6 +140,13 @@ export function renderAdmin({ t, session, roles, who, people, invites, pattern, 
         <button type="submit">${t("admin.invite")}</button>
       </form>
     </div>
+    <p class="hint">${t("admin.invitesShowing", { shown: inviteList.shown, total: inviteList.total })}</p>
+    ${inviteList.shown < inviteList.total ? html`
+      <div class="chiprow" role="group">
+        ${[50, 200, "all"].map((n) => html`<a class="chip" href="/admin?invites=${n}"${
+          String(inviteList.limit) === String(n) ? raw(' aria-current="true"') : ""}>${
+          n === "all" ? t("admin.showAllInvites") : t("admin.showN", { n })}</a>`)}
+      </div>` : ""}
     ${invites.map((i) => html`
       <div class="card">
         <b>${i.email}</b>

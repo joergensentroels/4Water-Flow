@@ -129,6 +129,8 @@
   "admin.showN": "Show {n}",
   "admin.showAll": "Show everybody",
   "admin.invites": "Invitations",
+  "admin.invitesShowing": "Invitations: showing {shown} of {total}.",
+  "admin.showAllInvites": "Show all invitations",
   "admin.season": "Season",
   "admin.activities": "Activities",
   "admin.invite": "Send an invitation",

@@ -17,7 +17,7 @@ import { renderBoard, flashFor } from "./pages/board.mjs";
 import { renderPlanner, plannerFlash } from "./pages/planner.mjs";
 import { autoRoster, lockInProposals, discardProposals, countProposals, rosterReview } from "./roster.mjs";
 import { renderAdmin, adminFlash } from "./pages/admin.mjs";
-import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, setRole, setCapability, setPersonStatus,
+import { peopleWithDetail, PEOPLE_PAGE, invitesWithDetail, INVITES_PAGE, setRole, setCapability, setPersonStatus,
          savePattern, patternFromForm, addActivityToForm, proposeNextSeason,
          addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot,
          setClassesAnyway, sessionsOnDate } from "./admin.mjs";
@@ -651,9 +651,14 @@ export function buildApp({ db, pattern = loadPattern(), env = process.env, notif
       q: query.get("q") ?? "",
       limit: wanted === "all" ? "all" : Number(wanted) > 0 ? Number(wanted) : PEOPLE_PAGE,
     });
+    // Same treatment for invitations, and read from its own parameter so paging one list does not page the other.
+    const wantedInv = query.get("invites");
+    const inviteList = invitesWithDetail(db, {
+      limit: wantedInv === "all" ? "all" : Number(wantedInv) > 0 ? Number(wantedInv) : INVITES_PAGE,
+    });
     send(res, 200, renderAdmin({
       t, session: c.session, roles: c.roles, who: c.who,
-      people: roster.rows, roster, invites: invitesWithDetail(db), pattern: cfg, inviteLink: link,
+      people: roster.rows, roster, invites: inviteList.rows, inviteList, pattern: cfg, inviteLink: link,
       nextSeason: proposeNextSeason(cfg),
       weeklyUse: Object.fromEntries((cfg.weekly ?? []).map((w) => [
         `${w.dayOfWeek}:${w.hour}:${w.minute ?? 0}`,

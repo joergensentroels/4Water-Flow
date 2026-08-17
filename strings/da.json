@@ -129,6 +129,8 @@
   "admin.showN": "Vis {n}",
   "admin.showAll": "Vis alle",
   "admin.invites": "Invitationer",
+  "admin.invitesShowing": "Invitationer: viser {shown} af {total}.",
+  "admin.showAllInvites": "Vis alle invitationer",
   "admin.season": "Sæson",
   "admin.activities": "Aktiviteter",
   "admin.invite": "Send invitation",

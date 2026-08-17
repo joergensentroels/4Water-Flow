@@ -136,13 +136,31 @@ export function releaseFutureShifts(db, personId, today) {
     .run({ pid: personId, today }).changes;
 }
 
-export const invitesWithDetail = (db) =>
-  db.prepare(`SELECT i.id, i.email, i.created_at AS createdAt, i.accepted_at AS acceptedAt, r.name AS role,
-                     p.name AS personName
-                FROM invitations i
-                LEFT JOIN roles r ON r.id = i.role_id
-                LEFT JOIN people p ON p.id = i.person_id
-               ORDER BY i.id DESC LIMIT 50`).all();
+export const INVITES_PAGE = 50;
+
+// Counted, not merely capped — and pageable, so the ones past the cap can still be revoked.
+//
+// This used to end `ORDER BY i.id DESC LIMIT 50` and return the bare array. `peopleWithDetail` above already
+// carried the rule that breaks, in its own comment: a list that quietly stops reads as "that is everybody".
+// The people list says shown/total and offers 25/100/all. Invitations said nothing and offered nothing, so
+// invitation 51 was unreachable from the screen with no hint on the page that it existed — an admin hunting
+// for an invitation they had definitely sent would have found the list quietly telling them they had not.
+//
+// Nothing here reads a search term. Invitations are one email each and the screen has no field to search on;
+// the silent cap is what was wrong, and inventing a filter beside it would be a different change.
+export function invitesWithDetail(db, { limit = INVITES_PAGE } = {}) {
+  const all = limit === "all";
+  const total = db.prepare("SELECT COUNT(*) n FROM invitations").get().n;
+  const rows = db.prepare(`SELECT i.id, i.email, i.created_at AS createdAt, i.accepted_at AS acceptedAt, r.name AS role,
+                                  p.name AS personName
+                             FROM invitations i
+                             LEFT JOIN roles r ON r.id = i.role_id
+                             LEFT JOIN people p ON p.id = i.person_id
+                            ORDER BY i.id DESC
+                            ${all ? "" : "LIMIT :lim"}`)
+    .all(all ? {} : { lim: Number(limit) > 0 ? Number(limit) : INVITES_PAGE });
+  return { rows, shown: rows.length, total, limit: all ? "all" : Number(limit) || INVITES_PAGE };
+}
 
 // ---- the season's shape -------------------------------------------------------------------------------
 // Validate BEFORE writing, then write atomically. A half-written pattern.json is an outage on next boot,
