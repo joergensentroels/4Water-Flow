@@ -633,6 +633,69 @@ test("the invitation lifetime RUNBOOK states is the one the code enforces", asyn
   } finally { db.close(); }
 });
 
+// A NEGATIVE claim, which is the class this file's own header says nothing had ever covered.
+//
+// Three documents said "this repository has no remote yet" and used it to conclude CI had never run. By
+// 2026-08-17 the remote had existed for a week and CI had run twenty times — 13 red, then 7 green. README.md
+// was corrected, wrote up the thirteen-red episode, and drew the lesson in its own words: "no mechanical check
+// covers a negative claim, and 'CI has never run' is one." The identical claim then sat uncorrected in PLAN.md
+// and twice in RUNBOOK.md for another week, because a lesson recorded in one file does not reach the others.
+//
+// So: the check, not the resolution. "Has CI ever run" needs the network and is not checkable here, but the
+// PREMISE every one of those sentences rested on — that there is no remote — is settled by `git remote`, offline
+// and in milliseconds. Killing the premise is enough; no sentence can conclude "so CI has never run" from a
+// remote that demonstrably exists.
+test("no document claims this repository has no remote, when it has one", () => {
+  const remotes = spawnSync("git", ["remote"], { cwd: ROOT, encoding: "utf8" });
+  // If git cannot answer, say so rather than passing. A check that goes quiet when its instrument is missing is
+  // the failure this file exists to prevent — and it would pass forever in a source tarball with no .git.
+  assert.equal(remotes.status, 0, `could not ask git for remotes (${remotes.stderr?.trim() || "no stderr"}), so this check could not run`);
+  const names = remotes.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (names.length === 0) return;   // genuinely no remote: the documents are entitled to say so
+
+  // Matched on the CLAIM, not on a sentence: "no remote yet", "has no remote", "there is no remote". Anchored to
+  // the word `remote` preceded by a negation within a few words, so a rewording does not slip past.
+  const CLAIMS_NO_REMOTE = /\b(no|without a|has no|have no|lacks a)\s+(git\s+)?remote\b|\bremote\s+(yet|has not been added)\b/i;
+  const offenders = [];
+  for (const rel of DOCS) {
+    for (const [i, line] of read(rel).split("\n").entries()) {
+      // HISTORY IS NOT A CLAIM. What is false is the present tense — "there is no remote" — not an accurate
+      // account of when there wasn't one. Without this exemption the honest way to write a correction becomes
+      // the thing the check forbids: the bullets fixed on 2026-08-17 quote the old wording to explain what was
+      // wrong, and README.md's write-up of the thirteen-red episode is the best prose in the repository on
+      // this very subject. A rule that forbids describing the defect it exists to prevent is the wrong rule.
+      //
+      // The line this check itself is described on tripped it, which is the same trap this file already
+      // records one screen up — a comment naming an example key made that key undetectable, "describe, do not
+      // quote". That prose was reworded rather than exempted; these markers cover genuine narration.
+      if (/corrected|used to (say|read|end)|~~|had no|at the time|by then|back then/i.test(line)) continue;
+      if (CLAIMS_NO_REMOTE.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `these lines say this repository has no remote, but git reports ${names.join(", ")}:\n  ${offenders.join("\n  ")}`);
+
+  // CONTROLS. The pattern must actually match the sentences that were wrong — otherwise an empty offender list
+  // is a pattern that stopped looking, which is exactly how the original claim survived a week in three files.
+  assert.ok(CLAIMS_NO_REMOTE.test("this repository has no remote yet"), "the pattern must see the sentence it was written for");
+  assert.ok(CLAIMS_NO_REMOTE.test("there is no remote, so it has never executed"), "and PLAN.md's phrasing of it");
+  assert.ok(CLAIMS_NO_REMOTE.test("the repo lacks a remote"), "and a rewording");
+  assert.ok(!CLAIMS_NO_REMOTE.test("push to the remote and confirm the run is green"), "and must not fire on ordinary prose about a remote");
+  assert.ok(!CLAIMS_NO_REMOTE.test("no volunteer has used it"), "nor on an unrelated negative claim");
+
+  // And controls on the EXEMPTION, because an exemption is where a check goes quiet. It must let real history
+  // through and must NOT swallow a present-tense claim that happens to sit near a historical word.
+  const exempt = (line) => /corrected|used to (say|read|end)|~~|had no|at the time|by then|back then/i.test(line);
+  assert.ok(exempt("the repository had no remote at the time, so CI had never executed"),
+    "genuine history must pass — the rule cannot forbid describing the defect it prevents");
+  assert.ok(exempt("this bullet used to end \"there is no remote\""),
+    "and so must a correction that quotes the old wording");
+  assert.ok(!exempt("there is no remote, so it has never executed"),
+    "but the bare present-tense claim must NOT be exempt, or the hole is the size of the rule");
+  assert.ok(!exempt("the repository has no remote"),
+    "nor the plainest form of it");
+});
+
 test("the session lifetime docs/OIDC.md states is the one the cookie carries", async () => {
   const { cookieHeader } = await import("../src/session.mjs");
   const said = Number(/Sessions last (\d+) days/.exec(read("docs/OIDC.md"))?.[1]);

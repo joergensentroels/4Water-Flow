@@ -16,14 +16,14 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 549 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 550 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It read 551 until the count was measured on the version the Dockerfile pins. Seven of those were phantoms:
 `test/a11y.test.mjs` imported `test/css-audit.test.mjs` to borrow a helper, which re-registered that file's seven
 tests as subtests, so the suite counted them twice and reported a total nobody had. A count that goes up when a
 file is imported is not a measure of coverage. The helper moved to `tools/a11y.mjs` and the number is now real;
-four genuinely new tests bring it to 548, and the invitation-list cap adds the 549th.
+four genuinely new tests bring it to 548, the invitation-list cap adds the 549th, and the no-remote doc check the 550th.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent
@@ -72,7 +72,7 @@ cheaper to enumerate siblings deliberately than to keep discovering them.
 | **Y** | OIDC end to end, and the image's filesystem | `auth.mjs` said the callback "CANNOT be exercised without a provider", which was untrue and was itself the obstacle: a conforming provider in 90 lines proved PKCE, discovery, and three refusals. Then the same shape one layer down — `deploy.test.mjs` checked the Dockerfile's *inputs*, which cannot fail the way a build fails |
 | **Z** | the distribution nobody could see | `workloadSpread` was computed for the tests and shown to no one, while a planner locked in 178 proposals blind. Measuring the roster from zero found it evens COUNTS as well as availability permits — and concentrates three of four broad volunteers onto one weekday. Reported, not silently "fixed": which of those is capture and which is continuity is 4water's judgement, not mine |
 | **AA** | the nudge job accounts for itself on `/status` | The page reported seven facts and not the one whose absence hid the worst defect here: a job with nobody to nudge and a job that is dead both produce silence. `jobs` is optional on `buildApp`, the same shape that left `notifier` out of production, so the journey test asserts the line renders on a real boot — a monitor must not carry the defect it monitors |
-| **AB** | the suite only ran where it was written | Three of the four tests that boot the real server — including the acceptance gate — read a file `.gitignore` excludes, so they failed with ENOENT on any clone. Invisible because there is no remote: CI has never executed once, so nobody had ever cloned it. Found by a negative control failing on its CONTROL case, which meant my harness was wrong rather than the code |
+| **AB** | the suite only ran where it was written | Three of the four tests that boot the real server — including the acceptance gate — read a file `.gitignore` excludes, so they failed with ENOENT on any clone. Invisible because nobody had ever cloned it — the repository had no remote at the time, so CI had never executed. Found by a negative control failing on its CONTROL case, which meant my harness was wrong rather than the code |
 | **AC** | the export was unreadable for the people it is for | No BOM, so every Danish name arrived as mojibake in the one artefact the board opens; and a comma delimiter puts every row in one cell on a Danish locale. The first is a fix, the second is configuration — comma is RFC 4180, and which one is right depends on who opens the file |
 | **AD** | the shift reminder | `src/calendar.mjs` opens by saying missed shifts are the failure this app exists to prevent, and the answer so far reached only volunteers who went and subscribed to a feed. Confirmed shifts only — telling somebody to show up for a proposal is worse than silence. Keyed on the assignment id, so the existing UNIQUE constraint means one reminder per person per shift, ever |
 | **AE** | the documents, and the strings, checked both ways | Every mechanically checkable claim in six documents (84 of them) now verified by a test; translations checked in the unread direction too, which turned up seven strings nothing was showing |
@@ -282,11 +282,17 @@ up, add it there too.**
   still has to be run. Invite links are a fully working path meanwhile, and `/status` says which mode sign-in
   is in. The discovery FALLBACK is also verified live rather than only in unit tests: pointed at a provider with
   no well-known document, the app logs the failure, degrades to NextCloud's layout, and keeps working.
-- **CI has never run.** The workflow is written and correct; there is no remote, so it has never executed, and
-  "CI runs the suite on two Node versions" was stated as a fact in `RUNBOOK.md` when it was a plan. The
-  difference was not academic: until the AB increment the first run would have been red, because three tests read
-  a gitignored file. The suite is now verified against a real `git clone`, which is the closest thing to CI
-  available without a remote. **Push, and confirm the first run is green, before trusting that line.**
+- **~~CI has never run.~~ It has, and this bullet was the last place still saying otherwise.** _Corrected
+  2026-08-17._ The repository has a remote (`joergensentroels/4Water-Flow`), CI first ran **2026-08-10**, and
+  the record since is **13 red then 7 green** — every green run covering both `test (22.14)` and `test (24)`.
+  This bullet used to end "Push, and confirm the first run is green, before trusting that line", which had
+  been done a week before anybody re-read it.
+  The interesting part is not that it drifted but *where*: README.md corrected this same claim, wrote up the
+  thirteen-red episode, and drew the lesson — **"no mechanical check covers a negative claim, and 'CI has
+  never run' is one"** — while the identical claim sat uncorrected here and twice in `RUNBOOK.md`. A lesson
+  recorded in one file does not reach the other two. `test/docs.test.mjs` now settles it mechanically by
+  asking git whether a remote exists and refusing any document that asserts otherwise in the present tense —
+  history stated as history is fine, which is how the paragraph you are reading survives its own rule.
 - **Nothing has been observed with real volunteers.** Every usability judgement here is reasoned from the
   reported pain, not measured against somebody using it.
 - **Whether volunteers should read Danish or English is a decision nobody has made out loud.** `locale` is `"en"`

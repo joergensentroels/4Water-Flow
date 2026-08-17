@@ -356,22 +356,27 @@ What that means in practice:
   message naming the version it found, rather than failing at an import nobody can interpret.
 - **The Dockerfile pins an exact Node minor** (currently 22.14) so a host rebuild cannot move the runtime under
   the app. Do not relax that pin to `node:22`.
-- **⚠ The version the container ships has never run the suite.** Every test run in this project has been on
-  Node 24; the image pins 22.14. So the one runtime that matters in production is the least exercised, which is
-  exactly the shape of defect this project keeps finding. Two things narrow it, both measured rather than
-  assumed. The app touches only `exec`, `prepare` and `close` on the database and `run`/`get`/`all` on a
-  statement — the original 22.5-era surface, nothing added since — and the only SQL construct in it newer than
-  2018 is `ON CONFLICT … DO UPDATE` (SQLite 3.24, against roughly 3.47 bundled on 22.14). A test now enforces
-  that rather than trusting it: reach for `iterate`, `db.function` or any other later member and the suite fails
-  telling you the real floor has moved above the declared one. **That is a good argument, not a green build. The
-  first CI run on 22.14 is the actual evidence.**
-- **CI is set up to run the suite on both the pinned LTS and current Node, and has never actually run**, because
-  this repository has no remote yet. The workflow is correct and the intent stands — a breaking change in
-  `node:sqlite` should show up as a red build rather than as a broken deployment mid-season — but it is a plan,
-  not a thing that has happened, and the difference mattered: three tests read a file `.gitignore` excludes, so
-  the first CI run would have been red for a reason having nothing to do with Node. That is fixed, and the suite
-  is verified against an actual `git clone` rather than against this working copy. **Push the repo and confirm
-  the first run is green before relying on this line.**
+- **The version the container ships now DOES run the suite, on every push.** _Corrected 2026-08-17._ This
+  bullet used to open "⚠ The version the container ships has never run the suite — every test run in this
+  project has been on Node 24" and close "That is a good argument, not a green build. **The first CI run on
+  22.14 is the actual evidence.**" That evidence exists: every green CI run covers `test (22.14)` alongside
+  `test (24)`, so the runtime that matters in production is exercised on the same commit as the other.
+  The argument it replaced is kept because it is still the reason the floor holds between runs: the app touches
+  only `exec`, `prepare` and `close` on the database and `run`/`get`/`all` on a statement — the original
+  22.5-era surface, nothing added since — and the only SQL construct newer than 2018 is `ON CONFLICT … DO
+  UPDATE` (SQLite 3.24, against roughly 3.47 bundled on 22.14). A test enforces that rather than trusting it:
+  reach for `iterate`, `db.function` or any other later member and the suite fails telling you the real floor
+  has moved above the declared one.
+- **CI runs the suite on both the pinned LTS and current Node, and that is now a fact rather than a plan.**
+  _Corrected 2026-08-17._ This bullet read "has never actually run, because this repository has no remote yet"
+  and ended "Push the repo and confirm the first run is green before relying on this line." The repository has
+  had a remote since **2026-08-10** and CI has run 20 times — **13 red, then 7 green**.
+  The thirteen reds were not Node's doing, and are worth knowing about: three tests read a file `.gitignore`
+  excludes, so they passed only on the machine that wrote them, and the failures were unreadable without a
+  signed-in session with repo admin — which is why nobody noticed for days. Both are fixed, the suite is
+  verified against an actual `git clone` rather than this working copy, and a red build is now a real finding.
+  Why this line survived after README.md had already corrected the same claim: **no mechanical check covers a
+  negative claim.** One does now — see `test/docs.test.mjs`.
 
   All four steps have now been exercised, so a red first build should be triaged as a real finding rather than
   as untested scaffolding. The first two (`node --version`, `node --test`) ran against a real clone. The last
