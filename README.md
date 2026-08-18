@@ -17,8 +17,13 @@ step by a test), so a Danish or English-speaking org changes one word; another l
 `strings/<lang>.json`.
 
 It runs from a clone with no install and no build step — Node >= 22.13 and SQLite, zero runtime dependencies.
-`RUNBOOK.md` covers deployment, backup and handover. It is AGPL-3.0: run it, adapt it, and if you offer it as a
-service, share your changes back.
+`RUNBOOK.md` covers deployment, backup and handover.
+
+**Licence: AGPL-3.0-or-later.** Copyright (C) 2026 4water.org. Run it, adapt it, and if you offer it as a
+service, share your changes back. `LICENSE` holds the licence text verbatim and nothing else — it used to be
+a 28-line summary that linked to the text, which GitHub's licence detector could not match, so the repository
+showed *no licence at all*. A nonprofit looking for something it is allowed to use reads that as "all rights
+reserved", which was the opposite of the intent.
 
 ```bash
 npm test

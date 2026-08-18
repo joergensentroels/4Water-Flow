@@ -305,11 +305,34 @@ test("CI runs the suite, the fresh-deployment check, and the backup restore", ()
     "use `npm ci` and not `npm install` — CI must build from the lockfile, not resolve versions afresh");
 });
 
-test("the licence tells the board the choice is theirs", () => {
+// This asserted that LICENSE named 4water and told the BOARD the choice was theirs, because "a licence
+// picked by the developer without saying so is a decision taken quietly". That guard did its job and the
+// decision has since been taken out loud by the owner: public, AGPL, any nonprofit may use it. What it was
+// protecting — nothing about the licence decided in silence — is kept, and one thing is added that the old
+// shape actively prevented.
+//
+// LICENSE now holds the AGPL text VERBATIM and nothing else. It used to be a 28-line summary that linked to
+// the real text, and GitHub's licence detector matches against the canonical body: it could not identify a
+// summary, so the repository page showed NO LICENCE AT ALL. A nonprofit looking for something it is allowed
+// to run reads that as "all rights reserved" — the opposite of the intent, enforced by nobody, and invisible
+// from inside the repo because every file said AGPL.
+//
+// So the project-specific part moved to README.md, where humans read it and no matcher is looking.
+test("the licence is stated, decided in the open, and machine-identifiable", () => {
   const l = readFileSync(path.join(ROOT, "LICENSE"), "utf8");
-  assert.match(l, /AGPL/);
-  assert.match(l, /4water/);
-  assert.match(l, /board/i, "a licence picked by the developer without saying so is a decision taken quietly");
+  assert.match(l, /GNU AFFERO GENERAL PUBLIC LICENSE/, "LICENSE must be the AGPL text itself");
+  assert.match(l, /Remote Network Interaction/,
+    "clause 13 is what makes this the AGPL rather than the GPL — its absence means the wrong text was pasted");
+  // The detector's requirement, stated as the thing it actually needs: no project-specific prose in the body.
+  assert.ok(!/4water/.test(l),
+    "LICENSE must stay verbatim — project-specific text is what stopped GitHub identifying it, so that "
+    + "belongs in README.md, not here");
+  assert.ok(l.length > 30000, `LICENSE is ${l.length} bytes; the full AGPL-3.0 is ~34k, so this is a summary again`);
+
+  // And the human half: the decision, the holder, and the reasoning, where a reader will find them.
+  const r = readFileSync(path.join(ROOT, "README.md"), "utf8");
+  assert.match(r, /AGPL-3\.0/, "README must state the licence — a licence nobody mentions is a decision taken quietly");
+  assert.match(r, /Copyright \(C\) 2026 4water\.org/, "and name the copyright holder, which LICENSE no longer does");
 });
 
 // ---- the version must not claim a name a tag has already given to a different commit -------------------------------
