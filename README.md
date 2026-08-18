@@ -6,6 +6,20 @@ to use on the phone". Design decisions and open questions live in the discovery 
 spec"**, which is 4water's own record and is deliberately not in this repository. Ask whoever handed you this
 for it; nothing here depends on having it, and every decision it settles is also explained where it applies.
 
+**Another organisation can run this.** It was built for 4water, but nothing about Copenhagen, salsa or Danish
+is in the code — every activity name, weekday and user-visible string comes from `config/pattern.json` and
+`strings/<locale>.json`, and `test/seams.test.mjs` fails the build if one leaks into `src/`. See *The seams*
+below.
+
+To adapt it you edit configuration, not code: your activities and weekly rhythm in `config/pattern.json`, your
+season dates, `calendar.timezone`, and `locale`. **Danish and English ship complete** (421 keys each, kept in
+step by a test), so a Danish or English-speaking org changes one word; another language means one new
+`strings/<lang>.json`.
+
+It runs from a clone with no install and no build step — Node >= 22.13 and SQLite, zero runtime dependencies.
+`RUNBOOK.md` covers deployment, backup and handover. It is AGPL-3.0: run it, adapt it, and if you offer it as a
+service, share your changes back.
+
 ```bash
 npm test
 ```
