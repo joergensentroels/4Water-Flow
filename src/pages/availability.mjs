@@ -112,12 +112,26 @@ export function groupByDate(rows) {
 //
 // "Answered" means what it means everywhere else in this file: a stored answer at hour or day level. Silence is not
 // an answer, which is the whole reason the radio group is tri-state.
+//
+// COUNTED IN DATES, and a date is answered only when EVERY time on it is.
+//
+// It counted (date, hour) rows until 2026-08-23, and both strings that report it have always said "dates" — which
+// was loose while a date carried one time and became visibly wrong once the form grouped by date: the screen
+// showed 35 rows while saying "53 dates", and answering one whole day moved the counter by two. Arithmetically
+// consistent, and it reads as a bug.
+//
+// EVERY time on the date, not any. Silence is not consent, so a date with one time answered and another blank is
+// not an answered date. `shown` is the effective answer, so a single whole-day row satisfies all of them at once
+// — which is why answering the day now moves the counter by exactly one.
+//
+// groupByDate rather than a second grouping written here: the form draws from that function, and a counter that
+// grouped dates its own way could disagree with the list it sits directly above.
 export function answerProgress(db, personId, seasonId, from) {
-  const rows = datesNeedingAnswer(db, seasonId, from);
   const answers = currentAnswers(db, personId);
+  const dates = groupByDate(datesNeedingAnswer(db, seasonId, from));
   let answered = 0;
-  for (const r of rows) if (shown(answers, r.date, r.hour) !== "") answered++;
-  return { total: rows.length, answered, remaining: rows.length - answered };
+  for (const g of dates) if (g.hours.every((h) => shown(answers, g.date, h.hour) !== "")) answered++;
+  return { total: dates.length, answered, remaining: dates.length - answered };
 }
 
 // Bulk setting. Opening the real page in a browser measured 3,750 pixels — 51 date rows and 153 radio

@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
-import { bulkTargets, bulkScopes, datesNeedingAnswer, groupByDate, saveAvailability, currentAnswers, shown } from "../src/pages/availability.mjs";
+import { bulkTargets, bulkScopes, datesNeedingAnswer, groupByDate, saveAvailability, currentAnswers, shown, answerProgress } from "../src/pages/availability.mjs";
 import { makeT, loadPattern } from "../src/config.mjs";
 
 const withWorld = (opts, fn) => async () => {
@@ -340,4 +340,59 @@ test("a fabricated day answer for an unoffered date is ignored", withWorld({}, a
   const real = datesNeedingAnswer(w.db, w.seasonId, w.today)[0].date;
   saveAvailability(w.db, me, { [`day:${real}`]: "1" }, w.seasonId, w.today);
   assert.equal(w.db.prepare("SELECT COUNT(*) c FROM availability_day WHERE person_id=?").get(me).c, 1);
+}));
+
+// ---- the counter counts DATES, and a date needs all of its times ---------------------------------------
+//
+// It counted (date, hour) rows until 2026-08-23 while both strings reporting it said "dates". That was loose
+// while a date carried one time and became visibly wrong once the form grouped by date: 35 rows on screen above
+// the words "53 dates", and answering one whole day moved it by two.
+//
+// The existing runthrough test asserts `/0 of \d+ dates answered/` — a wildcard total, so it passed unchanged
+// across this change and could not have caught it either way. These pin the semantics it leaves open.
+test("progress counts dates, not the times on them", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const dates = new Set(rows.map((r) => r.date));
+  const p = answerProgress(w.db, w.people[0], w.seasonId, w.today);
+
+  assert.equal(p.total, dates.size, "the total must be the number of dates the form shows");
+  assert.ok(rows.length > dates.size,
+    "the fixture must have a date with several times, or this cannot tell dates from slots");
+  assert.equal(p.answered, 0, "and nobody has answered anything yet");
+}));
+
+test("a date is answered only when every time on it is", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const multi = groupByDate(rows).find((g) => g.hours.length > 1);
+  const me = w.people[0];
+  const before = answerProgress(w.db, me, w.seasonId, w.today).answered;
+
+  // One of the times, not all of them. Silence is not consent for the rest, so the date must not count.
+  saveAvailability(w.db, me, { [`slot:${multi.date}:${multi.hours[0].hour}`]: "1" }, w.seasonId, w.today);
+  assert.equal(answerProgress(w.db, me, w.seasonId, w.today).answered, before,
+    "a partly answered date must not count — the planner still cannot tell about the other time");
+
+  // Now the rest of them, and it counts exactly once however many times it had.
+  const rest = Object.fromEntries(multi.hours.slice(1).map((h) => [`slot:${multi.date}:${h.hour}`, "0"]));
+  saveAvailability(w.db, me, rest, w.seasonId, w.today);
+  assert.equal(answerProgress(w.db, me, w.seasonId, w.today).answered, before + 1,
+    `a date with ${multi.hours.length} times must add ONE to the count, not ${multi.hours.length}`);
+}));
+
+test("one whole-day answer moves the counter by one", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const multi = groupByDate(rows).filter((g) => g.hours.length > 1);
+  const me = w.people[0];
+  const before = answerProgress(w.db, me, w.seasonId, w.today).answered;
+
+  saveAvailability(w.db, me, { [`day:${multi[0].date}`]: "1" }, w.seasonId, w.today);
+  const after = answerProgress(w.db, me, w.seasonId, w.today);
+  assert.equal(after.answered, before + 1,
+    "answering the day is one answer and must read as one, whatever the day's slot count");
+  assert.equal(after.remaining, after.total - after.answered, "remaining must stay consistent with the total");
+
+  // CONTROL: the counter is not simply stuck at +1 per call — a second date moves it again.
+  saveAvailability(w.db, me, { [`day:${multi[1].date}`]: "0" }, w.seasonId, w.today);
+  assert.equal(answerProgress(w.db, me, w.seasonId, w.today).answered, before + 2,
+    "and an 'unavailable' day is an answer too");
 }));

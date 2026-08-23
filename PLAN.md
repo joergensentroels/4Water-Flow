@@ -16,7 +16,7 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 561 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 564 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It once read 551 for the wrong reason, and now reads it for the right one. Seven of the original total were
@@ -34,6 +34,9 @@ grouped availability form: the grouping itself, a whole-day answer stored as ONE
 an exception surviving a save that also sets the day, a stale hour answer ceasing to override once the day is
 answered, and the allow-list refusing a fabricated date. Two of those were decorative when first written —
 removing the code they existed for left them green — and were rewritten until breaking the feature broke them.
+Three more pin the counter to DATES rather than the times on them: the total is the number of dates the form
+shows, a partly answered date does not count, and one whole-day answer moves it by one. The runthrough test
+that already reported progress asserts a wildcard total, so it passed across that change either way.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent
