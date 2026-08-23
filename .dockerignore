@@ -51,3 +51,9 @@ tools/proseproof.mjs
 # serves, but it is not part of serving them — and its dependencies are devDependencies the image never installs.
 tools/a11y.mjs
 tools/a11y-run.mjs
+
+# Standing up a demo instance for people to try. It runs on the HOST — it builds the demo database, creates an
+# administrator and prints the environment to start the app with — so it has no business inside the image that
+# serves a real roster. tools/bootstrap.mjs is the opposite case and deliberately ships: the RUNBOOK tells an
+# operator to run it with `docker compose exec`.
+tools/demo-serve.mjs
