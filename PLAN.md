@@ -16,7 +16,7 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 554 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 556 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It once read 551 for the wrong reason, and now reads it for the right one. Seven of the original total were

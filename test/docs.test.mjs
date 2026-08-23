@@ -345,6 +345,68 @@ test("every document's placeholder list names the same items as config/pattern.j
   }
 });
 
+// The demo instructions must never print the developer sign-in.
+//
+// tools/demo-serve.mjs prints how to start a demo instance on a URL other people can reach. It shells out to
+// tools/demo.mjs, whose own closing advice is `FOURWATER_AUTH=dev ...` — correct for local development and
+// dangerous here, because dev sign-in is passwordless entry as any of the twelve demo people. Inherited, that
+// line printed ABOVE the production instructions, so the first start command an operator read was the wrong
+// one. Fixed by discarding demo.mjs's stdout; asserted here so it stays fixed.
+//
+// The builder is a PURE function precisely so this can run without building a database or starting a server.
+test("the demo instructions never offer the developer sign-in", async () => {
+  const { demoInstructions } = await import("../tools/demo-serve.mjs");
+  const text = demoInstructions({
+    email: "you@example.org", personId: 13, granted: ["salsa"], dbPath: "/tmp/demo.db",
+    pattern: "demo-pattern.json", baseUrl: "https://box.example.ts.net:8444",
+    inviteUrl: "https://box.example.ts.net:8444/invite/tok", appPort: 8080, loopback: false,
+    origin: "https://box.example.ts.net:8444", people: 13, sessions: 118, season: "demo-2026",
+  });
+
+  assert.ok(!/FOURWATER_AUTH/.test(text),
+    `the demo instructions name FOURWATER_AUTH, which enables passwordless sign-in:
+${text}`);
+  assert.ok(!/dev/.test(text.replace(/device|developer sign-in/g, "")),
+    "the demo instructions mention a dev mode");
+
+  // CONTROLS. Without these the assertions above would pass on an empty string, which is the shape a builder
+  // takes when it has been refactored into returning nothing.
+  assert.ok(text.includes("NODE_ENV=production"), "the instructions must name production mode");
+  assert.ok(text.includes("FOURWATER_SECRET"), "and the secret the app refuses to start without");
+  assert.ok(text.includes("https://box.example.ts.net:8444/invite/tok"), "and the invite link");
+  assert.ok(text.includes("PORT=8080"), "and the app port, which is not the port in the base URL");
+  assert.ok(!text.includes("PORT=8444"), "and must NOT tell the app to bind the proxy's own port");
+});
+
+// And importing it must not DO anything: a tool whose report runs at import time takes the suite with it.
+//
+// Asserted on the SOURCE rather than by watching for the database it would build. The first version compared
+// whether demo.db existed before and after the import -- and demo.db is gitignored, so that test could only
+// ever have run on a machine that had already built one. The sibling check in this suite ("no test depends on
+// a file git does not carry") caught it immediately, which is the third time this project has written a test
+// that reads an ignored path.
+test("importing the demo tool does not build a database or exit", async () => {
+  const mod = await import("../tools/demo-serve.mjs");
+  assert.equal(typeof mod.demoInstructions, "function", "the pure builder must be importable");
+
+  // Reaching this line already proves the import neither threw nor called process.exit. What it cannot prove is
+  // that nothing was SPAWNED, so the guard is checked directly: every side effect must sit after the
+  // main-module test, not before it.
+  const src = read("tools/demo-serve.mjs");
+  const guard = src.indexOf("if (process.argv[1]");
+  assert.ok(guard > 0, "tools/demo-serve.mjs no longer has a main-module guard");
+  for (const effect of ["execFileSync(", "openDb(", "bootstrapAdmin(", "process.exit("]) {
+    const at = src.indexOf(effect);
+    assert.ok(at === -1 || at > guard,
+      `tools/demo-serve.mjs calls ${effect} before its main-module guard (at character ${at}, guard at ` +
+      `${guard}) — importing it would run that`);
+  }
+  // CONTROL: the scan must be able to fail. If indexOf stopped finding these, the loop above would pass by
+  // finding nothing, which is the same shape as a green run over an empty list.
+  assert.ok(src.includes("execFileSync(") && src.includes("bootstrapAdmin("),
+    "the side-effect scan found neither call it looks for, so it is not proving anything");
+});
+
 // One place may state the test count, and it is PLAN.md.
 //
 // Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK claimed a
