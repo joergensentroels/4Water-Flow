@@ -34,6 +34,13 @@
   --yes: #0a6690;
   --no: #b32020;          /* their red, darkened from #e51919 for the same reason */
   --tap: 48px;            /* every interactive target is at least this tall — thumbs, not cursors */
+  /* The reading column. ONE token, because three things have to agree about it: the page body, the tab strip
+     above it, and the brand bar above that. Only `main` was centred, so on a wide screen the content sat in the
+     middle while the tabs began at the far left and the volunteer's name was pinned to the far right — measured
+     at 1600px, the column ran 473–1113 while the first tab started at 16 and the name ended at 1569. The "you
+     are here" pill had no visual relationship to the page it described. Phone-first means the wide case is the
+     one nobody looks at. */
+  --col: 40rem;
 }
 
 /* Dark mode is TRUE BLACK rather than dark grey, because that is what 4water.org actually is. */
@@ -67,7 +74,13 @@ body {
 header.bar {
   position: sticky; top: 0; z-index: 5;
   display: flex; align-items: center; gap: .55rem;
-  padding: .75rem 1rem;
+  /* Full-bleed BLACK, column-aligned CONTENT. The bar has to span the whole width — it is the brand frame, and a
+     black band with white gutters either side is not what 4water's site looks like — but the wordmark and the
+     volunteer's name belong over the reading column, not in the far corners of a 27-inch monitor.
+     max() rather than a wrapper element so no markup changes: below --col it degrades to the plain 1rem gutter,
+     which is the phone case and the one that matters most. */
+  padding-block: .75rem;
+  padding-inline: max(1rem, calc((100% - var(--col)) / 2 + 1rem));
   background: #000;
   color: #ffffff;
   /* Not pure black: in dark mode the page behind is also black, and a sticky bar with no edge lets content
@@ -78,7 +91,7 @@ header.bar h1 { margin: 0; font-size: 1.05rem; font-weight: 650; letter-spacing:
 header.bar .who { margin-left: auto; color: #c3cbd1; font-size: .85rem; }   /* 11.4:1 on black — checked, not guessed */
 header.bar .drop { flex: 0 0 auto; color: #5cc8f5; }
 
-main { max-width: 40rem; margin: 0 auto; padding: 1rem; }
+main { max-width: var(--col); margin: 0 auto; padding: 1rem; }
 
 /* WRAPS, and does not scroll sideways. It scrolled until this was measured in a browser at 375px, and the
    measurement is the argument: a plain volunteer on /plan had five tabs totalling 493px of content, and the one
@@ -88,8 +101,16 @@ main { max-width: 40rem; margin: 0 auto; padding: 1rem; }
    Nothing could scroll it into view, either: the CSP forbids browser JavaScript on purpose, so there is no
    scrollIntoView to reach for, and there was no gradient or mask hinting that more tabs existed. Wrapping costs
    one extra row for a volunteer and two for an admin, and is the only fix available that keeps every destination
-   and the current-page marker visible without JavaScript. .chiprow below already wraps for its own reasons. */
-nav.tabs { display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 1rem 0; }
+   and the current-page marker visible without JavaScript. .chiprow below already wraps for its own reasons.
+
+   Centred on --col so the strip sits over the page it navigates. It does not carry a background, so unlike the
+   bar above it needs nothing but a max-width and auto margins; the 1rem padding then lines its first pill up with
+   the body text below. Wrapping is unaffected — the wrap happens at the column edge instead of the window's,
+   which on a wide screen is the only place it could sensibly happen anyway. */
+nav.tabs {
+  display: flex; flex-wrap: wrap; gap: .5rem;
+  max-width: var(--col); margin-inline: auto; padding: .5rem 1rem 0;
+}
 nav.tabs a {
   flex: 0 0 auto; padding: .55rem .9rem; border-radius: 999px;
   border: 1px solid var(--edge); background: var(--card);
