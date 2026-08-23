@@ -16,7 +16,7 @@ import os from "node:os";
 import { ROOT, loadPattern, roleSlotsFor } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
 import { bootstrapAdmin } from "../tools/bootstrap.mjs";
-import { redeemInvite, rolesOf } from "../src/auth.mjs";
+import { redeemInvite, rolesOf, createInvite } from "../src/auth.mjs";
 import { writeSeasonSpanningToday } from "../tools/season-fixture.mjs";
 
 const freshDir = () => mkdtempSync(path.join(os.tmpdir(), "4water-first-"));
@@ -202,6 +202,13 @@ test("bootstrap creates the first admin and hands back a working sign-in link", 
     const redeemed = redeemInvite(db, r.inviteToken, { name: "The Chair" });
     assert.equal(redeemed.ok, true);
     assert.deepEqual(redeemInvite(db, r.inviteToken, {}), { ok: false, reason: "already_used" });
+
+    // THE LINE THIS TEST WAS MISSING. It redeemed the invite and never looked at what that did to the roster,
+    // so a second row for the same human passed straight through it for as long as this test has existed.
+    assert.equal(redeemed.personId, r.personId,
+      "redeeming the bootstrap invite must sign in AS the administrator it created, not as a new person");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, 1,
+      "bootstrap-then-redeem must leave ONE person, not the administrator plus a duplicate");
     db.close();
   } finally { cleanup(dir); }
 });
@@ -217,6 +224,66 @@ test("bootstrap is idempotent and never duplicates a person", () => {
     assert.equal(second.created, false);
     assert.equal(second.alreadyAdmin, true, "and it should say the role was already there");
     assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, 1);
+    db.close();
+  } finally { cleanup(dir); }
+});
+
+// Found by rehearsing the RUNBOOK's first-run procedure against a real production boot, which is the only way
+// it could have been found: every part of it passed its own test.
+//
+// bootstrapAdmin creates the person AND an invite for the same address, and redeemInvite always INSERTed. So a
+// fresh deployment ended up with two active people before a single volunteer had joined — one named by their
+// email address holding admin, and one holding admin+planner that nobody could sign in to, because bootstrap
+// leaves auth_subject NULL for OIDC to adopt later. The roles were split across the two, and both counted as
+// volunteers.
+//
+// The neighbouring idempotency test covers running bootstrap TWICE. Nothing covered bootstrap THEN redeem,
+// which is the documented procedure.
+test("the bootstrapped administrator is one person, and can sign in again afterwards", () => {
+  const dir = freshDir();
+  try {
+    const db = new DatabaseSync(path.join(dir, "app.db"));
+    migrate(db);
+    const r = bootstrapAdmin(db, { email: "chair@4water.org", name: "The Chair" });
+    const redeemed = redeemInvite(db, r.inviteToken, { name: "The Chair" });
+
+    assert.equal(redeemed.ok, true);
+    assert.equal(redeemed.personId, r.personId, "redemption must adopt, not insert");
+    const people = db.prepare("SELECT id, name, auth_provider, auth_subject FROM people").all();
+    assert.equal(people.length, 1, `expected one person, got ${JSON.stringify(people)}`);
+    assert.equal(people[0].name, "The Chair",
+      "the surviving row must be the named administrator, not one named by their email address");
+    assert.ok(rolesOf(db, r.personId).includes("admin"), "and must still hold admin");
+
+    // They must have a way back in once this session expires: the invite they just used is spent, and with no
+    // auth_subject and no OIDC configured there was none. Redemption binds the credential it was used with.
+    assert.equal(people[0].auth_provider, "invite");
+    assert.ok(people[0].auth_subject, "the adopted person must end up with a usable credential, not a NULL subject");
+    db.close();
+  } finally { cleanup(dir); }
+});
+
+// THE CONTROL for the change above, and it is the assertion that matters most: adoption must happen ONLY for an
+// invitation that explicitly names a person. If it leaked into ordinary invites — by matching on the email
+// address, say — then a leaked link would take over an existing volunteer's account and history instead of
+// producing a spurious empty one, which is strictly worse than the bug being fixed.
+test("an ordinary invitation still creates a person, even for an address already on the roster", () => {
+  const dir = freshDir();
+  try {
+    const db = new DatabaseSync(path.join(dir, "app.db"));
+    migrate(db);
+    const r = bootstrapAdmin(db, { email: "chair@4water.org", name: "The Chair" });
+    redeemInvite(db, r.inviteToken, { name: "The Chair" });
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, 1);
+
+    // An admin invites the SAME address again. person_id is null, so this must NOT adopt.
+    const { token } = createInvite(db, { email: "chair@4water.org", roleName: "volunteer" });
+    const second = redeemInvite(db, token, { name: "Somebody Else" });
+    assert.equal(second.ok, true);
+    assert.notEqual(second.personId, r.personId,
+      "an invitation that names no person must create one — adoption by address would let a leaked link take " +
+      "over an existing volunteer");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, 2);
     db.close();
   } finally { cleanup(dir); }
 });

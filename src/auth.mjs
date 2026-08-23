@@ -254,11 +254,20 @@ const INVITE_TTL_DAYS = 14;
 // DOES scrub, so the same row reads as "invited somebody" afterwards without any code having to remember to
 // blank it. Every other audit detail already referred to people as `person:<id>` for this reason; this one was
 // the exception, and it was the one carrying the most identifying value.
-export function createInvite(db, { email, roleName = "volunteer", now = new Date() }) {
+// `personId` names the person this invitation is FOR, and it is normally null — an admin inviting an address
+// is inviting somebody not on the roster yet, and redemption creates them. It is set only by
+// tools/bootstrap.mjs, which has already created the person it is inviting, and without it redemption made a
+// SECOND row for the same human: see redeemInvite below for the measurement.
+//
+// Deliberately NOT inferred from the email. Matching an invitation to an existing person by address would mean
+// a leaked link takes over that person's account and history, instead of producing a spurious empty one — a
+// strictly worse failure, and the same shape as the linkIdentity concern about adopting on an unverified
+// address. An explicit id set by the caller that created the person carries no such risk.
+export function createInvite(db, { email, roleName = "volunteer", personId = null, now = new Date() }) {
   const token = randomBytes(24).toString("base64url");
   const roleId = db.prepare("SELECT id FROM roles WHERE name = ?").get(roleName)?.id ?? null;
-  const { id } = db.prepare(`INSERT INTO invitations (email, token, role_id, created_at)
-                             VALUES (?,?,?,?) RETURNING id`).get(email, hashToken(token), roleId, now.toISOString());
+  const { id } = db.prepare(`INSERT INTO invitations (email, token, role_id, created_at, person_id)
+                             VALUES (?,?,?,?,?) RETURNING id`).get(email, hashToken(token), roleId, now.toISOString(), personId);
   // The raw token is returned ONCE and stored only as a hash — a stolen database must not yield working
   // invite links. Same reasoning as never storing a password.
   return { token, id };
@@ -288,9 +297,32 @@ export function redeemInvite(db, token, { name, now = new Date() } = {}) {
   let personId;
   db.exec("BEGIN");
   try {
-    const r = db.prepare("INSERT INTO people (name, contact, auth_provider, auth_subject) VALUES (?,?,?,?)")
-      .run(name || row.email, row.email, "invite", `invite:${row.id}`);
-    personId = Number(r.lastInsertRowid);
+    // ADOPT the person the invitation already names, rather than always inserting.
+    //
+    // Measured 2026-08-23 by rehearsing the RUNBOOK's own first-run procedure against a production boot.
+    // `tools/bootstrap.mjs` creates the first administrator AND an invite for the same address; this INSERT
+    // then made a second row for the same human. The result was two active people on a one-person roster:
+    // one named by their email address holding admin, and one holding admin+planner that nobody could ever
+    // sign in to, because bootstrap leaves auth_subject NULL. Both counted as volunteers. The existing
+    // idempotency test covers running bootstrap TWICE, not bootstrap-then-redeem, which is why it was green.
+    //
+    // Only an invitation carrying an explicit person_id adopts. An ordinary admin-created invite still has
+    // person_id NULL and still creates a person, so nothing about the leaked-link risk changes — see
+    // createInvite above for why matching on the email address instead would have been worse.
+    if (row.person_id) {
+      personId = Number(row.person_id);
+      // Claim the credential slot if that person has none. bootstrap creates them as provider `oidc` with a
+      // NULL subject so a later NextCloud sign-in can adopt them; until OIDC exists, that leaves them with no
+      // way back in once this session expires — the invite they just used is spent. Binding the invite here
+      // makes them a normal invite-provider person, keeping their id and history. An existing subject is left
+      // alone: it is a working credential and this must not overwrite one.
+      db.prepare(`UPDATE people SET auth_provider = 'invite', auth_subject = ?
+                   WHERE id = ? AND auth_subject IS NULL`).run(`invite:${row.id}`, personId);
+    } else {
+      const r = db.prepare("INSERT INTO people (name, contact, auth_provider, auth_subject) VALUES (?,?,?,?)")
+        .run(name || row.email, row.email, "invite", `invite:${row.id}`);
+      personId = Number(r.lastInsertRowid);
+    }
     if (row.role_id) db.prepare("INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?,?)").run(personId, row.role_id);
     // Marking accepted inside the same transaction is what makes it single-use under concurrency.
     const upd = db.prepare("UPDATE invitations SET accepted_at = ?, person_id = ? WHERE id = ? AND accepted_at IS NULL")

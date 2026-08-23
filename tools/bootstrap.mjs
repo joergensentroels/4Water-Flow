@@ -46,7 +46,12 @@ export function bootstrapAdmin(db, { email, name, baseUrl = "", roles = null }) 
   if (plannerRole) db.prepare("INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?,?)").run(person.id, plannerRole.id);
 
   // An invite link is the way in when OIDC is not configured yet — which is the normal state on day one.
-  const { token } = createInvite(db, { email, roleName: "admin" });
+  //
+  // `personId` is passed because this function has ALREADY created the person above. Without it, redeeming
+  // this link inserted a second row for the same human and split the roles across the two: the redeemed one
+  // held admin, and this one — which nobody can sign in to, auth_subject being NULL — held admin and planner.
+  // Both were status 'active', so a fresh deployment counted two volunteers before a single one had joined.
+  const { token } = createInvite(db, { email, roleName: "admin", personId: person.id });
   return {
     ok: true, personId: person.id, created, alreadyAdmin: Boolean(already),
     inviteToken: token,
