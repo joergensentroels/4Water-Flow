@@ -68,6 +68,8 @@
   "availability.yes": "Available",
   "availability.no": "Unavailable",
   "availability.unknown": "No answer yet",
+  "availability.wholeDay": "The whole day",
+  "availability.bySlot": "Answer the {count} times separately",
   "role.admin": "Administrator",
   "role.planner": "Planner",
   "role.volunteer": "Volunteer",

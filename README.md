@@ -146,10 +146,11 @@ because the count went stale the moment a fourth was added: three documents said
   shift the app would never have scheduled. `config/pattern.json` corrected the rhythm and recorded the lesson:
   a provenance claim is a claim, and this one went unchecked because nothing reads the spec except a person
   deciding to.
-- **How many Sunday slots there really are.** <!--ph:sundaySlots--> The export states 13:00–16:00, which is a range; this app models
-  discrete timeslots, so one 15:00 slot stands in for whatever the real granularity is. A simplification rather
-  than an invention, but still 4water's answer — and several times on one day is fully supported, editable from
-  the Administration screen.
+- ~~**How many Sunday slots there really are.**~~ — **answered by 4water on 2026-08-23: four one-hour slots,
+  13:00–17:00**, with Salsa and Bachata running simultaneously in each, so a volunteer says when they are free and
+  the planner decides which dance they take. Note that this EXTENDS the export's stated 13:00–16:00 by an hour
+  rather than subdividing it, so it is recorded as their correction and not as a re-reading of the source. It was
+  one 15:00 slot standing in while the question was open.
 - ~~**`board.cutoffDays`**~~ — **settled by 4water: `7`.** A week's notice, so there is realistic time to find a
   replacement. It does not block the hand-back; it marks it as short notice in the flash and in the channel
   announcement, so a planner sees the urgency without the volunteer having to relay it. `2` was the placeholder.

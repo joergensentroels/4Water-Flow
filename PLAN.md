@@ -16,7 +16,7 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 556 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 561 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It once read 551 for the wrong reason, and now reads it for the right one. Seven of the original total were
@@ -29,7 +29,11 @@ questions as `config/pattern.json` — the 551st. The 552nd is its other half, h
 ids in step with the numbered prose: `tools/proseproof.mjs` required them split apart, because one of the two
 must survive having every comment stripped and the other must not. The 553rd and 554th cover the first-run
 identity: bootstrap-then-redeem must leave ONE person, and an ordinary invitation must still create one —
-the second being the control that keeps the first fix from becoming an account takeover.
+the second being the control that keeps the first fix from becoming an account takeover. Five more cover the
+grouped availability form: the grouping itself, a whole-day answer stored as ONE row rather than one per hour,
+an exception surviving a save that also sets the day, a stale hour answer ceasing to override once the day is
+answered, and the allow-list refusing a fabricated date. Two of those were decorative when first written —
+removing the code they existed for left them green — and were rewritten until breaking the feature broke them.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent
@@ -341,10 +345,11 @@ up, add it there too.**
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
 - **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
-  How many Sunday slots there really are <!--ph:sundaySlots--> (the export states a 13:00–16:00 range and this
-  app models discrete slots, so one 15:00 slot stands in for it), `calendar.eventMinutes` <!--ph:eventMinutes-->
-  — no shift length was ever stated, so 90 minutes is invented — and `locale` <!--ph:locale-->.
-  Two are **no longer among them.** `board.cutoffDays` (spec Q18): 4water settled it at `7`. And **the clock
+  `calendar.eventMinutes` <!--ph:eventMinutes--> — no shift length was ever stated, so 90 minutes is invented —
+  and `locale` <!--ph:locale-->.
+  Three are **no longer among them.** **How many Sunday slots there are**: 4water answered four one-hour slots,
+  13:00–17:00, with Salsa and Bachata simultaneous in each — which EXTENDS the export's 13:00–16:00 by an hour, so
+  it is their correction rather than a re-reading of it. `board.cutoffDays` (spec Q18): settled at `7`. And **the clock
   times, which were never invented at all** — the discovery spec's section 1 states Wednesdays 19:00 and 20:15
   and Sundays 13:00–16:00. This entry called them a guess anyway, and that is how the 20:15 DJ slot stayed
   missing: a provenance claim nothing checked, because nothing reads the spec except a person deciding to.

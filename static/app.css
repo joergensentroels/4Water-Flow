@@ -134,6 +134,25 @@ ul.dates > li:last-child { border-bottom: 0; }
 .daterow .when b { font-weight: 600; }
 .daterow .when small { display: block; color: var(--muted); }
 
+/* A DATE WITH SEVERAL TIMES. The date is printed once with a whole-day answer, and the individual times sit
+   behind a disclosure — so the list is one row per date rather than one per time, which is what stopped the same
+   date appearing four times once the configured rhythm gave one weekday four one-hour slots.
+   The indent and the rule down the left say "these belong to the date above" without a heading level or a nested
+   card; `border-inline-start` rather than `border-left` because the rule follows the writing direction, and this
+   file has no business assuming one. */
+.dategroup > details.hours { margin: 0 0 .5rem; }
+.dategroup > details.hours > summary {
+  color: var(--muted); font-size: .85rem; cursor: pointer;
+  padding: .35rem 0 .35rem .25rem; min-height: 0;   /* a disclosure is not a tap target competing with --tap */
+}
+.dategroup > details.hours > ul {
+  list-style: none; margin: 0; padding: 0 0 0 .85rem;
+  border-inline-start: 2px solid var(--line);
+}
+/* Tighter than a top-level row: these are already inside a labelled group, so they carry a time and no date, and
+   the separating rule would double up with the border above. */
+.dategroup > details.hours > ul > li + li { border-top: 1px solid var(--line); }
+
 .choice { display: flex; gap: .35rem; flex: 0 0 auto; }
 /* The radio itself is hidden but still focusable and still what the form submits — the label is the target.
    Removing the input entirely would break keyboard and screen-reader use. */

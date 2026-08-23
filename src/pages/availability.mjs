@@ -58,13 +58,53 @@ export function currentAnswers(db, personId) {
   return { byDate, byHour };
 }
 
-// The value a radio group should show: the hour-level answer if one exists, else the day-level, else "".
-const shown = (answers, date, hour) => {
+// The EFFECTIVE answer: the hour-level one if it exists, else the day-level, else "". This matches the COALESCE
+// in queries.mjs, so it is what a planner sees, and it is what answerProgress counts. It is NOT what the hour
+// radios render — see hourOnly, where that distinction is load-bearing rather than tidy.
+// Exported so a test can assert the EFFECTIVE answer — the thing a planner acts on — rather than poking at two
+// tables and re-implementing the fallback, which would let the test agree with a bug.
+export const shown = (answers, date, hour) => {
   const h = answers.byHour.get(`${date}T${hour}`);
   if (h !== undefined) return String(h);
   const d = answers.byDate.get(date);
   return d === undefined ? "" : String(d);
 };
+
+// What an HOUR radio renders: only a real hour-level row, never the day-level fallback.
+//
+// Using `shown` here would quietly destroy the whole-day answer it is meant to display. Inputs inside a CLOSED
+// <details> are still submitted, so every save posts every hour radio on the page. Pre-check those from the day
+// value and the next save writes an hour row for every hour of every date — materialising exactly the rows the
+// day-level answer exists to avoid, and turning "free all that day" into four independent facts that stop moving
+// when the day answer changes.
+//
+// Blank therefore means "inherits the day", which is also what the schema means by the absence of a row.
+const hourOnly = (answers, date, hour) => {
+  const h = answers.byHour.get(`${date}T${hour}`);
+  return h === undefined ? "" : String(h);
+};
+
+const dayOnly = (answers, date) => {
+  const d = answers.byDate.get(date);
+  return d === undefined ? "" : String(d);
+};
+
+// One entry per DATE, each carrying its hours. The flat (date, hour) list stays the unit of truth for the
+// allow-list, the progress count and the bulk scopes — this only decides how the form is drawn.
+//
+// Why it exists: once the configured rhythm gives a date four one-hour slots and another two, almost every date
+// appears more than once, and the date was printed again on every row. Which weekday that is belongs to
+// config/pattern.json, not here — the seams gate enforces that and caught an earlier draft of this comment.
+export function groupByDate(rows) {
+  const out = [];
+  const byDate = new Map();
+  for (const r of rows) {
+    let g = byDate.get(r.date);
+    if (!g) { g = { date: r.date, hours: [] }; byDate.set(r.date, g); out.push(g); }
+    g.hours.push({ hour: r.hour, minute: r.minute, sessions: r.sessions });
+  }
+  return out;
+}
 
 // How far along this volunteer is. ONE definition, used by the availability form's own counter AND by the prompt on
 // the home screen — two screens computing this separately is how they come to disagree, and a volunteer told "3
@@ -147,29 +187,58 @@ export function renderAvailability({ t, session, roles, who, rows, answers, flas
       <form method="post" action="/availability">
         ${csrfField(session)}
         <ul class="dates">
-          ${rows.map((r) => {
-            const name = `slot:${r.date}:${r.hour}`;
-            const value = shown(answers, r.date, r.hour);
-            const when = `${formatDate(t, r.date)} ${formatTime(r.hour, r.minute)}`;
+          ${groupByDate(rows).map((g) => {
             // Each radio carries an explicit aria-label. The visible label's text is a glyph, and a glyph IS
             // the accessible name when a label has text content — `title` is only a fallback for elements with
             // no name at all. Without this a screen reader announced "✓ radio button" 153 times over, with no
             // way to tell which date was being answered. The glyph is aria-hidden so it is not read twice.
-            const choice = (suffix, val, glyph, key) => html`
-              <input type="radio" id="${name}:${suffix}" name="${name}" value="${val}"
-                     aria-label="${t(key)} — ${when}"${value === val ? html` checked` : ""}>
-              <label for="${name}:${suffix}" title="${t(key)}"><span aria-hidden="true">${glyph}</span></label>`;
-            return html`<li><div class="daterow">
-              <span class="when">
-                <b>${formatDate(t, r.date)}</b>
-                <small>${formatTime(r.hour, r.minute)}</small>
-              </span>
-              <span class="choice">
-                ${choice("1", "1", "✓", "availability.yes")}
-                ${choice("0", "0", "✕", "availability.no")}
-                ${choice("x", "", "–", "availability.unknown")}
-              </span>
-            </div></li>`;
+            const triple = (name, value, when) => {
+              const one = (suffix, val, glyph, key) => html`
+                <input type="radio" id="${name}:${suffix}" name="${name}" value="${val}"
+                       aria-label="${t(key)} — ${when}"${value === val ? html` checked` : ""}>
+                <label for="${name}:${suffix}" title="${t(key)}"><span aria-hidden="true">${glyph}</span></label>`;
+              return html`<span class="choice">
+                ${one("1", "1", "✓", "availability.yes")}
+                ${one("0", "0", "✕", "availability.no")}
+                ${one("x", "", "–", "availability.unknown")}
+              </span>`;
+            };
+
+            // ONE hour: a whole-day control and an hour control would be the same question asked twice, so this
+            // stays exactly the row it has always been, writing at hour level.
+            if (g.hours.length === 1) {
+              const h = g.hours[0];
+              return html`<li><div class="daterow">
+                <span class="when">
+                  <b>${formatDate(t, g.date)}</b>
+                  <small>${formatTime(h.hour, h.minute)}</small>
+                </span>
+                ${triple(`slot:${g.date}:${h.hour}`, shown(answers, g.date, h.hour), `${formatDate(t, g.date)} ${formatTime(h.hour, h.minute)}`)}
+              </div></li>`;
+            }
+
+            // SEVERAL hours: answer the day once, and open the times only if you need to be finer than that.
+            // Opened by default when any hour already carries its own answer, so a save can never hide something
+            // the volunteer set — a collapsed section holding a "no" they cannot see is worse than a long form.
+            const anyHour = g.hours.some((h) => hourOnly(answers, g.date, h.hour) !== "");
+            return html`<li class="dategroup">
+              <div class="daterow">
+                <span class="when">
+                  <b>${formatDate(t, g.date)}</b>
+                  <small>${t("availability.wholeDay")}</small>
+                </span>
+                ${triple(`day:${g.date}`, dayOnly(answers, g.date), `${t("availability.wholeDay")} — ${formatDate(t, g.date)}`)}
+              </div>
+              <details class="hours"${anyHour ? html` open` : ""}>
+                <summary>${t("availability.bySlot", { count: g.hours.length })}</summary>
+                <ul>
+                  ${g.hours.map((h) => html`<li><div class="daterow">
+                    <span class="when"><small>${formatTime(h.hour, h.minute)}</small></span>
+                    ${triple(`slot:${g.date}:${h.hour}`, hourOnly(answers, g.date, h.hour), `${formatDate(t, g.date)} ${formatTime(h.hour, h.minute)}`)}
+                  </div></li>`)}
+                </ul>
+              </details>
+            </li>`;
           })}
         </ul>
         <div class="actions"><button type="submit">${t("availability.save")}</button></div>
@@ -186,14 +255,38 @@ export function renderAvailability({ t, session, roles, who, rows, answers, flas
 // Twelve tests went red the moment the parameter became mandatory, all of them here, which is the argument against
 // giving it a default.
 export function saveAvailability(db, personId, form, seasonId, from) {
-  const allowed = new Set(datesNeedingAnswer(db, seasonId, from).map((r) => `${r.date}:${r.hour}`));
+  const rows = datesNeedingAnswer(db, seasonId, from);
+  const allowed = new Set(rows.map((r) => `${r.date}:${r.hour}`));
+  // Dates come from the SAME rows, so the whole-day control adds no trust surface: a fabricated `day:` field can
+  // only name a date the form itself offers.
+  const allowedDates = new Set(rows.map((r) => r.date));
   const setHour = db.prepare(`INSERT INTO availability_hour (person_id, date, hour, available) VALUES (:pid,:d,:h,:a)
                               ON CONFLICT (person_id, date, hour) DO UPDATE SET available = :a`);
   const clearHour = db.prepare("DELETE FROM availability_hour WHERE person_id = :pid AND date = :d AND hour = :h");
+  const setDay = db.prepare(`INSERT INTO availability_day (person_id, date, available) VALUES (:pid,:d,:a)
+                             ON CONFLICT (person_id, date) DO UPDATE SET available = :a`);
+  const clearDay = db.prepare("DELETE FROM availability_day WHERE person_id = :pid AND date = :d");
   let written = 0, cleared = 0;
 
   db.exec("BEGIN");
   try {
+    // DAY ANSWERS FIRST, and the order is the correctness argument rather than a preference.
+    //
+    // One submit carries both levels. "Free all that day except 15:00" arrives as day=1 together with hour 15=0,
+    // and a day write clears that date's hour rows so the whole-day answer actually takes effect — otherwise a
+    // stale hour row from an earlier save keeps overriding it through the COALESCE and the volunteer sees the
+    // day control say "available" beside an hour that still says no. Run in the other order, that clear would
+    // delete the 15:00 answer the same request was trying to set.
+    for (const [key, value] of Object.entries(form)) {
+      if (!key.startsWith("day:")) continue;
+      const date = key.slice(4);
+      if (!allowedDates.has(date)) continue;
+      if (value === "") { clearDay.run({ pid: personId, d: date }); cleared++; continue; }
+      if (value !== "0" && value !== "1") continue;
+      db.prepare("DELETE FROM availability_hour WHERE person_id = :pid AND date = :d").run({ pid: personId, d: date });
+      setDay.run({ pid: personId, d: date, a: Number(value) });
+      written++;
+    }
     for (const [key, value] of Object.entries(form)) {
       if (!key.startsWith("slot:")) continue;
       const [, date, hourStr] = key.split(":");

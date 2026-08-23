@@ -68,6 +68,8 @@
   "availability.yes": "Kan",
   "availability.no": "Kan ikke",
   "availability.unknown": "Ikke svaret",
+  "availability.wholeDay": "Hele dagen",
+  "availability.bySlot": "Svar på de {count} tidspunkter hver for sig",
   "role.admin": "Administrator",
   "role.planner": "Planlægger",
   "role.volunteer": "Frivillig",

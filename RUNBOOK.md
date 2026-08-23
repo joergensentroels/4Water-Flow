@@ -311,12 +311,14 @@ nice-to-have:
 2. **Sign-in has never spoken to 4water's NextCloud.** It runs end to end against a conforming provider. Work
    through `docs/OIDC.md` on the real instance; invite links need none of this and work today.
 3. **No volunteer has used it.** Every usability judgement is reasoned from the reported pain, not observed.
-4. **Some configuration values are still unanswered** — how long a shift runs <!--ph:eventMinutes-->, how
-   many Sunday slots there really are <!--ph:sundaySlots-->, and whether volunteers read Danish or English
-   <!--ph:locale-->. Each is marked as a placeholder where it is set
+4. **Some configuration values are still unanswered** — how long a shift runs <!--ph:eventMinutes--> and
+   whether volunteers read Danish or English <!--ph:locale-->. Each is marked as a placeholder where it is set
    in `config/pattern.json`, which is the list; only 4water can answer them. `README.md` says what each costs.
 
-   Two things this entry used to name are **settled and no longer blockers.** The **clock times** are not
+   Three things this entry used to name are **settled and no longer blockers.** **How many Sunday slots there
+   are** was answered by 4water on 2026-08-23: four one-hour slots, 13:00–17:00, with Salsa and Bachata running
+   simultaneously in each. Note that this EXTENDS the export's stated 13:00–16:00 by an hour rather than
+   subdividing it — it is their correction, not a re-reading of the source. The **clock times** are not
    invented: the discovery spec's section 1, read from the real export, states Wednesdays 19:00 and 20:15 and
    Sundays 13:00–16:00, so they were sourced all along — `config/pattern.json` says so in its own comment and
    this list went on repeating the opposite. And **`board.cutoffDays`** was settled by 4water at `7`; `2` was

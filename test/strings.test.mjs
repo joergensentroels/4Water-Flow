@@ -263,6 +263,11 @@ const NUMBER_INVARIANT = {
   "availability.progress": "'1 of 51 dates answered — 50 still to go' — n-of-N, and the trailing count has no noun to agree with.",
   "status.silentMore": "'And 1 more.' — the noun is elided entirely, so there is nothing for it to agree with.",
   "outbox.all": "'Everything (1)' — a filter chip carrying a bare count in brackets.",
+  // Structurally unreachable at one, which is a stronger reason than the wording ones above and worth stating as
+  // such: renderAvailability draws a date with a SINGLE hour as a plain row with no disclosure at all, so this
+  // summary only ever labels a date with two or more. If that branch is ever collapsed into one shape, this
+  // exemption stops being true and should go with it.
+  "availability.bySlot": "only rendered for a date with 2+ times — a one-hour date has no disclosure to label.",
   // NOTE_MAX is a constant 280 in src/notes.mjs, not configuration — so {max} is never 1 and never can be. This
   // is the only reason in this table that is provable from the source rather than from how a sentence reads.
   "notes.limit": "{max} is NOTE_MAX, a constant 280 in src/notes.mjs — it cannot be 1, so no singular is reachable.",

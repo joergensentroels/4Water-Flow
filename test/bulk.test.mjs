@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, csrfFromCookie } from "../tools/testkit.mjs";
-import { bulkTargets, bulkScopes, datesNeedingAnswer } from "../src/pages/availability.mjs";
+import { bulkTargets, bulkScopes, datesNeedingAnswer, groupByDate, saveAvailability, currentAnswers, shown } from "../src/pages/availability.mjs";
 import { makeT, loadPattern } from "../src/config.mjs";
 
 const withWorld = (opts, fn) => async () => {
@@ -233,3 +233,111 @@ test("neither the form nor the write path offers a date that has already passed"
     assert.ok(!rows.includes(past[0]), `a past date was written anyway: ${rows.join(", ")}`);
   } finally { w.close(); }
 });
+
+// ---- a date with several times is asked once, and answered once ---------------------------------------
+//
+// The configured rhythm now gives one weekday four one-hour slots and another two, so almost every date appeared
+// more than once and printed its own date again on each row. Which weekday is configuration, not a fact about
+// this test — the seams gate forbids naming it here. The fix groups by date: one whole-day answer, with
+// the individual times behind a disclosure for anyone who needs to be finer than that.
+//
+// The whole-day control is the FIRST thing in this app to write availability_day. The column, the setter and the
+// COALESCE in queries.mjs have all existed since the schema was written — only demo.mjs and measure.mjs wrote to
+// it — so this is a feature landing on a seam that was already built for it.
+test("a date with several times is grouped, and one with a single time is not", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const groups = groupByDate(rows);
+
+  assert.equal(groups.reduce((n, g) => n + g.hours.length, 0), rows.length,
+    "grouping must not lose or invent a slot");
+  assert.equal(new Set(groups.map((g) => g.date)).size, groups.length, "one group per date");
+  assert.deepEqual(groups.map((g) => g.date), [...new Set(rows.map((r) => r.date))],
+    "and the dates must stay in the order the query returned them");
+
+  // The fixture has to contain a multi-hour date or the grouping is untested. ASSERTED, not skipped — the same
+  // rule the CSV test beside this one states at length.
+  const multi = groups.find((g) => g.hours.length > 1);
+  assert.ok(multi, "the configured pattern must give some date more than one time, or this proves nothing");
+  assert.ok(groups.length < rows.length, "grouping must actually shorten the list");
+}));
+
+test("a whole-day answer is stored at day level, not smeared across the hours", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const multi = groupByDate(rows).find((g) => g.hours.length > 1);
+  const me = w.people[0];
+
+  saveAvailability(w.db, me, { [`day:${multi.date}`]: "1" }, w.seasonId, w.today);
+  assert.equal(w.db.prepare("SELECT available FROM availability_day WHERE person_id=? AND date=?").get(me, multi.date)?.available, 1);
+  assert.equal(w.db.prepare("SELECT COUNT(*) c FROM availability_hour WHERE person_id=? AND date=?").get(me, multi.date).c, 0,
+    "one answer for the day must be ONE row, not one per hour");
+
+  // And it is the effective answer for every hour of that date, through the same COALESCE a planner reads.
+  const answers = currentAnswers(w.db, me);
+  for (const h of multi.hours) {
+    assert.equal(shown(answers, multi.date, h.hour), "1", `hour ${h.hour} must inherit the day answer`);
+  }
+}));
+
+// THE ORDERING, which is the part that can silently lose an answer.
+//
+// One submit carries both levels: "free all that day except one time" arrives as day=1 with that hour's 0. A
+// day write clears the date's hour rows so the whole-day answer can actually take effect against stale rows from
+// an earlier save — run in the other order, that clear deletes the very answer the same request is setting.
+test("free all day EXCEPT one time survives a single save", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const multi = groupByDate(rows).find((g) => g.hours.length > 1);
+  const me = w.people[0];
+  const odd = multi.hours[1].hour;
+
+  saveAvailability(w.db, me, { [`day:${multi.date}`]: "1", [`slot:${multi.date}:${odd}`]: "0" }, w.seasonId, w.today);
+
+  const answers = currentAnswers(w.db, me);
+  assert.equal(shown(answers, multi.date, odd), "0", "the exception must survive the day write in the same submit");
+  for (const h of multi.hours) {
+    if (h.hour === odd) continue;
+    assert.equal(shown(answers, multi.date, h.hour), "1", `hour ${h.hour} must still inherit the day answer`);
+  }
+}));
+
+test("a stale hour answer stops overriding once the day is answered", withWorld({}, async (w) => {
+  const rows = datesNeedingAnswer(w.db, w.seasonId, w.today);
+  const multi = groupByDate(rows).find((g) => g.hours.length > 1);
+  const me = w.people[0];
+  const h0 = multi.hours[0].hour;
+
+  saveAvailability(w.db, me, { [`slot:${multi.date}:${h0}`]: "0" }, w.seasonId, w.today);
+  assert.equal(shown(currentAnswers(w.db, me), multi.date, h0), "0", "control: the hour answer is stored first");
+
+  // Now answer the whole day yes, sending ONLY the day field.
+  //
+  // That shape matters, and the first version of this test used the browser's shape instead — day plus a blank
+  // radio for every hour — which passes whether or not a day write clears anything, because the blanks clear the
+  // rows by themselves. Removing the clear from saveAvailability left all three of these tests green, so the
+  // check was decorative. This asserts the INVARIANT ("a day answer replaces everything finer for that date")
+  // at the only level where it is observable: a caller that sends a day answer and no hour fields, which is what
+  // anything other than this one form would send.
+  saveAvailability(w.db, me, { [`day:${multi.date}`]: "1" }, w.seasonId, w.today);
+  assert.equal(w.db.prepare("SELECT COUNT(*) c FROM availability_hour WHERE person_id=? AND date=?").get(me, multi.date).c, 0,
+    "a day answer must clear that date's hour rows rather than leaving them to override it");
+  assert.equal(shown(currentAnswers(w.db, me), multi.date, h0), "1",
+    "the day answer must win, or the volunteer sees 'available all day' beside an hour that still says no");
+
+  // And the browser's own shape reaches the same place by a different route, so both callers agree.
+  saveAvailability(w.db, me, { [`slot:${multi.date}:${h0}`]: "0" }, w.seasonId, w.today);
+  const blanks = Object.fromEntries(multi.hours.map((h) => [`slot:${multi.date}:${h.hour}`, ""]));
+  saveAvailability(w.db, me, { [`day:${multi.date}`]: "0", ...blanks }, w.seasonId, w.today);
+  assert.equal(shown(currentAnswers(w.db, me), multi.date, h0), "0");
+}));
+
+test("a fabricated day answer for an unoffered date is ignored", withWorld({}, async (w) => {
+  const me = w.people[0];
+  saveAvailability(w.db, me, { "day:1999-01-01": "1" }, w.seasonId, w.today);
+  assert.equal(w.db.prepare("SELECT COUNT(*) c FROM availability_day WHERE person_id=?").get(me).c, 0,
+    "the day allow-list comes from the same rows as the hour one, and must refuse a date the form never offered");
+
+  // CONTROL: the same call shape DOES write for a date that is offered, so the assertion above is not passing
+  // because saveAvailability quietly ignores every `day:` field.
+  const real = datesNeedingAnswer(w.db, w.seasonId, w.today)[0].date;
+  saveAvailability(w.db, me, { [`day:${real}`]: "1" }, w.seasonId, w.today);
+  assert.equal(w.db.prepare("SELECT COUNT(*) c FROM availability_day WHERE person_id=?").get(me).c, 1);
+}));

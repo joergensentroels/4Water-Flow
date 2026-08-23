@@ -346,9 +346,14 @@ test("running retention from the admin screen reports what it removed", withAdmi
 // activity. Without the role column they are indistinguishable — and for an unfilled pair that means two
 // identical rows with an empty person, which reads as a duplicated line in whatever spreadsheet it lands in.
 test("the season CSV distinguishes the two halves of a class", withAdmin({}, async (w) => {
-  const pair = w.db.prepare(`SELECT s.id, s.date, act.key,
+  // The TIME is selected too, and it has to be. The row filter below matched on date and activity alone, which
+  // identified one session only while a date held at most one session of each activity. One weekday gained four
+  // one-hour slots on 2026-08-23, the filter started matching all four, and it counted 8 rows against a
+  // pair.slots of 2. The test had encoded an assumption about config/pattern.json rather than about the export.
+  const pair = w.db.prepare(`SELECT s.id, s.date, act.key, t.hour, t.minute,
                                     (SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id) AS slots
                                FROM sessions s JOIN activities act ON act.id=s.activity_id
+                                    JOIN timeslots t ON t.id = s.timeslot_id
                               WHERE s.season_id=? AND slots > 1 LIMIT 1`).get(w.seasonId);
   // ASSERTED, not skipped. `if (!pair) return` reads as defensive and is not: it hands the test a way to report
   // success having checked nothing, and the only thing standing between that and a green run is the contents of
@@ -359,6 +364,8 @@ test("the season CSV distinguishes the two halves of a class", withAdmin({}, asy
   assert.ok(pair, "the configured pattern must contain an activity with more than one slot, or this test — which " +
                   "exists to prove the two halves of a class are distinguishable — proves nothing at all");
 
+  // Formatted exactly as exportSeasonCsv formats it, because this is compared against the file's own text.
+  const pairTime = `${String(pair.hour).padStart(2, "0")}:${String(pair.minute).padStart(2, "0")}`;
   const csv = exportSeasonCsv(w.db, w.seasonId);
   const header = csv.split("\r\n")[0].split(",").map((f) => f.replace(/"/g, ""));
   const roleAt = header.indexOf("role");
@@ -367,7 +374,7 @@ test("the season CSV distinguishes the two halves of a class", withAdmin({}, asy
   // The rows for that one session: same date, same activity, different roles, and none of them identical.
   const cells = (line) => (line.match(/"(?:[^"]|"")*"/g) ?? []).map((f) => f.slice(1, -1).replace(/""/g, '"'));
   const rows = csv.split("\r\n").slice(1).filter(Boolean).map(cells)
-    .filter((r) => r[0] === pair.date && r[2] === pair.key);
+    .filter((r) => r[0] === pair.date && r[1] === pairTime && r[2] === pair.key);
   assert.equal(rows.length, pair.slots, "one row per slot");
   const roles = rows.map((r) => r[roleAt]).sort();
   assert.deepEqual(roles, ["f", "l"], "raw l/f, not a translation — a data export must not change with the locale");
