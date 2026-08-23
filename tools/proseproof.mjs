@@ -39,6 +39,11 @@ const EXPECTED = {
   "the config comment's own count of its placeholders is true":
     "its subject IS config/pattern.json's _comment — asserting the prose exists and that its own count is true. "
     + "Deleting the prose must fail this, and does, by name.",
+  "the ids in _openQuestions match the numbered placeholders in the comment":
+    "same subject as the check above, from the other side: it holds the machine-readable _openQuestions in step "
+    + "with the numbered prose, so stripping the prose must fail it. It was SPLIT OUT of the document check for "
+    + "this reason — that one reads _openQuestions and the documents, never prose, so it must keep passing here "
+    + "and is deliberately not covered by this exemption.",
   "control: the planted needle": "the tool's own control; see NEEDLE above. It MUST fail or this run is void.",
 };
 

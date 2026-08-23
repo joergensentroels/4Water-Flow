@@ -277,18 +277,39 @@ test("the config comment's own count of its placeholders is true", () => {
 // document, so BOTH failures are caught — an omitted id and a retired one. Markers rather than keyword
 // matching on purpose: RUNBOOK now discusses the clock times at length in order to say they are settled, and
 // any rule keyed on the words "clock times" near "placeholder" would flag exactly the corrected text.
+// SPLIT from the check below, and the split is the interesting part.
+//
+// The first version was one test, and `tools/proseproof.mjs` rejected it: strip every comment and it failed,
+// which is that tool's signature for "this check is satisfied by prose rather than by code". It was right. The
+// assertion here counts numbered lines inside config/pattern.json's `_comment`, so removing the prose removes
+// the needle.
+//
+// The available shortcut was to declare the whole test EXPECTED-to-fail in proseproof and move on. That would
+// have covered the marker comparison below with the same exemption, and the marker comparison reads DATA —
+// `_openQuestions` and the documents — so it must keep passing when prose is stripped. Exempting it too would
+// have quietly widened an excuse to cover a check that did not need one.
+//
+// So the prose dependency lives here alone, where the prose genuinely IS the subject, and it is declared in
+// proseproof's EXPECTED beside the sibling check that has always depended on the same comment.
+test("the ids in _openQuestions match the numbered placeholders in the comment", () => {
+  const cfg = JSON.parse(read("config/pattern.json"));
+  const open = cfg._openQuestions;
+  assert.ok(Array.isArray(open) && open.length, "config/pattern.json declares no _openQuestions");
+  // Without this the machine-readable list becomes a SECOND home for the same fact, free to drift from the
+  // human one — the disease rather than the cure. A fourth numbered placeholder with no matching id would
+  // leave the document check below passing on three and nobody any the wiser.
+  const numbered = cfg._comment.filter((l) => /^\s*\d+\./.test(l)).length;
+  assert.equal(open.length, numbered,
+    `_openQuestions has ${open.length} ids while the comment numbers ${numbered} placeholders — one id per ` +
+    `number, same order. Whichever is right, the other is now lying.`);
+});
+
 test("every document's placeholder list names the same items as config/pattern.json", () => {
   const cfg = JSON.parse(read("config/pattern.json"));
   const open = cfg._openQuestions, settled = cfg._settledQuestions;
   assert.ok(Array.isArray(open) && open.length, "config/pattern.json declares no _openQuestions");
   assert.ok(Array.isArray(settled) && settled.length, "config/pattern.json declares no _settledQuestions");
 
-  // The ids must stay in step with the prose they formalise, or the machine-readable list becomes a second
-  // place for the same fact to go stale — which is the disease, not the cure.
-  const numbered = cfg._comment.filter((l) => /^\s*\d+\./.test(l)).length;
-  assert.equal(open.length, numbered,
-    `_openQuestions has ${open.length} ids while the comment numbers ${numbered} placeholders — one id per ` +
-    `number, same order. Whichever is right, the other is now lying.`);
   const both = open.filter((id) => settled.includes(id));
   assert.deepEqual(both, [], `these ids are listed as open AND settled: ${both.join(", ")}`);
 
