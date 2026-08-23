@@ -226,7 +226,14 @@ test("the config comment's own count of its placeholders is true", () => {
       `without counting it — a count in prose is what went stale here before.`);
   }
   // "Both" is a count of two wearing a different hat, and it is how the stale version survived a reading.
+  //
+  // DORMANT SINCE 2026-08-23, and it went dormant by being right rather than by rotting: 4water answered how
+  // many slots one weekday has, that placeholder retired, and the list came down to exactly two — at which point
+  // "both" would be a true statement and there is nothing to forbid. tools/deadassert.mjs caught the transition
+  // on the push, which is the whole reason this project marks dormancy with a reason instead of trusting a green
+  // run: this assertion and one that has stopped working look identical from the outside.
   if (numbered.length !== 2) {
+    // deadassert: dormant — the list is exactly two today, so "both" is accurate and this has nothing to catch.
     assert.ok(!/\bboth\b/i.test(text),
       `the comment says "both" while listing ${numbered.length} placeholders — that is a count of two in disguise`);
   }
