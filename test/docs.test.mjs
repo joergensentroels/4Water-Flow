@@ -259,6 +259,71 @@ test("the config comment's own count of its placeholders is true", () => {
     counting.join("\n  "));
 });
 
+// The test above guards the COUNT of the placeholders. Nothing guarded WHICH ONES, and that is the gap this
+// closes.
+//
+// Measured 2026-08-23: RUNBOOK, README and PLAN all described the clock times as invented, and PLAN did it
+// twice — in prose and again in its table — while config/pattern.json had already established the opposite in
+// its own comment: the discovery spec's section 1 states Wednesdays 19:00 and 20:15 and Sundays 13:00–16:00,
+// so they were sourced all along. RUNBOOK additionally listed board.cutoffDays, which 4water settled at 7.
+// And all three omitted a real one: how many Sunday slots there actually are.
+//
+// So the list was wrong in BOTH directions at once — two settled items inflating it, one open item missing
+// from it — and the suite was green throughout, because a count can be right while every entry is wrong.
+// That is not luck running out; it is the instrument only ever having measured the number.
+//
+// The mechanism is the one already used for the figures elsewhere in this project: the config file declares
+// ids, and every document that describes the list marks each entry with `<!--ph:id-->`. Set equality per
+// document, so BOTH failures are caught — an omitted id and a retired one. Markers rather than keyword
+// matching on purpose: RUNBOOK now discusses the clock times at length in order to say they are settled, and
+// any rule keyed on the words "clock times" near "placeholder" would flag exactly the corrected text.
+test("every document's placeholder list names the same items as config/pattern.json", () => {
+  const cfg = JSON.parse(read("config/pattern.json"));
+  const open = cfg._openQuestions, settled = cfg._settledQuestions;
+  assert.ok(Array.isArray(open) && open.length, "config/pattern.json declares no _openQuestions");
+  assert.ok(Array.isArray(settled) && settled.length, "config/pattern.json declares no _settledQuestions");
+
+  // The ids must stay in step with the prose they formalise, or the machine-readable list becomes a second
+  // place for the same fact to go stale — which is the disease, not the cure.
+  const numbered = cfg._comment.filter((l) => /^\s*\d+\./.test(l)).length;
+  assert.equal(open.length, numbered,
+    `_openQuestions has ${open.length} ids while the comment numbers ${numbered} placeholders — one id per ` +
+    `number, same order. Whichever is right, the other is now lying.`);
+  const both = open.filter((id) => settled.includes(id));
+  assert.deepEqual(both, [], `these ids are listed as open AND settled: ${both.join(", ")}`);
+
+  const markers = (text) => [...new Set([...text.matchAll(/<!--\s*ph:([A-Za-z][A-Za-z0-9]*)\s*-->/g)].map((m) => m[1]))];
+
+  // POSITIVE CONTROL, before the extractor is aimed at anything real. If the regex stopped matching, every
+  // set comparison below would compare two empty-ish sets and this test would pass while measuring nothing —
+  // the exact failure mode that let the real defect live for weeks.
+  assert.deepEqual(markers("a <!--ph:alpha--> b <!-- ph:beta --> c <!--ph:alpha-->").sort(), ["alpha", "beta"],
+    "the ph-marker extractor no longer reads markers out of prose, so the checks below are blind, not passing");
+  assert.deepEqual(markers("no markers here at all"), [],
+    "the ph-marker extractor invents markers that are not there");
+
+  // NEGATIVE CONTROLS on the comparison itself, both directions of the real failure.
+  const cmp = (found) => ({ missing: open.filter((i) => !found.includes(i)), stale: found.filter((i) => !open.includes(i)) });
+  assert.deepEqual(cmp(open.slice(1)).missing, [open[0]], "the comparison does not notice an OMITTED placeholder");
+  assert.deepEqual(cmp([...open, settled[0]]).stale, [settled[0]], "the comparison does not notice a RETIRED placeholder");
+
+  // The documents that describe the list. Found by which ones carry markers at all, then required to be the
+  // full set — a doc that quietly loses every marker would otherwise drop out of the check silently.
+  const DESCRIBERS = ["RUNBOOK.md", "README.md", "PLAN.md"];
+  for (const doc of DESCRIBERS) {
+    const found = markers(read(doc));
+    assert.ok(found.length, `${doc} carries no <!--ph:id--> markers at all — it describes the placeholder ` +
+      `list, so each entry must name its id, or this check silently stops covering it`);
+    const { missing, stale } = cmp(found);
+    assert.deepEqual(missing, [],
+      `${doc} does not name these open questions: ${missing.join(", ")}. config/pattern.json lists them, so ` +
+      `this document is telling a reader there is less to settle than there is.`);
+    assert.deepEqual(stale, [],
+      `${doc} still names ${stale.join(", ")} as an open question. config/pattern.json does not list it — if ` +
+      `it has been settled, say so here rather than leaving it on the list.`);
+  }
+});
+
 // One place may state the test count, and it is PLAN.md.
 //
 // Three documents used to, and when this was written all three disagreed with reality at once: RUNBOOK claimed a

@@ -207,6 +207,15 @@ const DESCRIPTIVE_CONFIG = {
   department:
     "A label saying whose configuration file this is, for when Copenhagen and Lyon each run their own. It promises " +
     "no behaviour, so nothing reading it is correct rather than an oversight.",
+  _openQuestions:
+    "The machine-readable form of the numbered placeholders in this file's _comment. Read by test/docs.test.mjs, " +
+    "which requires RUNBOOK, README and PLAN to mark each entry with <!--ph:id--> and to name nothing settled. " +
+    "Deliberately NOT read by src/: it records what 4water has not decided yet, which changes no behaviour. It " +
+    "exists because prose was the only record, and three documents spent weeks calling the clock times invented " +
+    "after this file had established they never were.",
+  _settledQuestions:
+    "The other half of that check: ids that WERE open and are not any more, so a document re-listing one fails " +
+    "rather than quietly inflating the distance to 1.0.0. Test-only for the same reason.",
 };
 
 test("every config setting is read by the code, or is declared descriptive", () => {

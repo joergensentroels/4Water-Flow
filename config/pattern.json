@@ -55,8 +55,17 @@
     "Google Sheets, LibreOffice and pandas expect; this line is the deployment saying who actually opens the",
     "file. A department whose people use Sheets or a script should set it back to ','.",
     "The export also carries a UTF-8 byte-order mark, which is not configurable: without it a spreadsheet reads",
-    "the downloaded file in the system codepage and 'Soren Norgard' with Danish letters comes out as mojibake."
+    "the downloaded file in the system codepage and 'Soren Norgard' with Danish letters comes out as mojibake.",
+    "",
+    "_openQuestions AND _settledQuestions BELOW ARE THE MACHINE-READABLE FORM OF THE NUMBERED LIST ABOVE.",
+    "The prose is for you; those two arrays are for test/docs.test.mjs, which requires every document that",
+    "describes this list to mark each entry with an HTML comment naming the id - <!--ph:locale--> and so on -",
+    "and to name nothing that has been settled. Keep them in step with the numbered items: one id per number,",
+    "same order. A test fails if the counts diverge, because prose was the only record before and three",
+    "documents spent weeks calling the clock times invented after this file had established they never were."
   ],
+  "_openQuestions": ["sundaySlots", "eventMinutes", "locale"],
+  "_settledQuestions": ["clockTimes", "cutoffDays", "timezone", "weekOffset"],
   "department": "cph",
   "locale": "en",
   "calendar": {

@@ -146,15 +146,15 @@ because the count went stale the moment a fourth was added: three documents said
   shift the app would never have scheduled. `config/pattern.json` corrected the rhythm and recorded the lesson:
   a provenance claim is a claim, and this one went unchecked because nothing reads the spec except a person
   deciding to.
-- **How many Sunday slots there really are.** The export states 13:00–16:00, which is a range; this app models
+- **How many Sunday slots there really are.** <!--ph:sundaySlots--> The export states 13:00–16:00, which is a range; this app models
   discrete timeslots, so one 15:00 slot stands in for whatever the real granularity is. A simplification rather
   than an invention, but still 4water's answer — and several times on one day is fully supported, editable from
   the Administration screen.
 - ~~**`board.cutoffDays`**~~ — **settled by 4water: `7`.** A week's notice, so there is realistic time to find a
   replacement. It does not block the hand-back; it marks it as short notice in the flash and in the channel
   announcement, so a planner sees the urgency without the volunteer having to relay it. `2` was the placeholder.
-- **`calendar.eventMinutes`** — how long a shift runs. 90 is invented.
-- **`locale`** — `"en"`, while a complete Danish translation ships beside it. One word switches every
+- **`calendar.eventMinutes`** <!--ph:eventMinutes--> — how long a shift runs. 90 is invented.
+- **`locale`** <!--ph:locale--> — `"en"`, while a complete Danish translation ships beside it. One word switches every
   volunteer-facing string and the page's declared language. `export.csvDelimiter` is set for a Danish spreadsheet
   in the same file, so the two currently point in different directions. Either answer is fine; it should be one.
 - **One timeslot per day** is a modelling guess, not a limit. The real export has four parallel schedules, and

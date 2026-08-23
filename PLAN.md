@@ -16,14 +16,16 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 550 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 551 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
-It read 551 until the count was measured on the version the Dockerfile pins. Seven of those were phantoms:
-`test/a11y.test.mjs` imported `test/css-audit.test.mjs` to borrow a helper, which re-registered that file's seven
-tests as subtests, so the suite counted them twice and reported a total nobody had. A count that goes up when a
-file is imported is not a measure of coverage. The helper moved to `tools/a11y.mjs` and the number is now real;
-four genuinely new tests bring it to 548, the invitation-list cap adds the 549th, and the no-remote doc check the 550th.
+It once read 551 for the wrong reason, and now reads it for the right one. Seven of the original total were
+phantoms: `test/a11y.test.mjs` imported `test/css-audit.test.mjs` to borrow a helper, which re-registered that
+file's seven tests as subtests, so the suite counted them twice and reported a total nobody had. A count that
+goes up when a file is imported is not a measure of coverage. The helper moved to `tools/a11y.mjs` and the
+number became real at 547; four genuinely new tests brought it to 548, the invitation-list cap added the 549th,
+the no-remote doc check the 550th, and the placeholder-list check — every document naming the same open
+questions as `config/pattern.json` — the 551st.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent
@@ -335,9 +337,9 @@ up, add it there too.**
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
 - **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
-  How many Sunday slots there really are (the export states a 13:00–16:00 range and this app models discrete
-  slots, so one 15:00 slot stands in for it), `calendar.eventMinutes` — no shift length was ever stated, so
-  90 minutes is invented — and `locale`.
+  How many Sunday slots there really are <!--ph:sundaySlots--> (the export states a 13:00–16:00 range and this
+  app models discrete slots, so one 15:00 slot stands in for it), `calendar.eventMinutes` <!--ph:eventMinutes-->
+  — no shift length was ever stated, so 90 minutes is invented — and `locale` <!--ph:locale-->.
   Two are **no longer among them.** `board.cutoffDays` (spec Q18): 4water settled it at `7`. And **the clock
   times, which were never invented at all** — the discovery spec's section 1 states Wednesdays 19:00 and 20:15
   and Sundays 13:00–16:00. This entry called them a guess anyway, and that is how the 20:15 DJ slot stayed
