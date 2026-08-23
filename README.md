@@ -140,7 +140,16 @@ Some values in `config/pattern.json` are invented, and only 4water can settle th
 each is marked as a placeholder where it is set, with the reasoning beside it. Described here rather than counted,
 because the count went stale the moment a fourth was added: three documents said "three" while the file listed four.
 
-- **Clock times.** The Wednesday/Sunday rhythm is from the real export; the times were never stated anywhere.
+- ~~**Clock times.**~~ — **not invented, and never were.** The discovery spec's section 1, read from the real
+  export, states Wednesdays 19:00 (Salsa, Bachata) and 20:15 (DJ), and Sundays 13:00–16:00. This bullet used to
+  say "the times were never stated anywhere", which is how the 20:15 DJ slot went missing entirely — a weekly
+  shift the app would never have scheduled. `config/pattern.json` corrected the rhythm and recorded the lesson:
+  a provenance claim is a claim, and this one went unchecked because nothing reads the spec except a person
+  deciding to.
+- **How many Sunday slots there really are.** The export states 13:00–16:00, which is a range; this app models
+  discrete timeslots, so one 15:00 slot stands in for whatever the real granularity is. A simplification rather
+  than an invention, but still 4water's answer — and several times on one day is fully supported, editable from
+  the Administration screen.
 - ~~**`board.cutoffDays`**~~ — **settled by 4water: `7`.** A week's notice, so there is realistic time to find a
   replacement. It does not block the hand-back; it marks it as short notice in the flash and in the channel
   announcement, so a planner sees the urgency without the volunteer having to relay it. `2` was the placeholder.

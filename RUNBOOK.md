@@ -311,9 +311,16 @@ nice-to-have:
 2. **Sign-in has never spoken to 4water's NextCloud.** It runs end to end against a conforming provider. Work
    through `docs/OIDC.md` on the real instance; invite links need none of this and work today.
 3. **No volunteer has used it.** Every usability judgement is reasoned from the reported pain, not observed.
-4. **Several configuration values are invented** — the clock times, the hand-back cutoff, the shift length, and
-   whether volunteers read Danish or English. Each is marked as a placeholder where it is set in
-   `config/pattern.json`, which is the list; only 4water can answer them. `README.md` says what each one costs.
+4. **Some configuration values are still unanswered** — how long a shift runs, how many Sunday slots there
+   really are, and whether volunteers read Danish or English. Each is marked as a placeholder where it is set
+   in `config/pattern.json`, which is the list; only 4water can answer them. `README.md` says what each costs.
+
+   Two things this entry used to name are **settled and no longer blockers.** The **clock times** are not
+   invented: the discovery spec's section 1, read from the real export, states Wednesdays 19:00 and 20:15 and
+   Sundays 13:00–16:00, so they were sourced all along — `config/pattern.json` says so in its own comment and
+   this list went on repeating the opposite. And **`board.cutoffDays`** was settled by 4water at `7`; `2` was
+   the placeholder while the question was open. Both were listed here as open work, which made the remaining
+   distance to 1.0.0 look longer than it is.
 
 Call it 1.0.0 when a season has actually been planned in it. Until then the suffix is telling whoever inherits
 this the truth, and the truth is useful: it says which parts to be suspicious of first.

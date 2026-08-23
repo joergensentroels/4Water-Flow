@@ -335,11 +335,15 @@ up, add it there too.**
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
 - **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
-  The clock times (the Wed/Sun rhythm is from the real export; the times were never stated),
-  `calendar.eventMinutes` — no shift length was ever stated, so 90 minutes is invented — and `locale`.
-  `board.cutoffDays` (spec Q18) is no longer among them: 4water settled it at `7`.
-  `calendar.timezone` is **not** a placeholder: it is what puts a 19:00 shift at 19:00 in a subscriber's calendar,
-  and getting it wrong shifts every event silently.
+  How many Sunday slots there really are (the export states a 13:00–16:00 range and this app models discrete
+  slots, so one 15:00 slot stands in for it), `calendar.eventMinutes` — no shift length was ever stated, so
+  90 minutes is invented — and `locale`.
+  Two are **no longer among them.** `board.cutoffDays` (spec Q18): 4water settled it at `7`. And **the clock
+  times, which were never invented at all** — the discovery spec's section 1 states Wednesdays 19:00 and 20:15
+  and Sundays 13:00–16:00. This entry called them a guess anyway, and that is how the 20:15 DJ slot stayed
+  missing: a provenance claim nothing checked, because nothing reads the spec except a person deciding to.
+  `calendar.timezone` is **not** a placeholder either: it is what puts a 19:00 shift at 19:00 in a subscriber's
+  calendar, and getting it wrong shifts every event silently.
   Not counted here on purpose. This said "three" in three documents while the config comment listed four, within
   one commit of a gate being added that checks the config comment's own count and not its readers'.
 - **Retention runs only if the operator installed the cron line.** Deliberate — a container that deletes data on
@@ -467,7 +471,8 @@ what leaves the box, final read of every user-visible string in both locales.
 
 | | Placeholder in use | Confirm before |
 |---|---|---|
-| Clock times for the Wed/Sun pattern | `19:00` and `15:00` in `config/pattern.json` | B |
+| ~~Clock times for the Wed/Sun pattern~~ | **NOT a placeholder — sourced all along.** Spec section 1: Wed 19:00 + 20:15, Sun 13:00–16:00. Calling them invented is how the 20:15 DJ slot stayed missing | ~~B~~ |
+| How many Sunday slots there really are | one `15:00` slot standing in for the stated 13:00–16:00 range — a simplification, not an invention | before a season is planned |
 | ~~`board.cutoffDays` (spec Q18)~~ | **SETTLED by 4water: `7`** — a week's notice, so a replacement can realistically be found. Was `2` | ~~D~~ |
 | "Active volunteer" = current season or longer? | current season | G |
 | Whether swap (named two-party exchange) is wanted at all | not built — the open board likely absorbs it | after D lands; **still open** |
