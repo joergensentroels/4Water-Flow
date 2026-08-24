@@ -8,7 +8,7 @@ import { pruneNotifications, pruneSeasons, pruneOrphanedAvailability, runRetenti
 import { rolesOf } from "../src/auth.mjs";
 import { setRole } from "../src/admin.mjs";
 import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
-import { validatePattern, exportConfig, loadPattern } from "../src/config.mjs";
+import { validatePattern, exportConfig, loadPattern, roleSlotsFor } from "../src/config.mjs";
 
 const withAdmin = (opts, fn) => async () => {
   const w = await makeWorld({ volunteers: 3, roles: { 0: ["admin"] }, ...opts });
@@ -376,8 +376,15 @@ test("the season CSV distinguishes the two halves of a class", withAdmin({}, asy
   const rows = csv.split("\r\n").slice(1).filter(Boolean).map(cells)
     .filter((r) => r[0] === pair.date && r[1] === pairTime && r[2] === pair.key);
   assert.equal(rows.length, pair.slots, "one row per slot");
+  // DERIVED from the pattern, not listed here. It read ["f","l"] and went red when classes gained a booth slot,
+  // which is a fact about the configuration rather than about the export. What this test is really for is that
+  // the values are RAW — the storage codes, not translations — so a spreadsheet does not change meaning with the
+  // reader's locale, and that no two rows for one session are identical.
+  const declared = roleSlotsFor(w.pattern.activities.find((x) => x.key === pair.key)).map((r) => r ?? "").sort();
   const roles = rows.map((r) => r[roleAt]).sort();
-  assert.deepEqual(roles, ["f", "l"], "raw l/f, not a translation — a data export must not change with the locale");
+  assert.deepEqual(roles, declared,
+    "raw storage codes, not translations — a data export must not change with the locale");
+  assert.ok(declared.length > 1, "the fixture must be a class with more than one slot, or this proves nothing");
   assert.equal(new Set(rows.map((r) => r.join("|"))).size, rows.length,
     "no two rows for one session may be identical, or the file looks like it has duplicates");
 }));

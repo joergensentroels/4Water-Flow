@@ -373,6 +373,7 @@
   "planner.eligibleFairest.one": "1 person can take it",
   "role.dance.l": "leader",
   "role.dance.f": "follower",
+  "role.dance.booth": "booth",
   "planner.wrongRole": "That person does not teach the role this slot needs.",
   "planner.alreadyBooked": "That person is already booked at the same time.",
   "profile.danceRole": "You teach as",

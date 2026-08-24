@@ -418,10 +418,74 @@ test("no notifier configured at all: the board still works", async () => {
 //
 // What matters is that the reasons are DISTINGUISHABLE. A diagnostic that says "no_availability" for every
 // cause is the same uselessness with more words, so each case is pinned separately.
+// ---- the booth is open to everyone, and that is the whole feature -------------------------------------------
+//
+// 4water: "Everybody can do booth so it's not a qualification. But it's something you need for each class."
+// Classes are in separate rooms, so each one needs its own.
+//
+// Modelled as a third role on the class rather than an activity of its own, because the export records a booth per
+// activity ("Boo Sa", "Boo Ba", …) and config/pattern.json already carries boothLabel to say which classes have
+// one. The capability gate in queries.mjs is the ONLY gate it escapes — the other four still apply in full, and
+// this pins each of them, because "not a qualification" is easy to over-implement into "no rules at all".
+test("a volunteer with no capabilities and no stated role can still take a booth", withWorld({ volunteers: 2 }, async (w) => {
+  const { openSlotsFor, claimSlot } = await import("../src/queries.mjs");
+  const me = w.people[0];
+
+  // Nothing an admin has granted them, and nothing they have said about leading or following.
+  w.db.prepare("DELETE FROM capabilities WHERE person_id=?").run(me);
+  w.db.prepare("UPDATE people SET preferred_role=NULL WHERE id=?").run(me);
+  makeAvailable(w, me);
+
+  const open = openSlotsFor(w.db, me, w.seasonId, w.today);
+  assert.ok(open.length > 0, "a volunteer who can staff a door is never offered nothing");
+  assert.ok(open.every((s) => s.role === "booth"),
+    `only booth slots should be reachable without a capability, got roles: ${[...new Set(open.map((s) => s.role))]}`);
+
+  // And the claim actually goes through, not merely appears. The board and the claim guard check the role rule
+  // separately — the comment on that guard says why — so an offer the claim then refuses is a live failure mode.
+  const claimed = claimSlot(w.db, open[0].assignmentId, me);   // (db, assignmentId, personId) — not the other way round
+  assert.equal(claimed.ok, true, `the booth slot was offered and then refused: ${claimed.reason}`);
+
+  // THE FOUR GATES THAT STILL APPLY. Skipping the capability check must not have skipped the rest.
+  const other = w.people[1];
+  w.db.prepare("DELETE FROM capabilities WHERE person_id=?").run(other);
+
+  // 1. availability — never answered means not available, because silence is not consent.
+  assert.equal(openSlotsFor(w.db, other, w.seasonId, w.today).length, 0,
+    "a booth slot must not be offered to somebody who has not said when they can help");
+
+  // 2. on the roster — a stood-down volunteer cannot take a booth either.
+  makeAvailable(w, other);
+  assert.ok(openSlotsFor(w.db, other, w.seasonId, w.today).length > 0, "control: available, so booths are offered");
+  w.db.prepare("UPDATE people SET status='inactive' WHERE id=?").run(other);
+  assert.equal(openSlotsFor(w.db, other, w.seasonId, w.today).length, 0,
+    "a stood-down volunteer must not be offered a booth");
+  w.db.prepare("UPDATE people SET status='active' WHERE id=?").run(other);
+
+  // 3. not in two rooms at once — the booth just claimed above blocks that hour for the person who took it.
+  const mine = w.db.prepare(`SELECT s.date, t.hour FROM assignments a JOIN sessions s ON s.id=a.session_id
+                              JOIN timeslots t ON t.id=s.timeslot_id WHERE a.id=?`).get(open[0].assignmentId);
+  const stillOffered = openSlotsFor(w.db, me, w.seasonId, w.today)
+    .filter((s) => s.date === mine.date && s.hour === mine.hour);
+  assert.equal(stillOffered.length, 0,
+    "having taken one booth at that hour, no other slot at the same hour may be offered — separate rooms are still one person");
+}));
+
 test("an empty board explains itself, and the reasons are distinguishable", withWorld({ volunteers: 2 }, async (w) => {
   const { boardEmptyReason } = await import("../src/queries.mjs");
   const me = w.people[0];
   const reason = () => boardEmptyReason(w.db, me, w.seasonId, w.today).reason;
+
+  // THE BOOTH SLOTS ARE TAKEN FIRST, and without this the rest of this walk tests nothing it claims to.
+  //
+  // Booth slots bypass both the capability gate and the role gate — everybody can staff a door — so while one is
+  // open, neither a missing capability nor an unstated dance role can empty the board. Both steps below reported
+  // no_availability instead when this landed on 2026-08-24, because the booth slot survived every gate they were
+  // about. This walk has always assumed the open slots are the gated ones; that assumption is now explicit.
+  //
+  // The property itself — that there is nearly always something a volunteer can take — is the point of the
+  // feature, and it is asserted directly in the test after this one rather than left as a side effect here.
+  w.db.prepare("UPDATE assignments SET person_id=? WHERE role='booth' AND person_id IS NULL").run(w.people[1]);
 
   // makeWorld gives every volunteer a capability for the first activity, so start by removing it.
   w.db.prepare("DELETE FROM capabilities WHERE person_id=?").run(me);

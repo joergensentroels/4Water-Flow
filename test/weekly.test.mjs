@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { makeWorld } from "../tools/testkit.mjs";
 import { addWeeklyToForm, removeWeeklyFromForm, sessionsForSlot } from "../src/admin.mjs";
-import { loadPattern, validatePattern } from "../src/config.mjs";
+import { loadPattern, validatePattern, roleSlotsFor } from "../src/config.mjs";
 import { migrate } from "../src/db.mjs";
 import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { eligiblePeopleFor } from "../src/queries.mjs";
@@ -155,8 +155,14 @@ test("different times on one day do not collide; two activities in one slot stil
       JOIN activities act ON act.id=s.activity_id WHERE s.date=? ORDER BY t.hour, act.key`).all(date);
     const at13 = slots.find((s) => s.hour === 13);
     const at15 = slots.filter((s) => s.hour === 15);
-    // Four rows now, not two: salsa and bachata each need a leader AND a follower.
-    assert.equal(at15.length, 4, "two classes at one time, each needing both roles");
+    // DERIVED from the pattern rather than written as a literal. It said 4 — two classes each needing a leader
+    // and a follower — and went red when those classes gained a booth slot, which sent me hunting for which
+    // number in which test to bump. The pattern already knows how many slots a class opens; ask it.
+    const expectedAt15 = p.weekly.filter((e) => e.hour === 15)
+      .flatMap((e) => e.activities)
+      .reduce((n, key) => n + roleSlotsFor(p.activities.find((a) => a.key === key)).length, 0);
+    assert.ok(expectedAt15 > 2, "the fixture must open more than two slots at that hour, or this proves little");
+    assert.equal(at15.length, expectedAt15, "two classes at one time, each opening every role it declares");
 
     db.prepare("UPDATE assignments SET person_id=? WHERE id=?").run(me, at13.id);
     for (const s of at15) {
@@ -482,4 +488,55 @@ test("removing one of an alternating pair leaves the other alone", () => {
     "without cadence fields the removal is by time alone, as it always was");
   // And a cadence that matches nothing removes nothing, rather than falling back to time.
   assert.equal(removeWeeklyFromForm(p, { dayOfWeek: 3, hour: 19, minute: 0, everyNth: 3 }).removed, 0);
+});
+
+// ---- the booth: two records of one fact, and one contract with the schema --------------------------------
+//
+// `boothLabel` says WHICH classes staff a door — it predates this feature, is populated from the export's
+// "Boo …" columns, and until 2026-08-24 nothing read it. `needs.booth` says HOW MANY people that takes. Two
+// fields describing one thing about the same activity, in the same file, free to disagree: an activity could
+// carry a booth label and open no booth slot, or open one while claiming to have no booth.
+test("every class with a booth label opens a booth slot, and only those", () => {
+  const p = loadPattern();
+  const labelled = p.activities.filter((a) => a.boothLabel).map((a) => a.key).sort();
+  const staffed = p.activities.filter((a) => (a.needs?.booth ?? 0) > 0).map((a) => a.key).sort();
+
+  assert.deepEqual(staffed, labelled,
+    "boothLabel and needs.booth disagree about which classes have a door — they describe the same fact");
+  // CONTROLS: neither list may be empty, or the comparison above passes by comparing nothing. And at least one
+  // activity must be WITHOUT a booth, or "only those" is untested — the export has exactly one such activity.
+  assert.ok(labelled.length > 0, "no activity carries a booth label, so this compares two empty lists");
+  assert.ok(labelled.length < p.activities.length,
+    "every activity has a booth, so nothing here proves the exclusion — the export has one that does not");
+});
+
+// THE CONTRACT WITH THE SCHEMA, and it is the one that would fail in production and nowhere else.
+//
+// assignments.role carries a CHECK, and SQLite cannot ALTER one — see the note above ADDED_COLUMNS in db.mjs. So
+// a role value that roleSlotsFor can emit but the CHECK does not permit is accepted by every test on a database
+// built from the current CREATE TABLE, and rejected at INSERT time on any database built before it. Nothing else
+// in this suite compares the two.
+test("every role the pattern can open is permitted by the schema", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrate(db);
+    const ddl = db.prepare("SELECT sql FROM sqlite_master WHERE name='assignments'").get().sql;
+    const m = ddl.match(/role\s+TEXT\s+CHECK\s*\(\s*role\s+IN\s*\(([^)]*)\)/i);
+    assert.ok(m, `could not find the role CHECK in the assignments schema — this test is reading the wrong thing:\n${ddl}`);
+    const permitted = m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, ""));
+
+    // CONTROL FIRST: the extraction has to have found real values, or every assertion below passes on an empty
+    // list. Two named here because a partner-dance class has always opened both.
+    assert.ok(permitted.includes("l") && permitted.includes("f"),
+      `the CHECK parse produced ${JSON.stringify(permitted)}, which cannot be right`);
+
+    const emitted = [...new Set(loadPattern().activities.flatMap((a) => roleSlotsFor(a)))].filter(Boolean);
+    assert.ok(emitted.length > 2, "the pattern emits no role beyond the two dance roles, so this proves little");
+    const unpermitted = emitted.filter((r) => !permitted.includes(r));
+    assert.deepEqual(unpermitted, [],
+      `the pattern can open ${JSON.stringify(unpermitted)} and the schema's CHECK does not allow it. Every test `
+      + `passes because test databases are built from the CURRENT CREATE TABLE; an existing one would reject `
+      + `these rows at INSERT time. Add the value to the CHECK in src/db.mjs — and note that only databases `
+      + `created after that edit will have it, because ALTER TABLE cannot change a CHECK.`);
+  } finally { db.close(); }
 });

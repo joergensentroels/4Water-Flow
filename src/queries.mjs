@@ -36,12 +36,25 @@ export const GATE = {
   // is exactly the shape the comment above this object warns about, which is why the gate belongs here.
   onRoster: (person) => `(SELECT status FROM people WHERE id = ${person}) = 'active'`,
 
-  capable: (person) => `EXISTS (SELECT 1 FROM capabilities c
-                                 WHERE c.person_id = ${person} AND c.activity_id = s.activity_id)`,
+  // THE BOOTH IS NOT A QUALIFICATION, and this is the ONE gate it escapes.
+  //
+  // 4water: everybody can staff a booth. Requiring a capability row for it would be a fiction, and an expensive
+  // one — it would mean granting all ~40 volunteers a capability for every class that has a door, on the screen
+  // that already costs half an hour of clicking at cutover. The other four gates still apply in full: a
+  // stood-down volunteer cannot take a booth (onRoster), they must have said they are free that hour
+  // (available), and they cannot be in two rooms at once (free). Skipping the capability check is the whole of
+  // what "not a qualification" means here, and nothing more.
+  capable: (person) => `(a.role = 'booth' OR EXISTS (SELECT 1 FROM capabilities c
+                                 WHERE c.person_id = ${person} AND c.activity_id = s.activity_id))`,
 
   // A slot with no role takes anyone; a leader slot takes leaders and people who do both. Here rather than in
   // each caller so the board, the claim guard, the planner's candidates and auto-roster all inherit it.
+  //
+  // A booth slot takes anyone too, and that needs saying rather than relying on `a.role IS NULL`: booth is a
+  // NAMED role, so without this clause it would be compared against preferred_role, match nobody, and leave
+  // every booth slot in the season unfillable while looking like an availability problem.
   role: (person) => `(a.role IS NULL
+                      OR a.role = 'booth'
                       OR (SELECT preferred_role FROM people WHERE id = ${person}) = 'b'
                       OR (SELECT preferred_role FROM people WHERE id = ${person}) = a.role)`,
 
@@ -554,8 +567,13 @@ export function assignSlot(db, assignmentId, personId, { expectPersonId = null }
 
   // A leader slot needs a leader or someone who does both. Checked here as well as in the shared predicate,
   // because a planner assigns directly rather than through the board.
+  //
+  // `row.role !== "booth"` mirrors the booth clause in the shared predicate, and this is the second place that
+  // needed it. The comment above already says why this check is duplicated at all — a planner assigns directly
+  // rather than through the board — which makes it precisely the kind of pair that drifts: the board would have
+  // offered booth slots to everyone while a planner assigning the same slot got "wrong_role".
   const prefers = db.prepare("SELECT preferred_role FROM people WHERE id=?").get(personId)?.preferred_role;
-  if (row.role && prefers !== "b" && prefers !== row.role) return { ok: false, reason: "wrong_role" };
+  if (row.role && row.role !== "booth" && prefers !== "b" && prefers !== row.role) return { ok: false, reason: "wrong_role" };
 
   // Nobody can be in two places at one time. The shared predicate has always said so, but it only gated the
   // CANDIDATE LIST — so the board and the auto-roster were safe while a direct planner assignment was not, and

@@ -70,8 +70,17 @@
     "same order. A test fails if the counts diverge, because prose was the only record before and three",
     "documents spent weeks calling the clock times invented after this file had established they never were."
   ],
-  "_openQuestions": ["eventMinutes", "locale"],
-  "_settledQuestions": ["clockTimes", "cutoffDays", "timezone", "weekOffset", "sundaySlots"],
+  "_openQuestions": [
+    "eventMinutes",
+    "locale"
+  ],
+  "_settledQuestions": [
+    "clockTimes",
+    "cutoffDays",
+    "timezone",
+    "weekOffset",
+    "sundaySlots"
+  ],
   "department": "cph",
   "locale": "en",
   "calendar": {
@@ -96,7 +105,8 @@
       "consolidation": "S",
       "needs": {
         "l": 1,
-        "f": 1
+        "f": 1,
+        "booth": 1
       }
     },
     {
@@ -108,7 +118,8 @@
       "consolidation": "B",
       "needs": {
         "l": 1,
-        "f": 1
+        "f": 1,
+        "booth": 1
       }
     },
     {
@@ -130,7 +141,8 @@
       "boothLabel": "WY",
       "consolidation": "Y",
       "needs": {
-        "any": 1
+        "any": 1,
+        "booth": 1
       }
     },
     {
@@ -141,7 +153,8 @@
       "boothLabel": "WO",
       "consolidation": "W",
       "needs": {
-        "any": 1
+        "any": 1,
+        "booth": 1
       }
     },
     {
@@ -152,7 +165,8 @@
       "boothLabel": "SH",
       "consolidation": "H",
       "needs": {
-        "any": 1
+        "any": 1,
+        "booth": 1
       }
     }
   ],

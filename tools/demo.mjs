@@ -32,15 +32,32 @@ export function demoSeason(today = new Date()) {
 }
 
 export function demoPattern(base = loadPattern(), today = new Date()) {
-  // Two slots on the Sunday, because a single slot per day was a placeholder and the demo should not repeat it.
+  // MIRRORS THE REAL RHYTHM, and that is the point rather than a coincidence.
+  //
+  // It used to invent a shape — one workshop slot and one mixed slot — which demonstrated the software and not
+  // 4water's week. A volunteer handed this at a meeting should recognise their own timetable, or the feedback is
+  // about a schedule nobody runs. So: the four one-hour slots 4water confirmed on 2026-08-23, plus the evening
+  // class and the later single-person slot.
+  //
+  // Positional keys, not names: test/seams.test.mjs forbids naming an activity in a string literal under src/ or
+  // test/, and this file is held to the same rule. Which index is which lives in config/pattern.json.
+  //
+  // The alternation the real config puts on the evening class is deliberately NOT copied — everyNth/weekOffset
+  // would leave half the evenings missing one of the two dances, which reads as a bug to somebody seeing the app
+  // for the first time. The demo's job is to be recognisable, not to be a second copy of production.
   const keys = base.activities.map((a) => a.key);
+  const bothDances = [keys[0], keys[1]];
   return {
     ...base,
     season: demoSeason(today),
     weekly: [
-      { dayOfWeek: 3, hour: 19, minute: 0, activities: [keys[0], keys[1]] },
-      { dayOfWeek: 0, hour: 13, minute: 0, activities: [keys[3]] },
-      { dayOfWeek: 0, hour: 15, minute: 0, activities: [keys[0], keys[2]] },
+      { dayOfWeek: 3, hour: 19, minute: 0, activities: bothDances },
+      // Carries no booth, so the demo shows a class that needs one next to a slot that does not.
+      { dayOfWeek: 3, hour: 20, minute: 15, activities: [keys[2]] },
+      { dayOfWeek: 0, hour: 13, minute: 0, activities: bothDances },
+      { dayOfWeek: 0, hour: 14, minute: 0, activities: bothDances },
+      { dayOfWeek: 0, hour: 15, minute: 0, activities: bothDances },
+      { dayOfWeek: 0, hour: 16, minute: 0, activities: bothDances },
     ],
   };
 }

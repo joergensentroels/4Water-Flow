@@ -397,9 +397,28 @@ test("the lock and discard controls only appear when there is something to decid
 // The fixture difference is deliberately small: same four volunteers, all available, but capable of everything, so
 // every partner-dance slot has an eligible pair. That is what makes the contrast with the test above meaningful —
 // one flag, opposite outcome.
-test("a roster with no gaps says so, in a banner that is not a warning", withPlanner({ capableOfEverything: true },
-  async (w) => {
+// ⚠ `volunteers` is set HERE and sized against the busiest hour, rather than left at the helper's four.
+//
+// Four was enough while a class needed a leader and a follower. Classes gained a booth slot on 2026-08-24, the
+// busiest hour rose to six people, and this test went red reporting `roster_gaps` — which is exactly what its own
+// message below warns about: the complete case stopped being complete and this became a second copy of the
+// incomplete one. It failed loudly instead of passing wrongly, which is why that message was written.
+//
+// The assertion on `busiest` guards the next such change: it fails naming the shortfall, rather than leaving
+// somebody to work out why "no gaps" produced gaps.
+test("a roster with no gaps says so, in a banner that is not a warning",
+  withPlanner({ capableOfEverything: true, volunteers: 8 }, async (w) => {
     allAvailable(w);
+
+    // The most people any ONE hour needs. Nobody can be in two rooms at once, so a fixture with fewer volunteers
+    // than this cannot fill that hour, and the assertion below would be measuring the fixture instead.
+    const busiest = Math.max(...w.db.prepare(`SELECT COUNT(*) n FROM assignments a
+        JOIN sessions s ON s.id = a.session_id JOIN timeslots t ON t.id = s.timeslot_id
+       GROUP BY s.date, t.hour, t.minute`).all().map((r) => r.n));
+    assert.ok(w.people.length >= busiest,
+      `the busiest hour needs ${busiest} people and the fixture has ${w.people.length} — raise volunteers, or this `
+      + `test reports a shortage of volunteers as a failure of auto-roster`);
+
     const planner = await w.signIn(w.people[0]);
     const { token } = await w.csrfFrom("/planner", planner);
 

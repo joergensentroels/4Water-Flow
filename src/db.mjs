@@ -294,10 +294,23 @@ export function migrate(db) {
       id         INTEGER PRIMARY KEY,
       session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       person_id  INTEGER REFERENCES people(id) ON DELETE SET NULL,
-      -- Which role this slot is for: 'l' leader, 'f' follower, or NULL meaning the role does not matter.
-      -- A partner-dance class needs one of each, so it gets TWO rows; a workshop gets one NULL-role row.
+      -- Which role this slot is for: 'l' leader, 'f' follower, 'booth' the class's door, or NULL meaning the role
+      -- does not matter. A partner-dance class needs one of each dance role plus a booth, so it gets THREE rows;
+      -- a workshop gets one NULL-role row and a booth.
       -- Nullable on purpose, so rows written before roles existed remain valid and read as "anyone".
-      role       TEXT CHECK (role IN ('l','f')),
+      --
+      -- 'booth' was added 2026-08-24, and WHEN matters as much as what. ALTER TABLE ADD COLUMN cannot add or
+      -- change a CHECK (see the warning above ADDED_COLUMNS), and nothing here rebuilds a table, so this
+      -- constraint only reaches databases created after this line. That is free today and expensive later: the
+      -- image has never been built and no volunteer has used it, so no database anywhere holds the old
+      -- two-value CHECK. One that did would accept l and f, reject every booth slot at INSERT time in
+      -- production, and keep the whole suite green — so a further role value after go-live is a deliberate
+      -- rebuild, not an edit to this line.
+      --
+      -- NOT 'b', which is taken: preferred_role IN ('l','f','b') uses 'b' for "does both", and the role gate in
+      -- queries.mjs reads it that way — so a booth slot spelled 'b' would match every ambidextrous volunteer for
+      -- entirely the wrong reason.
+      role       TEXT CHECK (role IN ('l','f','booth')),
       state      TEXT NOT NULL DEFAULT 'confirmed' CHECK (state IN ('proposed','confirmed')),
       -- Did they turn up? NULL means nobody has said, and that is the honest majority state: a planner marks
       -- this after the fact, and most shifts will never be marked at all. 1 attended, 0 did not.

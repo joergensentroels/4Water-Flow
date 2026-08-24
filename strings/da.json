@@ -373,6 +373,7 @@
   "planner.eligibleFairest.one": "1 person kan tage den",
   "role.dance.l": "fører",
   "role.dance.f": "følger",
+  "role.dance.booth": "booth",
   "planner.wrongRole": "Personen underviser ikke i den rolle, denne vagt kræver.",
   "planner.alreadyBooked": "Personen er allerede booket på samme tidspunkt.",
   "profile.danceRole": "Du underviser som",

@@ -77,7 +77,11 @@ export function validatePattern(p) {
       const n = a.needs;
       if (!n || typeof n !== "object" || Array.isArray(n)) err(`activity "${a.key}": needs must be an object like {"l":1,"f":1} or {"any":1}`);
       for (const [role, count] of Object.entries(n)) {
-        if (!["l", "f", "any"].includes(role)) err(`activity "${a.key}": unknown role "${role}" — use l, f or any`);
+        // `booth` is a REAL role, not a synonym for `any`, and the mixing rule below is why it has to be: `any`
+        // beside a named role is refused as ambiguous, so a booth slot could never have been an extra `any`
+        // next to l and f. It is also not a qualification — see the capability gate in queries.mjs — which is
+        // the other half of why it is a role on the class rather than an activity of its own.
+        if (!["l", "f", "any", "booth"].includes(role)) err(`activity "${a.key}": unknown role "${role}" — use l, f, any or booth`);
         if (!Number.isInteger(count) || count < 0 || count > 10) err(`activity "${a.key}": needs.${role} must be a whole number 0..10`);
       }
       if (Object.values(n).reduce((s, c) => s + c, 0) < 1) err(`activity "${a.key}": needs at least one person`);
@@ -231,10 +235,12 @@ export const notifyTimingConfig = (pattern) => ({
 
 // Absent needs means one person, role irrelevant. Returned as a flat list of role slots, because that is what
 // both the seeder and every screen actually want: one entry per person the session requires.
+// `booth` last, so the people who run the class come before the people who staff its door on every screen that
+// renders slots in this order. `any` stays null — the schema's way of saying "role does not matter".
 export function roleSlotsFor(activity) {
   const needs = activity?.needs ?? { any: 1 };
   const out = [];
-  for (const role of ["l", "f", "any"]) {
+  for (const role of ["l", "f", "any", "booth"]) {
     for (let i = 0; i < (needs[role] ?? 0); i++) out.push(role === "any" ? null : role);
   }
   return out;
