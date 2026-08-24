@@ -154,10 +154,14 @@ because the count went stale the moment a fourth was added: three documents said
 - ~~**`board.cutoffDays`**~~ — **settled by 4water: `7`.** A week's notice, so there is realistic time to find a
   replacement. It does not block the hand-back; it marks it as short notice in the flash and in the channel
   announcement, so a planner sees the urgency without the volunteer having to relay it. `2` was the placeholder.
-- **`calendar.eventMinutes`** <!--ph:eventMinutes--> — how long a shift runs. 90 is invented.
-- **`locale`** <!--ph:locale--> — `"en"`, while a complete Danish translation ships beside it. One word switches every
-  volunteer-facing string and the page's declared language. `export.csvDelimiter` is set for a Danish spreadsheet
-  in the same file, so the two currently point in different directions. Either answer is fine; it should be one.
+- ~~**`calendar.eventMinutes`**~~ — **settled by 4water: `60`.** One hour, which the slots had already said:
+  13–14, 14–15, 15–16, 16–17. It sat at an invented 90 while this was treated as an open question, which it had
+  stopped being. The code default in `src/config.mjs` is still 90 for a config that omits the key — a fallback
+  for another department, not a claim about this one.
+- ~~**`locale`**~~ — **settled by 4water: `"en"`.** They do not need Danish. Note this does NOT settle
+  `export.csvDelimiter`, which is `;` for a different reason: a spreadsheet splits a `.csv` on the locale's list
+  separator, and the people opening it are on a Danish Windows whatever language the interface is in. Two facts
+  that look like one.
 - **One timeslot per day** is a modelling guess, not a limit. The real export has four parallel schedules, and
   several times on one day is normal and fully supported — add them on the Administration screen.
 

@@ -351,10 +351,11 @@ up, add it there too.**
   one weekday.
 - **The licence is the board's choice, not the developer's.** AGPL-3.0 is a default with the reasoning written
   into `LICENSE` itself.
-- **Placeholders remain in `config/pattern.json`,** and that file is the list — each is marked where it is set.
-  `calendar.eventMinutes` <!--ph:eventMinutes--> — no shift length was ever stated, so 90 minutes is invented —
-  and `locale` <!--ph:locale-->.
-  Three are **no longer among them.** **How many Sunday slots there are**: 4water answered four one-hour slots,
+- ~~**Placeholders remain in `config/pattern.json`.**~~ **None do, as of 2026-08-24.** `_openQuestions` in that
+  file is empty and a test requires every document to name nothing while it is. The last two: a shift is **60
+  minutes**, which the one-hour slots had already established and which sat at an invented 90 while the question
+  was treated as open; and the interface is **English**, because 4water do not need Danish.
+  The rest were settled earlier. **How many Sunday slots there are**: 4water answered four one-hour slots,
   13:00–17:00, with Salsa and Bachata simultaneous in each — which EXTENDS the export's 13:00–16:00 by an hour, so
   it is their correction rather than a re-reading of it. `board.cutoffDays` (spec Q18): settled at `7`. And **the clock
   times, which were never invented at all** — the discovery spec's section 1 states Wednesdays 19:00 and 20:15

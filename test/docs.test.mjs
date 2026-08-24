@@ -200,10 +200,19 @@ test("the config comment's own count of its placeholders is true", () => {
   const comment = JSON.parse(read("config/pattern.json"))._comment;
   assert.ok(Array.isArray(comment) && comment.length > 5, "the config comment is missing or has shrunk to nothing");
 
+  // NO NUMBERED LIST IS NOW THE CORRECT STATE, and this asserted at least two of them.
+  //
+  // 4water answered the last placeholder on 2026-08-24, the list was deleted rather than left as an empty
+  // heading, and this went red demanding items that must not exist. Same assumption as the sibling checks
+  // further down: that the project would always have something undecided — the state all of them were built to
+  // help it leave. The numbering rule below still applies to any list that IS there.
   const numbered = comment.map((l) => /^\s*(\d+)\./.exec(l)).filter(Boolean).map((m) => Number(m[1]));
-  assert.ok(numbered.length >= 2, `expected a numbered list of placeholders, found ${numbered.length} items`);
   assert.deepEqual(numbered, numbered.map((_, i) => i + 1),
     `the numbered placeholders skip or repeat a number: ${numbered.join(", ")}`);
+  // The count rules below are what this test is really for, and they must not go quiet just because the list
+  // emptied: a stale "two placeholders" left in the prose is exactly the drift being guarded against.
+  assert.ok(comment.some((l) => /_openQuestions/.test(l)),
+    "the comment no longer mentions _openQuestions, so a reader has no route from the prose to the machine-readable list");
 
   const text = comment.join("\n");
   const WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
@@ -227,15 +236,22 @@ test("the config comment's own count of its placeholders is true", () => {
   }
   // "Both" is a count of two wearing a different hat, and it is how the stale version survived a reading.
   //
-  // DORMANT SINCE 2026-08-23, and it went dormant by being right rather than by rotting: 4water answered how
-  // many slots one weekday has, that placeholder retired, and the list came down to exactly two — at which point
-  // "both" would be a true statement and there is nothing to forbid. tools/deadassert.mjs caught the transition
-  // on the push, which is the whole reason this project marks dormancy with a reason instead of trusting a green
-  // run: this assertion and one that has stopped working look identical from the outside.
+  // IT WENT DORMANT AND CAME BACK, and the round trip is worth recording because it is the whole argument for
+  // marking dormancy instead of trusting a green run.
+  //
+  // On 2026-08-23 the list came down to exactly two, this stopped executing — correctly, since at two the word
+  // is simply true — and tools/deadassert.mjs blocked the push until that was written down. On 2026-08-24 the
+  // last placeholder was answered, the list went to none, and it woke up and immediately caught three innocent
+  // uses of the word in a comment that had grown around it.
+  //
+  // All three were reworded rather than the rule narrowed. The rule is BLUNT on purpose: the original stale
+  // sentence paired that word with "are editable" and mentioned no placeholder at all, so a version scoped to
+  // lines mentioning placeholders would sail past the exact bug it was written for. A blunt rule that
+  // occasionally makes you rephrase a sentence is the cheaper trade.
   if (numbered.length !== 2) {
-    // deadassert: dormant — the list is exactly two today, so "both" is accurate and this has nothing to catch.
     assert.ok(!/\bboth\b/i.test(text),
-      `the comment says "both" while listing ${numbered.length} placeholders — that is a count of two in disguise`);
+      `the comment uses a word meaning "the two of them" while listing ${numbered.length} placeholders — that is `
+      + `a count of two in disguise. Reword the prose; do not narrow this check.`);
   }
 
   // And the DOCUMENTS that point at this list must not count it either. The gate above shipped checking the
@@ -301,7 +317,12 @@ test("the config comment's own count of its placeholders is true", () => {
 test("the ids in _openQuestions match the numbered placeholders in the comment", () => {
   const cfg = JSON.parse(read("config/pattern.json"));
   const open = cfg._openQuestions;
-  assert.ok(Array.isArray(open) && open.length, "config/pattern.json declares no _openQuestions");
+  // AN EMPTY LIST IS LEGITIMATE, and as of 2026-08-24 it is the state: 4water answered the last two questions,
+  // so nothing is a placeholder any more. This asserted non-empty and went red on that answer — the check had
+  // quietly assumed the project would always have something undecided, which is the one state it was built to
+  // help reach. `Array.isArray` is still required: a missing field means somebody deleted the record, which is
+  // a different thing from an empty one and must not read as "all settled".
+  assert.ok(Array.isArray(open), "config/pattern.json has no _openQuestions array — deleted is not the same as empty");
   // Without this the machine-readable list becomes a SECOND home for the same fact, free to drift from the
   // human one — the disease rather than the cure. A fourth numbered placeholder with no matching id would
   // leave the document check below passing on three and nobody any the wiser.
@@ -314,7 +335,9 @@ test("the ids in _openQuestions match the numbered placeholders in the comment",
 test("every document's placeholder list names the same items as config/pattern.json", () => {
   const cfg = JSON.parse(read("config/pattern.json"));
   const open = cfg._openQuestions, settled = cfg._settledQuestions;
-  assert.ok(Array.isArray(open) && open.length, "config/pattern.json declares no _openQuestions");
+  // Empty is the terminal state and it is where this project now is — see the sibling test above. Both arrays
+  // must EXIST, because a deleted record and an answered one are different facts.
+  assert.ok(Array.isArray(open), "config/pattern.json has no _openQuestions array — deleted is not empty");
   assert.ok(Array.isArray(settled) && settled.length, "config/pattern.json declares no _settledQuestions");
 
   const both = open.filter((id) => settled.includes(id));
@@ -331,18 +354,37 @@ test("every document's placeholder list names the same items as config/pattern.j
     "the ph-marker extractor invents markers that are not there");
 
   // NEGATIVE CONTROLS on the comparison itself, both directions of the real failure.
-  const cmp = (found) => ({ missing: open.filter((i) => !found.includes(i)), stale: found.filter((i) => !open.includes(i)) });
-  assert.deepEqual(cmp(open.slice(1)).missing, [open[0]], "the comparison does not notice an OMITTED placeholder");
-  assert.deepEqual(cmp([...open, settled[0]]).stale, [settled[0]], "the comparison does not notice a RETIRED placeholder");
+  //
+  // Built from INVENTED ids rather than from `open`, and that matters now: these were derived from the live list
+  // with `open.slice(1)`, which produced no case to test the moment the list emptied — a control that evaporates
+  // exactly when the data reaches its final state is not a control. Synthetic input exercises the comparison
+  // whatever the config says.
+  const cmp = (wanted, found) => ({
+    missing: wanted.filter((i) => !found.includes(i)),
+    stale: found.filter((i) => !wanted.includes(i)),
+  });
+  assert.deepEqual(cmp(["alpha", "beta"], ["beta"]).missing, ["alpha"],
+    "the comparison does not notice an OMITTED placeholder");
+  assert.deepEqual(cmp(["alpha"], ["alpha", "gamma"]).stale, ["gamma"],
+    "the comparison does not notice a RETIRED placeholder");
+  assert.deepEqual(cmp([], ["gamma"]).stale, ["gamma"],
+    "with nothing open, a document still naming one must be caught — that is today's state");
+  assert.deepEqual(cmp([], []), { missing: [], stale: [] }, "and nothing open with nothing named is agreement");
 
-  // The documents that describe the list. Found by which ones carry markers at all, then required to be the
-  // full set — a doc that quietly loses every marker would otherwise drop out of the check silently.
+  // The documents that describe the list. Each must name exactly the open questions — which today means naming
+  // NONE, since 4water answered the last of them.
   const DESCRIBERS = ["RUNBOOK.md", "README.md", "PLAN.md"];
   for (const doc of DESCRIBERS) {
     const found = markers(read(doc));
-    assert.ok(found.length, `${doc} carries no <!--ph:id--> markers at all — it describes the placeholder ` +
-      `list, so each entry must name its id, or this check silently stops covering it`);
-    const { missing, stale } = cmp(found);
+    // Only meaningful while something IS open. Asserting it unconditionally is what broke when the list
+    // emptied: it demanded a marker for a question that no longer exists.
+    if (open.length) {
+      // The set comparison below still runs whatever happens here, and it is what catches a stale marker.
+      // deadassert: dormant — nothing is open today, so demanding a marker would demand one for no question
+      assert.ok(found.length, `${doc} carries no <!--ph:id--> markers at all — it describes the placeholder ` +
+        `list, so each entry must name its id, or this check silently stops covering it`);
+    }
+    const { missing, stale } = cmp(open, found);
     assert.deepEqual(missing, [],
       `${doc} does not name these open questions: ${missing.join(", ")}. config/pattern.json lists them, so ` +
       `this document is telling a reader there is less to settle than there is.`);
@@ -402,7 +444,7 @@ test("importing the demo tool does not build a database or exit", async () => {
   const src = read("tools/demo-serve.mjs");
   const guard = src.indexOf("if (process.argv[1]");
   assert.ok(guard > 0, "tools/demo-serve.mjs no longer has a main-module guard");
-  for (const effect of ["execFileSync(", "openDb(", "bootstrapAdmin(", "process.exit("]) {
+  for (const effect of ["execFileSync(", "openDb(", "bootstrapAdmin(", "process.exit(", "rmSync("]) {
     const at = src.indexOf(effect);
     assert.ok(at === -1 || at > guard,
       `tools/demo-serve.mjs calls ${effect} before its main-module guard (at character ${at}, guard at ` +
