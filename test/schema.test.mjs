@@ -94,3 +94,45 @@ test("DoD 3 — Score is derived: it moves when an assignment is confirmed and b
   db.prepare("UPDATE assignments SET person_id=?, state='proposed' WHERE id=?").run(me, slot);
   assert.equal(score(db, me, seasonId), 0, "an unlocked auto-roster proposal must not count toward Score");
 });
+
+// ---- seeding people twice ---------------------------------------------------------------------------------
+//
+// Found by Bureau's nightly review of this repository on 2026-08-24 and proved through its gate: the check
+// failed on the code as it stood, passed with the fix, and failed again once the fix was reverted, with the
+// project's own suite green throughout.
+//
+// The probe that proved it was a throwaway and is gone, so this is a permanent replacement rather than a copy.
+// That gap is worth naming: a finding's check command survives in the audit trail, its probe does not.
+//
+// SCOPE, honestly: seedPeople is called only from tools/ and test/, never from src/, so no volunteer could ever
+// have hit this. tools/demo.mjs already works around it by deleting people first, and its comment records what
+// it cost — "12 names became 25 people". This closes the trap rather than the workaround.
+test("seeding the same people twice does not duplicate them", () => {
+  const db = fresh();
+  try {
+    migrate(db);
+    const { seasonId } = seedStructure(db, loadPattern());
+    const people = [{ name: "Volunteer 1", contact: "v1@example.org", can: ["salsa"] }, { name: "Volunteer 2" }];
+
+    const first = seedPeople(db, seasonId, people);
+    const second = seedPeople(db, seasonId, people);
+
+    assert.deepEqual(second, first, "the second run must return the SAME ids rather than inserting new rows");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, people.length,
+      "running the seeder twice must leave one row per person");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM capabilities").get().n, 1,
+      "and must not accumulate capability rows either");
+
+    // THE IDENTITY RULE, pinned because the fix chose it and a later reader should not have to guess: a person
+    // is the same person when the name AND the contact match. Same name, different address is somebody else.
+    const other = seedPeople(db, seasonId, [{ name: "Volunteer 1", contact: "different@example.org" }]);
+    assert.notDeepEqual(other, [first[0]], "same name with a different address must be a different person");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, people.length + 1);
+
+    // CONTROL: dedup must not be so eager that a genuinely new person is dropped. Without this the assertions
+    // above would pass on a seeder that had simply stopped inserting anything after the first run.
+    const fresh3 = seedPeople(db, seasonId, [{ name: "Volunteer 3" }]);
+    assert.equal(fresh3.length, 1, "a new person must still be inserted");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM people").get().n, people.length + 2);
+  } finally { db.close(); }
+});

@@ -16,7 +16,7 @@ planner opting a date back in. Still one thing per commit, still `git log` as th
 table with no session attached, so it can be added later without redoing any of the privacy work. Shift swaps are
 noted but not designed — the session page is where they would go.
 
-Status: **✅ A–AH complete plus the commits since, 567 tests green on BOTH Node 22.14 and 24** — and green in a
+Status: **✅ A–AH complete plus the commits since, 568 tests green on BOTH Node 22.14 and 24** — and green in a
 fresh `git clone` of the current commit, not only in the working copy where the tests were written.
 
 It once read 551 for the wrong reason, and now reads it for the right one. Seven of the original total were
@@ -41,6 +41,9 @@ The last three are the booth: that a volunteer with no capability and no stated 
 can claim it while the other four gates still bite, that boothLabel and needs.booth cannot disagree about
 which classes have a door, and that every role the pattern can open is permitted by the schema's CHECK — the
 one contract that would otherwise hold on every test database and fail on a real one.
+The 568th is the first fix to arrive from Bureau's nightly review of this repository: seeding the same people
+twice no longer duplicates them. Its own probe was a throwaway and is gone, so that test is a permanent
+replacement rather than a copy of it.
 
 That last part is checked rather than assumed, because it has been false before: three tests once read a file
 `.gitignore` excludes, so they could only ever pass on the machine that wrote them. Re-verified after the recent

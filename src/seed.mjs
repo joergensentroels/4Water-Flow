@@ -135,12 +135,23 @@ export function seedSeason(db, pattern, { fromDate = null } = {}) {
 export function seedPeople(db, seasonId, people) {
   const insP = db.prepare("INSERT INTO people (name, contact, preferred_role, auth_provider, auth_subject) VALUES (?,?,?,?,?)");
   const insC = db.prepare("INSERT OR IGNORE INTO capabilities (person_id, activity_id) VALUES (?, (SELECT id FROM activities WHERE key=?))");
+  // `contact IS ?` and not `= ?`. contact is nullable, and `= NULL` is never true in SQL — with `=` every
+  // person seeded without an address would fail to match themselves and duplicate anyway, which is the whole
+  // bug this is fixing. Hoisted out of the loop rather than prepared per person, as the two statements above are.
+  const findP = db.prepare("SELECT id FROM people WHERE name = ? AND contact IS ?");
   const ids = [];
   db.exec("BEGIN");
   try {
+    // IDEMPOTENT, so calling this twice returns the same people instead of a second set of them.
+    //
+    // It always INSERTed, and tools/demo.mjs records what that cost: "12 names became 25 people". That tool
+    // works around it by deleting everyone first; this removes the need to. A person is the same person when
+    // the name AND the contact match — same name, different address is somebody else, which
+    // test/schema.test.mjs pins so the rule is not left to inference.
     for (const p of people) {
-      const r = insP.run(p.name, p.contact ?? null, p.preferredRole ?? "b", p.authProvider ?? "oidc", p.authSubject ?? null);
-      const id = Number(r.lastInsertRowid);
+      const existing = findP.get(p.name, p.contact ?? null);
+      const id = existing ? existing.id
+        : Number(insP.run(p.name, p.contact ?? null, p.preferredRole ?? "b", p.authProvider ?? "oidc", p.authSubject ?? null).lastInsertRowid);
       ids.push(id);
       for (const k of p.can ?? []) insC.run(id, k);
     }
