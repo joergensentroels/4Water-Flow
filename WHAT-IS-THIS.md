@@ -32,8 +32,31 @@ You can change your mind later.
 
 **Swap a shift.** Can't make one? Put it on the exchange. Want an extra? Take one off it.
 
-There is a third answer besides yes and no: *not answered yet*. Silence is never read as
-agreement — nobody gets put on a shift because they forgot to reply.
+```mermaid
+flowchart TD
+  A["You mark when you can help"] --> B["The planner builds the roster<br/>from everyone's answers"]
+  B --> C["Your slots appear on your front page"]
+  C --> D{"Can you still make it?"}
+  D -- "yes" --> E["You turn up and teach"]
+  D -- "no" --> F["Put it on the shift exchange"]
+  F --> G["Someone else picks it up"]
+```
+
+## Yes, no, and not answered yet
+
+There are three answers, not two — and the third one is the reason nobody gets signed up by
+accident:
+
+```mermaid
+flowchart TD
+  A["A date that needs an answer"] --> B{"Can you help?"}
+  B -- "yes" --> C["You can be put on a shift"]
+  B -- "no" --> D["You are not asked about<br/>that date again"]
+  B -- "not answered yet" --> E["You get a reminder —<br/>never a shift"]
+```
+
+Silence is never read as agreement. Saying *no* is a real answer too, so you are not pestered
+about a date you have already turned down.
 
 ## If you are the one making the rota
 
