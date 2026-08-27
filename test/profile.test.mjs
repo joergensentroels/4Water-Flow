@@ -9,8 +9,8 @@ import { makeWorld, makeAvailableEverywhere, csrfFromCookie } from "../tools/tes
 import { myProfile, saveProfile } from "../src/pages/profile.mjs";
 import { collectStatus, renderStatus } from "../src/pages/status.mjs";
 import { makeT } from "../src/config.mjs";
-import { assignSlot, setAvailabilityDay } from "../src/queries.mjs";
-import { startJobs } from "../src/jobs.mjs";
+import { assignSlot, setAvailabilityDay, setAvailabilityHour } from "../src/queries.mjs";
+import { startJobs, volunteersNeedingNudge } from "../src/jobs.mjs";
 
 const withWorld = (opts, fn) => async () => {
   const w = await makeWorld({ volunteers: 3, roles: { 0: ["planner"] }, ...opts });
@@ -27,7 +27,16 @@ test("a volunteer can see what the system believes about them", withWorld({}, as
   assert.equal(me.answered, 0);
   assert.ok(me.datesInSeason > 0, "and how many dates there are to answer");
 
+  // Answering a date NOBODY IS SCHEDULED ON is not progress, and this test used to assert that it was: the
+  // season opens 2026-01-01 and the first class is on the 4th, so the old counter — any availability row on any
+  // date — moved to 1 for an answer about a day the app never asks about. The counter counts dates that need
+  // answering, which is the set the form puts in front of a volunteer.
+  const firstSession = w.db.prepare("SELECT MIN(date) d FROM sessions WHERE season_id=?").get(w.seasonId).d;
+  assert.notEqual(firstSession, w.pattern.season.from, "the season opens before the first class — the gap is the point here");
   setAvailabilityDay(w.db, w.people[1], w.pattern.season.from, true);
+  assert.equal(myProfile(w.db, w.people[1], w.seasonId).answered, 0, "a date with no sessions is not a date to answer");
+
+  setAvailabilityDay(w.db, w.people[1], firstSession, true);
   assert.equal(myProfile(w.db, w.people[1], w.seasonId).answered, 1);
 
   const cookie = await w.signIn(w.people[1]);
@@ -87,6 +96,31 @@ test("a volunteer cannot grant themselves a capability from their profile", with
 }));
 
 // ---- status -------------------------------------------------------------------------------------------
+// The status page and the nudge job answer the same question, so they must name the same people. They did not:
+// the page asked who had answered NOTHING from today on, the job asked who had a date left in the next 28 days,
+// and each called its own answer "has not answered". A planner reading "everyone has answered" in the same hour
+// the chat channel chased somebody has no way to tell which screen to believe.
+//
+// Asserted as a SET, not as two counts — two lists of the same length can still name different people.
+test("the status page names exactly the volunteers the nudge job would chase", withWorld({}, async (w) => {
+  const today = w.pattern.season.from;
+  const horizon = new Date(Date.parse(`${today}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
+
+  const namesOf = () => factFor(collectStatus(w.db, { pattern: w.pattern, today, backupDir: null }), "silent").value;
+  const chased = () => volunteersNeedingNudge(w.db, w.seasonId, today, horizon).length;
+  assert.ok(namesOf() > 0 && namesOf() === chased(), "control: with nobody having answered, both must see everyone");
+
+  // One volunteer answers a single time on a single date. Under the old pair of rules this made her invisible to
+  // the status page (she now had a row) while the job still chased her — the exact disagreement.
+  const slot = w.db.prepare(`SELECT s.date, t.hour FROM sessions s JOIN timeslots t ON t.id = s.timeslot_id
+                              WHERE s.season_id = :sid AND s.date >= :from ORDER BY s.date, t.hour LIMIT 1`)
+    .get({ sid: w.seasonId, from: today });
+  setAvailabilityHour(w.db, w.people[1], slot.date, slot.hour, false);
+
+  assert.equal(namesOf(), chased(), "one partial answer must not move the two screens apart");
+  assert.ok(chased() > 0, "and she is still owed the rest of the season, so this is not a vacuous agreement");
+}));
+
 test("a season that has ENDED is reported as the reason the plan looks empty", withWorld({}, async (w) => {
   // The clock past the season's end — which is the real situation on this project right now.
   const after = new Date(Date.parse(`${w.pattern.season.to}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);

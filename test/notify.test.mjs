@@ -10,7 +10,7 @@ import { seedStructure, seedPeople, openEverySession } from "../src/seed.mjs";
 import { makeNotifier, notifyConfig, stubTransport, slotOpenMessage, nudgeMessage,
          shiftReminderMessage } from "../src/notify.mjs";
 import { isoWeek, runNudge, volunteersNeedingNudge, startJobs, runShiftReminders } from "../src/jobs.mjs";
-import { setAvailabilityDay } from "../src/queries.mjs";
+import { setAvailabilityDay, setAvailabilityHour } from "../src/queries.mjs";
 import { listOutbox, renderOutbox } from "../src/pages/outbox.mjs";
 
 const SECRET_URL = "https://chat.example.org/hooks/xxxxSECRETxxxx";
@@ -217,6 +217,47 @@ test("only volunteers with unanswered dates are nudged", () => {
   assert.ok(need.includes(people[2]));
   // A 'no' counts as an answer — the nudge is about silence, not about saying yes.
   assert.equal(db.prepare("SELECT available FROM availability_day WHERE person_id=? AND date=?").get(people[1], dates[0].date).available, 0);
+});
+
+// The two failures the shared rule exists to prevent, one on each side of it. Both were live until 2026-08-27,
+// because the job counted a date as answered when ANY availability row touched it — any hour, any value.
+//
+// The first is the one an automated review proposed to "fix" by requiring available = 1, which would have made
+// an explicit no into silence: a volunteer who declined every hour would then be messaged every week, forever,
+// with nothing she could do to stop it. In a volunteer app that is not a bug report, it is harassment, and the
+// status page would have gone on listing her as having answered while it happened.
+test("an explicit no is an answer, and a date half-answered by hour is not", () => {
+  const { db, seasonId, people, pattern } = world();
+  const from = pattern.season.from;
+  const to = "2026-02-01";
+  const grid = db.prepare(`SELECT s.date, t.hour FROM sessions s JOIN timeslots t ON t.id = s.timeslot_id
+                            WHERE s.season_id = :sid AND s.date BETWEEN :from AND :to
+                            GROUP BY s.date, t.hour ORDER BY s.date, t.hour`).all({ sid: seasonId, from, to });
+  const nudged = () => volunteersNeedingNudge(db, seasonId, from, to).map((r) => r.id);
+  assert.ok(nudged().includes(people[0]), "control: this volunteer IS nudged before answering anything");
+
+  // Answers NO to every time in the window — the most emphatic answer available.
+  for (const g of grid) setAvailabilityHour(db, people[0], g.date, g.hour, false);
+  assert.ok(!nudged().includes(people[0]),
+    "a volunteer who said no to everything has ANSWERED; nudging her again asks a question she cannot satisfy");
+
+  // Answers every time except one, on a date that has several. Derived, not hardcoded: a fixture where every
+  // date carries a single time cannot exhibit this case at all, and would pass the test while proving nothing.
+  const hoursByDate = new Map();
+  for (const g of grid) hoursByDate.set(g.date, [...(hoursByDate.get(g.date) ?? []), g.hour]);
+  const multi = [...hoursByDate.entries()].find(([, hours]) => hours.length > 1);
+  assert.ok(multi, "the fixture needs a date with several times on it, or the half-answered case is untested");
+  const [busyDate, busyHours] = multi;
+
+  for (const g of grid) {
+    if (g.date === busyDate && g.hour === busyHours[0]) continue;
+    setAvailabilityHour(db, people[1], g.date, g.hour, true);
+  }
+  assert.ok(nudged().includes(people[1]),
+    "one blank time on an otherwise answered date is exactly the gap that loses cover, and nothing chased it");
+
+  setAvailabilityHour(db, people[1], busyDate, busyHours[0], true);
+  assert.ok(!nudged().includes(people[1]), "and answering that last time finishes the date");
 });
 
 test("the nudge is idempotent per person per period, however often the job runs", async () => {

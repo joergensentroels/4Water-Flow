@@ -1,6 +1,10 @@
 // Scheduled work. A timer inside the process rather than a cron entry, so deploying the app deploys the
 // nudge — one fewer thing for whoever inherits this to know about, and one fewer thing to forget.
 import { nudgeMessage, shiftReminderMessage } from "./notify.mjs";
+// From the page module rather than a copy here, and the direction is deliberate: the availability form is where
+// "answered" is DEFINED, because it is the screen that asks the question. A job that re-expressed the rule in SQL
+// is exactly what this import replaces.
+import { volunteersWithUnansweredDates } from "./pages/availability.mjs";
 
 // ISO week, used as the nudge's idempotency period: at most one reminder per volunteer per week, however
 // often the job runs. Computed in UTC to match how dates are stored.
@@ -18,23 +22,15 @@ export function isoWeek(isoDate) {
 
 const addDays = (isoDate, n) => new Date(Date.parse(`${isoDate}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-// Who has NOT answered for the coming window. "Has not answered" is the absence of a row — the same
-// definition the eligibility query uses, so a volunteer cannot be simultaneously nudged and considered
-// available.
+// Who has NOT answered for the coming window, by the one definition of answered — every time on a date, with an
+// explicit "no" counting as an answer. See unansweredDates.
+//
+// The invariant this has to keep is that a volunteer cannot be simultaneously nudged and considered available:
+// an unanswered (date, hour) is one where neither an hour nor a day row exists, which is exactly where the
+// COALESCE in queries.mjs falls through to 0. Nudged still implies not-available, as it did before, and now it
+// also implies the volunteer can DO something about it — which the old rule could not promise.
 export function volunteersNeedingNudge(db, seasonId, from, to) {
-  return db.prepare(`
-    SELECT p.id, p.name,
-           (SELECT COUNT(DISTINCT s.date) FROM sessions s
-             WHERE s.season_id = :sid AND s.date BETWEEN :from AND :to) AS dates,
-           (SELECT COUNT(DISTINCT s.date) FROM sessions s
-             WHERE s.season_id = :sid AND s.date BETWEEN :from AND :to
-               AND (EXISTS (SELECT 1 FROM availability_day ad WHERE ad.person_id = p.id AND ad.date = s.date)
-                 OR EXISTS (SELECT 1 FROM availability_hour ah WHERE ah.person_id = p.id AND ah.date = s.date))) AS answered
-      FROM people p
-     WHERE p.status = 'active'
-     ORDER BY p.id
-  `).all({ sid: seasonId, from, to })
-    .filter((r) => r.dates > 0 && r.answered < r.dates);
+  return volunteersWithUnansweredDates(db, seasonId, { from, to });
 }
 
 export async function runNudge(db, { notifier, t, seasonId, today, windowDays = 28, period = null }) {

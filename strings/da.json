@@ -290,7 +290,7 @@
   "status.seasonEmpty": "Sæson {key} findes og dækker i dag, men har slet ingen mødegange. Det er derfor alle skærme er tomme — sæsonen blev oprettet og aldrig fyldt. Kør seedningen igen, eller opret sæsonen forfra under Administration.",
   "status.seasonEmptyElsewhere": "Sæson {key} findes og dækker i dag, men har slet ingen mødegange — de hører til {other} i stedet. Alle skærme ser tomme ud, indtil konfigurationen peger på {other}, eller denne sæson bliver fyldt.",
   "status.gaps": "{n} af {of} vagter i den næste måned er ubesatte.",
-  "status.silent": "{n} af {of} aktive frivillige har ikke svaret på tilgængelighed endnu.",
+  "status.silent": "{n} af {of} aktive frivillige mangler stadig at svare på nogle datoer.",
   "status.silentWho": "Vi mangler svar fra: {names}.",
   "status.silentMore": "Og {n} flere.",
   "status.failed": "{n} beskeder kunne ikke sendes.",

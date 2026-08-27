@@ -8,6 +8,7 @@ import path from "node:path";
 import { html } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
 import { VERSION } from "../config.mjs";
+import { volunteersWithUnansweredDates } from "./availability.mjs";
 
 const BACKUP_RE = /^4water-\d{4}-\d{2}-\d{2}T\d{6}Z\.sqlite$/;
 // How many unanswered volunteers to name before falling back to a count. Enough to act on, few enough that the
@@ -70,12 +71,14 @@ export function collectStatus(db, { pattern, today, backupDir, oidc = null, noti
   // nothing with: chasing cover is one of the two pains this app was built for, and chasing requires knowing
   // who. The nudge job says it in the chat channel, which covers the case where a webhook is configured — this
   // covers the planner sitting on the status page wondering what to do next.
-  const silentPeople = seasonRow ? db.prepare(`
-    SELECT p.id, p.name FROM people p
-     WHERE p.status='active'
-       AND NOT EXISTS (SELECT 1 FROM availability_day ad WHERE ad.person_id=p.id AND ad.date >= :from)
-       AND NOT EXISTS (SELECT 1 FROM availability_hour ah WHERE ah.person_id=p.id AND ah.date >= :from)
-     ORDER BY p.name`).all({ from: today }) : [];
+  // The SAME list the nudge job works from, not a second query that answers a similar question. It used to be
+  // one: this asked who had answered NOTHING from today on, while the nudge asked who had a date left in the
+  // next 28 days — so the page could report "everyone has answered" in the same hour the job messaged someone,
+  // and a planner reading the page had no way to tell which was lying. Neither was; they were different
+  // questions wearing one name.
+  const silentPeople = seasonRow
+    ? volunteersWithUnansweredDates(db, seasonRow.id, { from: today }).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
   const active = db.prepare("SELECT COUNT(*) n FROM people WHERE status='active'").get().n;
   facts.push({
     key: "silent", value: silentPeople.length, detail: active,

@@ -4,22 +4,38 @@
 import { html } from "../http.mjs";
 import { layout, csrfField, navFor } from "../views.mjs";
 import { attendedCount } from "../queries.mjs";
+import { answerProgress } from "./availability.mjs";
 
 export function myProfile(db, personId, seasonId) {
   const person = db.prepare(`SELECT id, name, contact, preferred_role AS preferredRole, status,
                                     auth_provider AS authProvider
                                FROM people WHERE id=?`).get(personId);
   if (!person) return null;
+
+  // Counted by the one definition of answered — every time on a date, an explicit "no" included. This counted
+  // any date the person had ANY availability row for, which over-counted (one hour answered on a four-slot date
+  // read as done) and drifted from the counter on the availability form, so the two screens a volunteer moves
+  // between reported different progress on the same work.
+  //
+  // Over the WHOLE season, past dates included, because this page reports what the system has RECORDED about a
+  // person, not what is left to do — the form's counter is for what is left. The two may differ; they mean
+  // different things and each says which.
+  //
+  // The window starts at the season's first SESSION rather than its from_date: that is the set answerProgress
+  // counts over, so `datesInSeason` keeps the exact meaning it had, and a season configured to open before
+  // anything is scheduled cannot quietly inflate the denominator.
+  const firstSession = seasonId
+    ? db.prepare("SELECT MIN(date) d FROM sessions WHERE season_id=?").get(seasonId)?.d : null;
+  const progress = firstSession ? answerProgress(db, personId, seasonId, firstSession) : { total: 0, answered: 0 };
+
   return {
     person,
     roles: db.prepare("SELECT r.name FROM person_roles pr JOIN roles r ON r.id=pr.role_id WHERE pr.person_id=?")
       .all(personId).map((r) => r.name),
     capabilities: db.prepare(`SELECT a.key, a.label FROM capabilities c JOIN activities a ON a.id=c.activity_id
                                WHERE c.person_id=? ORDER BY a.label`).all(personId),
-    answered: db.prepare(`SELECT COUNT(DISTINCT date) n FROM (
-                            SELECT date FROM availability_day WHERE person_id=?
-                            UNION SELECT date FROM availability_hour WHERE person_id=?)`).get(personId, personId).n,
-    datesInSeason: seasonId ? db.prepare("SELECT COUNT(DISTINCT date) n FROM sessions WHERE season_id=?").get(seasonId).n : 0,
+    answered: progress.answered,
+    datesInSeason: progress.total,
     // What they are recorded as having done. The privacy notice tells a volunteer that a planner records whether
     // they turned up and that it counts how much they have helped — so they have to be able to SEE it. A record
     // somebody can neither read nor question is the wrong kind to keep about a person, and telling them it exists

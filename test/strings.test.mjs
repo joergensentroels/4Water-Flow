@@ -258,7 +258,7 @@ const NUMBER_INVARIANT = {
   "profile.attended": "'Recorded as having turned up: 1 this season' — the number trails the colon.",
   "profile.answered": "'You have answered 1 of 60 dates this season' — the plural belongs to the 60, not the 1.",
   "status.gaps": "'1 of 20 slots in the next month are unfilled' — the noun agrees with the total, not the count.",
-  "status.silent": "'1 of 12 active volunteers have not answered' — same n-of-N shape.",
+  "status.silent": "'1 of 12 active volunteers still have dates' — same n-of-N shape.",
   "home.needAnswerSome": "'1 of 51 dates still need an answer' — the noun agrees with the 51, exactly as status.silent does.",
   "availability.progress": "'1 of 51 dates answered — 50 still to go' — n-of-N, and the trailing count has no noun to agree with.",
   "status.silentMore": "'And 1 more.' — the noun is elided entirely, so there is nothing for it to agree with.",

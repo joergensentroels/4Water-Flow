@@ -127,11 +127,47 @@ export function groupByDate(rows) {
 // groupByDate rather than a second grouping written here: the form draws from that function, and a counter that
 // grouped dates its own way could disagree with the list it sits directly above.
 export function answerProgress(db, personId, seasonId, from) {
-  const answers = currentAnswers(db, personId);
   const dates = groupByDate(datesNeedingAnswer(db, seasonId, from));
-  let answered = 0;
-  for (const g of dates) if (g.hours.every((h) => shown(answers, g.date, h.hour) !== "")) answered++;
-  return { total: dates.length, answered, remaining: dates.length - answered };
+  const missing = unansweredDates(dates, currentAnswers(db, personId)).length;
+  return { total: dates.length, answered: dates.length - missing, remaining: missing };
+}
+
+// The rule itself, lifted out of answerProgress so the nudge job, the status page and a volunteer's own profile
+// can ask it too. Until now they could not, and each carried its own SQL counting a date as answered when ANY
+// availability row existed for it — any hour, any value. Both halves of that are wrong, and both were measured:
+//
+//   A volunteer who answers "not available" for the 20:00 class has ANSWERED. The proposed fix for the nudge was
+//   to require available = 1, which would have nudged her every week forever with no way to satisfy it, while the
+//   status page went on counting her as answered — the chat message and the planner's screen naming different
+//   people about the same volunteer.
+//
+//   A volunteer who answers the 18:00 class and leaves the 20:00 one blank has NOT answered, and was never
+//   chased for it, because the date already had a row on it. That is the gap that actually loses cover, and it
+//   is the one neither definition caught.
+//
+// So: a date is answered when EVERY time on it has an effective answer, and an explicit no is an answer. That is
+// what the availability form has counted since 2026-08-23; this makes it the only definition rather than the
+// best of four. The grid is passed in, not queried, so the roster-wide caller reads the season once.
+export function unansweredDates(grid, answers) {
+  return grid.filter((g) => g.hours.some((h) => shown(answers, g.date, h.hour) === "")).map((g) => g.date);
+}
+
+// The same question asked about the whole roster: who still has a date that is not fully answered.
+//
+// `to` is optional because the two callers bound it differently — the nudge job asks about a 28-day window, the
+// status page about everything from today on. Expressing the bound here keeps both off a second copy of the date
+// arithmetic, which is how they came to disagree in the first place.
+//
+// One answers-read per person rather than one wide join: at this roster size that is a few dozen indexed lookups
+// against an in-process database, and it reuses currentAnswers, which is the thing `shown` is defined against.
+// A join would be a second way to load an answer, and the second way is always the one that rots.
+export function volunteersWithUnansweredDates(db, seasonId, { from, to = null }) {
+  const grid = groupByDate(datesNeedingAnswer(db, seasonId, from)).filter((g) => to === null || g.date <= to);
+  if (grid.length === 0) return [];
+  return db.prepare("SELECT id, name FROM people WHERE status = 'active' ORDER BY id").all()
+    .map((p) => ({ id: p.id, name: p.name, dates: grid.length,
+                   unanswered: unansweredDates(grid, currentAnswers(db, p.id)).length }))
+    .filter((p) => p.unanswered > 0);
 }
 
 // Bulk setting. Opening the real page in a browser measured 3,750 pixels — 51 date rows and 153 radio
