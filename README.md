@@ -1,5 +1,8 @@
 # 4water Flow
 
+> **A volunteer, or just want the gist?** Read **[WHAT-IS-THIS.md](WHAT-IS-THIS.md)** —
+> one page, three pictures, no jargon. The rest of this file is the precise version.
+
 Volunteer scheduling for 4water: availability, a shift exchange, the plan, planning with an auto-roster, and
 administration. Phone-first, because the reported pain with the spreadsheet it replaces was "it's a nightmare
 to use on the phone". Design decisions and open questions live in the discovery document, **"4water scheduling —
